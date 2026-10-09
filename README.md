@@ -18,14 +18,14 @@ pnpm dev
 
 打开 `http://localhost:5173`。默认 D1 ID 为本地占位值，仅本地使用；部署前必须替换。`APP_URL` 在 `wrangler.jsonc` 中配置，须等于实际访问的同源地址。不要混用 localhost 和 127.0.0.1。
 
-| 配置 | 用途 |
-| --- | --- |
-| `BETTER_AUTH_SECRET` | 至少 32 字符的随机 secret，每个环境独立 |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用 |
-| `MODEL_PROVIDER` | 当前提供 `openai`、`anthropic` 或 `deepseek` |
-| `MODEL_ID` | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出 |
-| `MODEL_API_KEY` | 仅服务端使用的供应商密钥 |
-| `TAVILY_API_KEY` | 可选；缺少时搜索工具明确报告未配置 |
+| 配置                                        | 用途                                                |
+| ------------------------------------------- | --------------------------------------------------- |
+| `BETTER_AUTH_SECRET`                        | 至少 32 字符的随机 secret，每个环境独立             |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用                               |
+| `MODEL_PROVIDER`                            | 当前提供 `openai`、`anthropic` 或 `deepseek`        |
+| `MODEL_ID`                                  | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出 |
+| `MODEL_API_KEY`                             | 仅服务端使用的供应商密钥                            |
+| `TAVILY_API_KEY`                            | 可选；缺少时搜索工具明确报告未配置                  |
 
 生产 `MODEL_PROVIDER` / `MODEL_ID` 使用 Wrangler `vars`；密钥使用 Cloudflare Secrets。没有默认模型、用户 API key 输入或浏览器密钥。缺少认证配置返回 503；缺少模型配置在接受任务前返回 503。
 
@@ -74,18 +74,18 @@ pnpm deploy:test
 
 ## 代码入口与扩展
 
-| 位置 | 修改什么 |
-| --- | --- |
-| `src/browser/App.tsx` / `styles.css` / `ui/` | 登录、个人目录、主题和 shadcn 页面组件 |
-| `src/browser/Chat.tsx` / `transport.ts` | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
-| `src/browser/Panel.tsx` / `draft.ts` / `PanelDrafts.tsx` | OpenUI 面板、输入快照、用户内存草稿、500ms 保存与冲突反馈 |
-| `src/shared/catalog.tsx` | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查 |
-| `src/shared/compute.ts` / 两端 `compute.ts` | 有限 JSON、QuickJS 资源限制与 WASM 加载 |
-| `src/server/conversation.ts` | PiHarness、提交调和、队列准入与持久停止意图 |
-| `src/server/panel-tools.ts` / `limits.ts` | 生成程序/UI 的工具、指令和有限修正 |
-| `src/server/web.ts` | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
-| `src/server/models.ts` | 注册其他 Pi provider；保持显式模型和服务端凭据 |
-| `src/server/auth.ts` / `index.ts` | Better Auth、归属验证和八类业务 API |
+| 位置                                                     | 修改什么                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------- |
+| `src/browser/App.tsx` / `styles.css` / `ui/`             | 登录、个人目录、主题和 shadcn 页面组件                         |
+| `src/browser/Chat.tsx` / `transport.ts`                  | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
+| `src/browser/Panel.tsx` / `draft.ts` / `PanelDrafts.tsx` | OpenUI 面板、输入快照、用户内存草稿、500ms 保存与冲突反馈      |
+| `src/shared/catalog.tsx`                                 | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查   |
+| `src/shared/compute.ts` / 两端 `compute.ts`              | 有限 JSON、QuickJS 资源限制与 WASM 加载                        |
+| `src/server/conversation.ts`                             | PiHarness、提交调和、队列准入与持久停止意图                    |
+| `src/server/panel-tools.ts` / `limits.ts`                | 生成程序/UI 的工具、指令和有限修正                             |
+| `src/server/web.ts`                                      | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
+| `src/server/models.ts`                                   | 注册其他 Pi provider；保持显式模型和服务端凭据                 |
+| `src/server/auth.ts` / `index.ts`                        | Better Auth、归属验证和八类业务 API                            |
 
 生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
 
@@ -106,6 +106,18 @@ StateSync($target,result.next,result.ready,{result:result,inputs:currentArgs})
 保存使用聊天内面板引用和 CAS revision。未保存输入和 409 冲突草稿在同一用户 Workspace 中保留，聊天切换或 runtime 恢复不会丢失；整页刷新或退出前请复制冲突改动。应用不会静默强制覆盖。历史程序引用从 Pi 的公开完整 entries 恢复，即使模型上下文已压缩。第一版没有附件、知识库、多用户共享、计费或任意代码沙箱工具。
 
 ## 验证
+
+ESLint 检查 JavaScript / TypeScript、未使用变量和 React Hooks；Prettier 统一格式，ESLint 的格式冲突规则已关闭。编辑器推荐配置支持保存时格式化和 ESLint 自动修复。
+
+```sh
+pnpm lint          # 检查源码、配置和测试，警告也会失败
+pnpm lint:fix      # 自动修复可处理的 lint 问题
+pnpm format        # 格式化当前源码、配置和维护文档
+pnpm format:check  # 只检查格式，不改文件
+pnpm check         # lint、格式、类型、单元/workerd 测试及构建
+```
+
+生成的 Worker 类型、构建/测试产物、历史研究与设计快照、本地密钥文件不参与格式化。ESLint 使用 TypeScript 6 兼容 API；`pnpm typecheck` 仍由 TypeScript 7.0.2 执行。这采用 [TypeScript 官方的并行安装方式](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6.0)，并在 lockfile 中固定两个版本。
 
 ```sh
 pnpm typecheck

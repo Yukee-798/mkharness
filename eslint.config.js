@@ -1,0 +1,70 @@
+import js from '@eslint/js';
+import { defineConfig, globalIgnores } from 'eslint/config';
+import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
+import reactHooks from 'eslint-plugin-react-hooks';
+import prettier from 'eslint-config-prettier/flat';
+import globals from 'globals';
+
+export default defineConfig([
+  globalIgnores([
+    'node_modules/',
+    'dist/',
+    '.wrangler/',
+    '.superpowers/',
+    'playwright-report/',
+    'test-results/',
+    'worker-configuration.d.ts',
+    'docs/research/experiments/',
+  ]),
+  {
+    files: ['**/*.{js,mjs,ts,tsx}'],
+    extends: [js.configs.recommended],
+    languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    linterOptions: { reportUnusedDisableDirectives: 'error' },
+  },
+  {
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: { parser: tsParser },
+    plugins: { '@typescript-eslint': tsPlugin },
+    extends: [tsPlugin.configs['flat/recommended']],
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
+    files: [
+      'src/browser/**/*.{ts,tsx}',
+      'src/shared/**/*.tsx',
+      'tests/browser/**/*.{ts,tsx}',
+      'tests/unit/**/*.tsx',
+    ],
+    languageOptions: { globals: globals.browser },
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
+    },
+  },
+  {
+    files: [
+      'src/server/**/*.ts',
+      'src/browser/*.worker.ts',
+      'tests/browser/*.worker.ts',
+      'tests/workers/**/*.ts',
+    ],
+    languageOptions: { globals: globals.worker },
+  },
+  {
+    files: ['*.{js,mjs,ts}', 'scripts/**/*.mjs', 'tests/e2e/**/*.ts', 'tests/unit/**/*.{ts,tsx}'],
+    languageOptions: { globals: globals.node },
+  },
+  {
+    files: ['tests/**/*.{ts,tsx}'],
+    rules: { '@typescript-eslint/no-explicit-any': 'off' },
+  },
+  prettier,
+]);

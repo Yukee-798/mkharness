@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.wrangler/
+.superpowers/
+playwright-report/
+test-results/
+worker-configuration.d.ts
+pnpm-lock.yaml
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+# Preserve historical research and approved design/plan snapshots.
+docs/research/
+docs/design/
+docs/superpowers/
