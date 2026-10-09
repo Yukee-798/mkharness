@@ -39,6 +39,15 @@ app.get('/api/conversations/:id/snapshot',async c=>{
  return c.body(await c.env.CONVERSATIONS.getByName(c.get('conversationId')).snapshot(c.req.query('cursor')),200,{'Content-Type':'application/json'});
 });
 app.post('/api/conversations/:id/stop',async c=>c.json(await c.env.CONVERSATIONS.getByName(c.get('conversationId')).stopConversation(),202));
+app.get('/api/conversations/:id/panels/:ref',async c=>{
+ const reply=JSON.parse(await c.env.CONVERSATIONS.getByName(c.get('conversationId')).loadPanel(c.req.param('ref')));
+ return c.json(reply,reply.error?.status??200);
+});
+app.patch('/api/conversations/:id/panels/:ref/state',async c=>{
+ const body=await c.req.json();if(!body.state||typeof body.state!=='object'||Array.isArray(body.state))throw new AppError(400,'invalid_state');
+ const reply=await c.env.CONVERSATIONS.getByName(c.get('conversationId')).savePanelState(c.req.param('ref'),body.state,body.expectedRevision);
+ return c.json(reply,'error' in reply?reply.error.status as ContentfulStatusCode:200);
+});
 app.onError((error,c)=>{
  if(error instanceof AppError)return c.json({error:{code:error.code,message:error.message}},error.status as ContentfulStatusCode);
  console.error(JSON.stringify({stage:'api',error:'request_failed'}));return c.json({error:{code:'internal_error',message:'The request failed. Retry or inspect server logs.'}},500);

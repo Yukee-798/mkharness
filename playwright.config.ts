@@ -1,2 +1,2 @@
 import {defineConfig} from '@playwright/test';
-export default defineConfig({testDir:'./tests/e2e',use:{baseURL:'http://localhost:5173'},webServer:{command:'pnpm dev --host 127.0.0.1',url:'http://localhost:5173',reuseExistingServer:!process.env.CI},timeout:30000});
+export default defineConfig({testDir:'./tests/e2e',use:{baseURL:'http://localhost:5173'},webServer:{command:'pnpm dev --host 127.0.0.1',env:{BETTER_AUTH_SECRET:'local-test-only-secret-at-least-32-chars',GOOGLE_CLIENT_ID:'fixture',GOOGLE_CLIENT_SECRET:'fixture',MODEL_API_KEY:'fixture'},url:'http://localhost:5173',reuseExistingServer:!process.env.CI},timeout:30000});

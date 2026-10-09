@@ -5,6 +5,8 @@ import {Harness,createRegistry,type Cursor,type Extension,type EntryRecord} from
 import type {Models} from '@earendil-works/pi-ai/models';
 import {AppError,commandSchema,type RunCommand} from '../shared/contracts';
 import {jsonText} from '../shared/compute';
+import {panelTools} from './panel-tools';
+import {successfulTool} from '../shared/references';
 import {applicationModels} from './models';
 export const BG:Parameters<Harness['close']>[0]=Object.freeze({abortSignal:undefined,value:()=>undefined,toString:()=> '[Application background]'});
 class RequestRecovery extends LifecycleCapability {
@@ -31,7 +33,7 @@ export class ConversationAgent extends Agent<Env> {
     this.lifecycle.use(this.harness).use(this.recovery);
   }
   protected models():Models{return applicationModels(this.env);}
-  protected extensions():Extension[]{return [];}
+  protected extensions():Extension[]{return [panelTools(()=>this.allEntries())];}
   private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.admission.then(fn);this.admission=next.catch(()=>{});return next;}
   private rows<T extends Record<string,SqlStorageValue>>(query:string,...args:SqlStorageValue[]){return this.ctx.storage.sql.exec<T>(query,...args).toArray();}
   get stopping(){return this.rows('SELECT value FROM app_meta WHERE key=?','stopping')[0]?.value==='1';}
@@ -89,6 +91,23 @@ export class ConversationAgent extends Agent<Env> {
         this.setStopping(false);
       });
     })().finally(()=>{this.stopWork=undefined;});
+  }
+  async loadPanel(ref:string):Promise<string>{
+    const entries=await this.allEntries(),panel=successfulTool(entries,ref,'present_openui');
+    if(!panel)return JSON.stringify({error:{status:404,code:'panel_not_found'}});
+    const programRef=panel.args.programRef;const program=typeof programRef==='string'?successfulTool(entries,programRef,'prepare_program'):undefined;
+    if(programRef&&!program)return JSON.stringify({error:{status:409,code:'program_not_recoverable'}});
+    const saved=this.rows<{state:string;revision:number}>('SELECT state,revision FROM app_inputs WHERE ref=?',ref)[0];
+    return JSON.stringify({panelRef:ref,ui:panel.args.ui,program:program?{code:program.args.code,data:program.args.data}:null,state:saved?JSON.parse(saved.state):undefined,revision:saved?.revision??0});
+  }
+  async savePanelState(ref:string,state:Record<string,unknown>,expectedRevision:number):Promise<{revision:number}|{error:{status:number;code:string}}>{
+    const panel=JSON.parse(await this.loadPanel(ref));if(panel.error)return panel;
+    let text:string;try{text=jsonText(state);}catch{return {error:{status:400,code:'invalid_state'}};}
+    if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)return {error:{status:400,code:'invalid_revision'}};
+    let result=this.ctx.storage.sql.exec('UPDATE app_inputs SET state=?,revision=revision+1,updated=? WHERE ref=? AND revision=? RETURNING revision',text,Date.now(),ref,expectedRevision).toArray()[0];
+    if(!result && expectedRevision===0)result=this.ctx.storage.sql.exec('INSERT INTO app_inputs(ref,state,revision,updated)VALUES(?,?,1,?) ON CONFLICT(ref) DO NOTHING RETURNING revision',ref,text,Date.now()).toArray()[0];
+    if(!result)return {error:{status:409,code:'revision_conflict'}};
+    return {revision:Number(result.revision)};
   }
   async history(cursor?:Cursor){const root=await this.root();return root.entries({order:'ascending'},100,cursor,BG);}
   async allEntries():Promise<EntryRecord[]>{const all:EntryRecord[]=[];let cursor:Cursor|undefined;do{const page=await this.history(cursor);all.push(...page.items);cursor=page.next;}while(cursor);return all;}

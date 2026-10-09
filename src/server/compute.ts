@@ -1,4 +1,4 @@
-import wasm from '@jitl/quickjs-wasmfile-release-sync/wasm';
+import wasm from '#quickjs.wasm';
 import variant from '@jitl/quickjs-wasmfile-release-sync';
 import { newVariant, newQuickJSWASMModuleFromVariant } from 'quickjs-emscripten-core';
 import { createCompute } from '../shared/compute';
