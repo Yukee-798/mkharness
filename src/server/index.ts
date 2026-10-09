@@ -1,6 +1,7 @@
 import {Hono} from 'hono';
 import type {ContentfulStatusCode} from 'hono/utils/http-status';
 import {auth} from './auth';
+import {boundedText} from './web';
 import {AppError,commandSchema} from '../shared/contracts';
 const app=new Hono<{Bindings:Env;Variables:{userId:string;conversationId:string}}>();
 app.on(['POST','GET'],'/api/auth/*',c=>auth(c.env).handler(c.req.raw));
@@ -27,7 +28,7 @@ app.use('/api/conversations/:id/*',async(c,next)=>{
  c.set('conversationId',id);await next();
 });
 app.post('/api/conversations/:id/runs',async c=>{
- const raw=await c.req.text();if(new TextEncoder().encode(raw).length>1048576)throw new AppError(413,'request_too_large');
+ let raw:string;try{raw=await boundedText(new Response(c.req.raw.body,{headers:c.req.raw.headers}),1048576);}catch{throw new AppError(413,'request_too_large');}
  let body:unknown;try{body=JSON.parse(raw);}catch{throw new AppError(400,'invalid_json');}
  const parsed=commandSchema.safeParse(body);if(!parsed.success)throw new AppError(400,'invalid_request');
  const result=await c.env.CONVERSATIONS.getByName(c.get('conversationId')).submitRun(parsed.data);
@@ -45,7 +46,7 @@ app.get('/api/conversations/:id/panels/:ref',async c=>{
  return c.json(reply,reply.error?.status??200);
 });
 app.patch('/api/conversations/:id/panels/:ref/state',async c=>{
- const body=await c.req.json();if(!body.state||typeof body.state!=='object'||Array.isArray(body.state))throw new AppError(400,'invalid_state');
+ let body:any;let raw:string;try{raw=await boundedText(new Response(c.req.raw.body,{headers:c.req.raw.headers}),1048576);}catch{throw new AppError(413,'request_too_large');}try{body=JSON.parse(raw);}catch{throw new AppError(400,'invalid_json');}if(!body?.state||typeof body.state!=='object'||Array.isArray(body.state))throw new AppError(400,'invalid_state');
  const reply=await c.env.CONVERSATIONS.getByName(c.get('conversationId')).savePanelState(c.req.param('ref'),body.state,body.expectedRevision);
  return c.json(reply,'error' in reply?reply.error.status as ContentfulStatusCode:200);
 });

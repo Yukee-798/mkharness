@@ -50,13 +50,16 @@ export function createCompute(getModule: () => Promise<QuickJSWASMModule>) {
       // Capture serialization intrinsics before executing generated code. Reject values that JSON.stringify would silently change.
       return Scope.withScope(scope => {
       const serialize = scope.manage(ctx.unwrapResult(ctx.evalCode(`(() => {
-        const finite=Number.isFinite, entries=Object.getOwnPropertyDescriptors, proto=Object.getPrototypeOf, plain=Object.prototype, array=Array.isArray, stringify=JSON.stringify;
-        return value => { const seen=new Set(); function check(v){
-          if(v===null || typeof v==='string' || typeof v==='boolean')return;
-          if(typeof v==='number' && finite(v))return;
-          if(typeof v!=='object'||seen.has(v)||(!array(v)&&proto(v)!==plain&&proto(v)!==null))throw new Error('Output must be finite JSON');
-          seen.add(v);for(const key of Object.keys(entries(v))){const d=entries(v)[key];if(d.get||d.set)throw new Error('Accessors are not JSON');check(d.value);}seen.delete(v);
-        } check(value); return stringify(value); }
+        const finite=Number.isFinite, descriptors=Object.getOwnPropertyDescriptors, keys=Object.keys, proto=Object.getPrototypeOf, plain=Object.prototype, array=Array.isArray, stringify=JSON.stringify, create=Object.create, setProto=Object.setPrototypeOf, SetCtor=Set;
+        const has=Function.prototype.call.bind(Set.prototype.has), add=Function.prototype.call.bind(Set.prototype.add), remove=Function.prototype.call.bind(Set.prototype.delete);
+        return value => { const seen=new SetCtor(); function copy(v){
+          if(v===null || typeof v==='string' || typeof v==='boolean')return v;
+          if(typeof v==='number' && finite(v))return v;
+          if(typeof v!=='object'||has(seen,v)||(!array(v)&&proto(v)!==plain&&proto(v)!==null))throw 'Output must be finite JSON';
+          add(seen,v);const out=array(v)?setProto([],null):create(null),props=descriptors(v);
+          const names=keys(props);for(let index=0;index<names.length;index++){const key=names[index],d=props[key];if(d.get||d.set)throw 'Accessors are not JSON';const item=copy(d.value);if(d.enumerable||key==='length'&&array(v))out[key]=item;}remove(seen,v);return out;
+        } return stringify(copy(value)); }
+
       })()`)));
       const parsed = scope.manage(ctx.unwrapResult(ctx.evalCode(`JSON.parse(${JSON.stringify(inputText)})`)));
       const namespace = scope.manage(ctx.unwrapResult(ctx.evalCode(program.code,'program.mjs',{type:'module'})));

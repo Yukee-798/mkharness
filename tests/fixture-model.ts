@@ -17,7 +17,9 @@ export function fixtureModels(){
     else if(last?.role==='toolResult' && last.toolName==='prepare_program')content=[{type:'toolCall',id:'same-call',name:'present_openui',arguments:{programRef:(last.details as any)?.ref ?? 'missing',ui:'$cost = \"100\"\nresult = Query(\"run_program\",{cost:$cost},{double:0})\nroot = Stack([Input(\"cost\",\"Cost\",\"number\",null,$cost),Text(\"text\",\"Interactive example\")])'}}];
    }
    if(text?.includes('invalid_program')||text?.includes('loop_model'))content=[{type:'toolCall',id:'same-call',name:'prepare_program',arguments:{code:text.includes('invalid_program')?'export const bad=1':'export function compute(){return 0}',initialInputs:{},data:null,cases:[{inputs:{},expected:0}]}}];
-   const message:AssistantMessage={role:'assistant',content:content??(tool?[{type:'toolCall',id:'same-call',name:'ignores_cancel',arguments:{}}]:[{type:'text',text:'Answer: '+text}]),api:'openai-responses',provider:'fixture',model:'fixture',usage,stopReason:(content||tool)?'toolUse':'stop',timestamp:Date.now()};
+   if(text?.includes('multiple_text_blocks'))content=[{type:'text',text:'First section'},{type:'text',text:'Second section'}];
+   if(context.messages.some(m=>m.role==='system'&&typeof m.content==='string'&&m.content.toLowerCase().includes('summariz')))content=[{type:'text',text:'Summary of earlier work and its published panel.'}];
+   const message:AssistantMessage={role:'assistant',content:content??(tool?[{type:'toolCall',id:'same-call',name:'ignores_cancel',arguments:{}}]:[{type:'text',text:text?.includes('long_summary')?'Context '+ 'x'.repeat(120000):'Answer: '+text}]),api:'openai-responses',provider:'fixture',model:'fixture',usage:text?.includes('long_summary')?{...usage,output:30000,totalTokens:30000}:usage,stopReason:(content?.some(b=>b.type==='toolCall')||tool)?'toolUse':'stop',timestamp:Date.now()};
    events.push({type:'start',partial:{...message,content:[]}});
    setTimeout(()=>{events.push({type:'done',reason:message.stopReason==='toolUse'?'toolUse':'stop',message});events.end(message);},text?.includes('slow')?1000:30);
    return events;

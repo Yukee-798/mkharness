@@ -11,3 +11,12 @@ it('observes exactly one durable submission, detach does not cancel, and complet
  const history=events.find(e=>e.type==='MESSAGES_SNAPSHOT');expect(history.messages.filter((m:any)=>m.role==='user')).toHaveLength(2);
  expect(await stub.observeRun(crypto.randomUUID()).then(r=>r.status)).toBe(404);
 });
+
+it('starts each streamed assistant message once when Pi has multiple text blocks',async()=>{
+ const stub=env.CONVERSATIONS.getByName(crypto.randomUUID()),runId=crypto.randomUUID();
+ await stub.submitRun({runId,text:'slow multiple_text_blocks'});
+ const events=(await (await stub.observeRun(runId)).text()).split('\n').filter(l=>l.startsWith('data: ')).map(l=>JSON.parse(l.slice(6)));
+ const starts=events.filter(e=>e.type==='TEXT_MESSAGE_START');
+ expect(starts.length).toBeGreaterThan(0);expect(new Set(starts.map(e=>e.messageId)).size).toBe(starts.length);
+ expect(events.filter(e=>e.type==='TEXT_MESSAGE_CONTENT').map(e=>e.delta).join('')).toBe('First section\nSecond section');
+});

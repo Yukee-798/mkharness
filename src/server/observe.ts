@@ -10,7 +10,7 @@ export async function observeRun(owner:ConversationAgent,runId:string,threadId:s
  if(!record){await watch.stop();return Response.json({error:{code:'run_not_found'}},{status:404});}
  const entries=new Map((await owner.allEntries()).map(e=>[Number(e.id),e]));
  const fold=new StreamFold();let draft=0,active=false,ended=false;
- let texts=new Map<number,string>(),args=new Map<number,string>();let timer:ReturnType<typeof setInterval>;
+ let textPrefix:string|undefined,args=new Map<number,string>();let timer:ReturnType<typeof setInterval>;
  const body=new ReadableStream<Uint8Array>({
   start(controller){
    const emit=(event:BaseEvent)=>{if(!ended)controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify(event)+'\n\n'));};
@@ -25,12 +25,15 @@ export async function observeRun(owner:ConversationAgent,runId:string,threadId:s
    const reset=()=>{emit({type:EventType.CUSTOM,name:'pi.reset',value:{runId}} as BaseEvent);close();};
    const publish=(complete=false)=>{
     if(!fold.current)return;
+    const blocks=fold.current.content.filter(b=>b.type==='text');
+    if(blocks.length){
+     if(textPrefix===undefined){emit({type:EventType.TEXT_MESSAGE_START,messageId:`draft:${runId}:${draft}`,role:'assistant'} as BaseEvent);textPrefix='';}
+     const next=blocks.map(b=>b.text).join('\n');
+     if(!next.startsWith(textPrefix)){reset();return;}
+     const delta=next.slice(textPrefix.length);if(delta)emit({type:EventType.TEXT_MESSAGE_CONTENT,messageId:`draft:${runId}:${draft}`,delta} as BaseEvent);textPrefix=next;
+    }
     for(const [index,block] of fold.current.content.entries()){
-     if(block.type==='text'){
-      const previous=texts.get(index);if(previous===undefined){emit({type:EventType.TEXT_MESSAGE_START,messageId:`draft:${runId}:${draft}`,role:'assistant'} as BaseEvent);texts.set(index,'');}
-      const old=texts.get(index)!;if(!block.text.startsWith(old)){reset();return;}
-      const delta=block.text.slice(old.length);if(delta)emit({type:EventType.TEXT_MESSAGE_CONTENT,messageId:`draft:${runId}:${draft}`,delta} as BaseEvent);texts.set(index,block.text);
-     }else if(block.type==='toolCall'){
+     if(block.type==='toolCall'){
       const callId=`draft:${runId}:${draft}.${encodeURIComponent(block.id)}`;
       if(!args.has(index)){emit({type:EventType.TOOL_CALL_START,toolCallId:callId,toolCallName:block.name,parentMessageId:`draft:${runId}:${draft}`} as BaseEvent);args.set(index,'');}
       const next=complete?JSON.stringify(block.arguments):openArgs(block.arguments),old=args.get(index)!;
@@ -39,7 +42,7 @@ export async function observeRun(owner:ConversationAgent,runId:string,threadId:s
       if(complete)emit({type:EventType.TOOL_CALL_END,toolCallId:callId} as BaseEvent);
      }
     }
-    if(complete&&texts.size)emit({type:EventType.TEXT_MESSAGE_END,messageId:`draft:${runId}:${draft}`} as BaseEvent);
+    if(complete&&textPrefix!==undefined)emit({type:EventType.TEXT_MESSAGE_END,messageId:`draft:${runId}:${draft}`} as BaseEvent);
    };
    const snapshot=(event:Extract<AgentEvent,{type:'snapshot'}>)=>{
     for(const entry of event.entries)entries.set(Number(entry.id),entry);
@@ -54,7 +57,7 @@ export async function observeRun(owner:ConversationAgent,runId:string,threadId:s
      if(event.type==='submission'&&event.record.id===record!.id){record=event.record;state();if(terminal())return;}
      else if(event.type==='snapshot'){reset();return;}
      else if(event.type==='run_start')active=event.inputs.includes(record!.id);
-     else if(event.type==='message_start'&&active){draft++;texts=new Map();args=new Map();fold.accept(event);publish();}
+     else if(event.type==='message_start'&&active){draft++;textPrefix=undefined;args=new Map();fold.accept(event);publish();}
      else if(event.type==='message_update'&&active){fold.accept(event);publish();}
      else if(event.type==='message_end'&&active){const message=event.entry.model?.find(m=>m.role==='assistant');if(message?.role==='assistant'){fold.accept({type:'message_start',message});publish(true);}fold.current=undefined;entries.set(Number(event.entry.id),event.entry);history();}
      else if(event.type==='entry_appended'||event.type==='tool_execution_end'&&event.entry){const entry=(event as {entry:EntryRecord}).entry;entries.set(Number(entry.id),entry);history();}

@@ -19,3 +19,4 @@ it('publishes from committed tools, preserves raw input and rejects conflicting 
  expect(JSON.parse(await stub.loadPanel(newRef)).revision).toBe(0);
  expect(JSON.parse(await stub.loadPanel(ref)).state).toEqual({$cost:'1.'});
 });
+it('refuses a source panel from another chat or an unpublished call',async()=>{const target=env.CONVERSATIONS.getByName(crypto.randomUUID());expect(await target.submitRun({runId:crypto.randomUUID(),text:'continue',source:{panelRef:'2.missing',action:'continue_analysis',state:{$cost:''}}})).toMatchObject({error:{status:404}});});

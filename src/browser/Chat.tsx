@@ -7,6 +7,7 @@ import type {RunCommand} from '../shared/contracts';
 import {AttachAgent,partialUI,StreamReplaced} from './transport';
 import {Panel} from './Panel';
 import {request} from './api';
+import {createSubmitter} from './submission';
 export type Snapshot={entries:EntryRecord[];cursor?:unknown;pending:{operationId:string;status:'running'|'queued'}[];stopping:boolean};
 export async function loadSnapshot(id:string,signal?:AbortSignal){
  const first=await request<Snapshot>(`/conversations/${id}/snapshot`,{signal});let cursor=first.cursor;
@@ -16,9 +17,9 @@ export function Chat({id}:{id:string}){
  const [snapshot,setSnapshot]=useState<Snapshot>(),[revision,setRevision]=useState(0),[error,setError]=useState(''),[text,setText]=useState(''),[accepted,setAccepted]=useState<string[]>([]),[sending,setSending]=useState(false);
  const [retries,setRetries]=useState(0);
  useEffect(()=>{setSnapshot(undefined);const controller=new AbortController();void loadSnapshot(id,controller.signal).then(s=>{setSnapshot(s);setAccepted([]);}).catch(e=>{if(!controller.signal.aborted)setError(e.message);});return()=>controller.abort();},[id,revision]);
+ const send=useMemo(()=>createSubmitter(command=>request(`/conversations/${id}/runs`,{method:'POST',body:JSON.stringify(command)})),[id]);
  const submit=async(message:string,source?:RunCommand['source'])=>{
-  const command:RunCommand={runId:crypto.randomUUID(),text:message,...(source?{source}:{})};
-  await request(`/conversations/${id}/runs`,{method:'POST',body:JSON.stringify(command)});
+  await send(message,source);
   setAccepted(a=>[...a,message]);setRetries(0);setError('');if(!snapshot?.pending.length)setRevision(r=>r+1);
  };
  const refresh=()=>{setRetries(0);setRevision(r=>r+1);};

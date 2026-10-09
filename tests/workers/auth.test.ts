@@ -21,3 +21,8 @@ it('isolates listing and every resource operation using real Better Auth session
  const response=await app.request('http://localhost:5173/api/conversations/'+id+'/'+path,{method,headers:{cookie:b,origin:env.APP_URL,'Content-Type':'application/json'},body:method==='GET'?undefined:'{}'},env);expect(response.status).toBe(404);
  }
 });
+it('validates malformed and oversized input bodies before invoking Pi',async()=>{
+ const headers={cookie:await cookie('token-a'),origin:env.APP_URL,'Content-Type':'application/json'};const created=await app.request('http://localhost:5173/api/conversations',{method:'POST',headers},env);const {id}=await created.json() as any;
+ const bad=await app.request(`http://localhost:5173/api/conversations/${id}/panels/1.call/state`,{method:'PATCH',headers,body:'{'},env);expect(bad.status).toBe(400);
+ const big=await app.request(`http://localhost:5173/api/conversations/${id}/runs`,{method:'POST',headers:{...headers,'Content-Length':'2097152'},body:'{}'},env);expect(big.status).toBe(413);
+});
