@@ -51,7 +51,7 @@ app.patch('/api/conversations/:id/panels/:ref/state',async c=>{
  return c.json(reply,'error' in reply?reply.error.status as ContentfulStatusCode:200);
 });
 app.onError((error,c)=>{
- if(error instanceof AppError)return c.json({error:{code:error.code,message:error.message}},error.status as ContentfulStatusCode);
+ if(error instanceof AppError){if(c.req.path.startsWith('/api/auth/'))return c.json({code:error.code,message:error.message},error.status as ContentfulStatusCode);return c.json({error:{code:error.code,message:error.message}},error.status as ContentfulStatusCode);}
  console.error(JSON.stringify({stage:'api',error:'request_failed'}));return c.json({error:{code:'internal_error',message:'The request failed. Retry or inspect server logs.'}},500);
 });
 export default app;

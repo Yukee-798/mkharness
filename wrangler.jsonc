@@ -61,5 +61,36 @@
       "GOOGLE_CLIENT_SECRET",
       "MODEL_API_KEY"
     ]
+  },
+  "env": {
+    "test": {
+      "name": "agent-generative-ui-test-20261010-7591",
+      "vars": {
+        "APP_URL": "https://agent-generative-ui-test-20261010-7591.yukee798.workers.dev",
+        "MODEL_PROVIDER": "",
+        "MODEL_ID": ""
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CONVERSATIONS",
+            "class_name": "ConversationAgent"
+          }
+        ]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "agent-generative-ui-test-20261010-7591",
+          "database_id": "5c257aeb-5d9d-4260-b7e4-381054e00500",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "secrets": {
+        "required": []
+      },
+      "workers_dev": true,
+      "preview_urls": false
+    }
   }
 }

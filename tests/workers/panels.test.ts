@@ -2,8 +2,8 @@ import {env} from 'cloudflare:test';
 import {it,expect} from 'vitest';
 async function generate(stub:ReturnType<typeof env.CONVERSATIONS.getByName>){
  await stub.submitRun({runId:crypto.randomUUID(),text:'panel'});
- for(let i=0;i<100;i++){const s=JSON.parse(await stub.snapshot());if(s.pending.length===0)return s;await new Promise(r=>setTimeout(r,20));}
- throw new Error('Panel did not settle');
+ for(let i=0;i<600;i++){const s=JSON.parse(await stub.snapshot());if(s.pending.length===0)return s;await new Promise(r=>setTimeout(r,20));}
+ throw new Error('Panel did not settle: '+await stub.snapshot());
 }
 it('publishes from committed tools, preserves raw input and rejects conflicting saves',async()=>{
  const stub=env.CONVERSATIONS.getByName(crypto.randomUUID());const s=await generate(stub);

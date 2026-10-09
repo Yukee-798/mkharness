@@ -102,7 +102,7 @@ export class ConversationAgent extends Agent<Env> {
     const programRef=panel.args.programRef;const program=typeof programRef==='string'?successfulTool(entries,programRef,'prepare_program'):undefined;
     if(programRef&&!program)return JSON.stringify({error:{status:409,code:'program_not_recoverable'}});
     const saved=this.rows<{state:string;revision:number}>('SELECT state,revision FROM app_inputs WHERE ref=?',ref)[0];
-    return JSON.stringify({panelRef:ref,ui:panel.args.ui,program:program?{code:program.args.code,data:program.args.data}:null,state:saved?JSON.parse(saved.state):validateUI(String(panel.args.ui),!!program).stateDeclarations,revision:saved?.revision??0});
+    return JSON.stringify({panelRef:ref,ui:panel.args.ui,program:program?{code:program.args.code,data:program.args.data}:null,state:saved?JSON.parse(saved.state):(await validateUI(String(panel.args.ui),!!program)).stateDeclarations,revision:saved?.revision??0});
   }
   async savePanelState(ref:string,state:Record<string,unknown>,expectedRevision:number):Promise<{revision:number}|{error:{status:number;code:string}}>{
     const panel=JSON.parse(await this.loadPanel(ref));if(panel.error)return panel;

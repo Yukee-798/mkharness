@@ -3,7 +3,7 @@ import {beforeAll,it,expect} from 'vitest';
 import migration from '../../migrations/0001_auth_and_conversations.sql?raw';
 import {makeSignature} from 'better-auth/crypto';
 import app from '../../src/server/index';
-const cookie=async(token:string)=>'better-auth.session_token='+encodeURIComponent(token+'.'+await makeSignature(token,env.BETTER_AUTH_SECRET));
+const cookie=async(token:string)=>'better-auth.session_token='+encodeURIComponent(token+'.'+await makeSignature(token,env.BETTER_AUTH_SECRET!));
 beforeAll(async()=>{
  await applyD1Migrations(env.DB,[{name:'0001',queries:migration.split(';').filter(s=>s.trim())}]);
  for(const id of ['a','b']){
@@ -25,4 +25,8 @@ it('validates malformed and oversized input bodies before invoking Pi',async()=>
  const headers={cookie:await cookie('token-a'),origin:env.APP_URL,'Content-Type':'application/json'};const created=await app.request('http://localhost:5173/api/conversations',{method:'POST',headers},env);const {id}=await created.json() as any;
  const bad=await app.request(`http://localhost:5173/api/conversations/${id}/panels/1.call/state`,{method:'PATCH',headers,body:'{'},env);expect(bad.status).toBe(400);
  const big=await app.request(`http://localhost:5173/api/conversations/${id}/runs`,{method:'POST',headers:{...headers,'Content-Length':'2097152'},body:'{}'},env);expect(big.status).toBe(413);
+});
+it('returns the Better Auth error shape when OAuth is not configured',async()=>{
+ const response=await app.request('http://localhost:5173/api/auth/get-session',{}, {...env,GOOGLE_CLIENT_ID:''});
+ expect(response.status).toBe(503);expect(await response.json()).toMatchObject({code:'auth_not_configured',message:expect.stringContaining('Google OAuth')});
 });

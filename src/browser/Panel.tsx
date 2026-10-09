@@ -7,6 +7,7 @@ import type {RawState,RunCommand} from '../shared/contracts';
 import {computeProgram} from './compute';
 import {request} from './api';
 import {createDraftSaver,type SaveStatus} from './draft';
+import {Button} from './ui/button';
 export type PanelBundle={panelRef:string;ui:string;program:Program|null;state?:RawState;revision:number};
 export function Panel({conversationId,panelRef,preview,submit}:{conversationId:string;panelRef?:string;preview?:string;submit:(text:string,source?:RunCommand['source'])=>Promise<void>}){
  const [bundle,setBundle]=useState<PanelBundle>(),[error,setError]=useState(''),[status,setStatus]=useState<SaveStatus>('saved'),[guardTick,setGuardTick]=useState(0);
@@ -49,8 +50,9 @@ export function Panel({conversationId,panelRef,preview,submit}:{conversationId:s
  return <section className="generated-panel" aria-label="Interactive answer" onChangeCapture={edit} onClickCapture={edit} onKeyDownCapture={edit}>
   <div inert={!bundle || undefined}><PanelContext value={context}><Renderer response={bundle?.ui??preview??null} library={library} isStreaming={!bundle} initialState={bundle?.state} onStateUpdate={bundle?change:undefined} onAction={bundle?act:undefined} toolProvider={tools?.provider} publishObservability={false}/></PanelContext></div>
   {panelRef&&!bundle&&!error&&<p role="status">正在恢复面板…</p>}
+  {bundle?.program&&<p className="muted">参数调整在本地重算；计算出错时，图表可能保留上次结果。单位、数据与假设以面板说明为准。</p>}
   {bundle&&<p className="save-status" role="status">{{saved:'已保存',saving:'保存中…',unsaved:'等待保存…',error:'保存失败，草稿仍在当前页面',conflict:'另一页面已更新；当前草稿已保留，请重新加载确认'}[status]}</p>}
-  {status==='error'&&<button onClick={()=>saver?.retry()}>重试保存</button>}
+  {status==='error'&&<Button onClick={()=>saver?.retry()}>重试保存</Button>}
   {error&&<p role="alert">{error}</p>}
  </section>;
 }

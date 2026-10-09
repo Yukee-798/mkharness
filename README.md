@@ -1,0 +1,119 @@
+# Agent Generative UI
+
+可复制和修改的个人 Agent 应用。用户通过 Google 登录，提交文字任务；Agent 可以回答文字，也可以流式组织 OpenUI 界面、生成计算程序。参数调整在浏览器 QuickJS 中计算，点击“继续分析”才提交新的 Agent 任务。
+
+任务提交、观察和停止分开。关闭页面只断开观察，Durable Object 中的 PiHarness 继续执行；返回后从完整 Pi 历史恢复。程序、数据和界面使用成功工具历史，不建立第二套产物表。
+
+## 本地启动
+
+使用 Node.js 24 和 pnpm 11.17.0。核心依赖固定在 lockfile；升级时一起检查 OpenUI / assistant-ui / AG-UI / Pi 的兼容性。
+
+```sh
+pnpm install --frozen-lockfile
+cp .dev.vars.example .dev.vars
+# 编辑 .dev.vars，填写 Google OAuth、Better Auth secret 和模型配置
+pnpm db:migrate
+pnpm dev
+```
+
+打开 `http://localhost:5173`。默认 D1 ID 为本地占位值，仅本地使用；部署前必须替换。`APP_URL` 在 `wrangler.jsonc` 中配置，须等于实际访问的同源地址。不要混用 localhost 和 127.0.0.1。
+
+| 配置 | 用途 |
+| --- | --- |
+| `BETTER_AUTH_SECRET` | 至少 32 字符的随机 secret，每个环境独立 |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用 |
+| `MODEL_PROVIDER` | 当前提供 `openai` 或 `anthropic` |
+| `MODEL_ID` | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出 |
+| `MODEL_API_KEY` | 仅服务端使用的供应商密钥 |
+| `TAVILY_API_KEY` | 可选；缺少时搜索工具明确报告未配置 |
+
+生产 `MODEL_PROVIDER` / `MODEL_ID` 使用 Wrangler `vars`；密钥使用 Cloudflare Secrets。没有默认模型、用户 API key 输入或浏览器密钥。缺少认证配置返回 503；缺少模型配置在接受任务前返回 503。
+
+Google 控制台选择 Web 应用，添加授权 JavaScript 来源 `http://localhost:5173`，授权重定向 URI：
+
+```text
+http://localhost:5173/api/auth/callback/google
+https://YOUR_WORKER_DOMAIN/api/auth/callback/google
+```
+
+测试 OAuth 应用需在同意屏幕添加测试用户。生产域名也要加入来源及回调，`APP_URL` 与之一致。应用没有测试登录、session 注入或认证绕过路由。
+
+## Cloudflare 部署
+
+先登录 Wrangler，创建全新的 D1 数据库，将返回 ID 写入对应配置。首个 DO `v1` 迁移创建 SQLite-backed `ConversationAgent`；不要手工创建或迁移上游 Pi 表。
+
+```sh
+pnpm exec wrangler login
+pnpm exec wrangler d1 create YOUR_NEW_DATABASE
+# 修改 wrangler.jsonc 的 name、APP_URL、D1 database_name/database_id
+# 配置 MODEL_PROVIDER / MODEL_ID，然后使用交互提示逐项输入 secret
+pnpm exec wrangler secret put BETTER_AUTH_SECRET
+pnpm exec wrangler secret put GOOGLE_CLIENT_ID
+pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
+pnpm exec wrangler secret put MODEL_API_KEY
+pnpm exec wrangler d1 migrations apply DB --remote
+pnpm deploy
+```
+
+Cloudflare Vite 插件输出客户端静态资源和 Worker 部署配置，Wrangler 使用生成配置部署。先构建目标环境，再操作该环境，不要将测试构建当作生产构建部署。
+
+`env.test` 提供独立 Worker 名称和 D1/DO 绑定。**复制模板时，请改成自己的新测试资源名称和 D1 ID**，不要保留本次验收资源 ID。环境不会继承 D1/DO 绑定。测试命令：
+
+```sh
+pnpm exec wrangler d1 create YOUR_NEW_TEST_DATABASE
+# 写入 env.test.d1_databases，填写 env.test.vars
+pnpm exec wrangler secret put BETTER_AUTH_SECRET --env test
+pnpm exec wrangler secret put GOOGLE_CLIENT_ID --env test
+pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET --env test
+pnpm exec wrangler secret put MODEL_API_KEY --env test
+pnpm db:migrate:test
+pnpm deploy:test
+```
+
+当前测试环境允许先部署未配置的外壳：`secrets.required` 为空，认证仍拒绝服务并返回清楚错误。完成配置后可将它设为与根配置相同的四个 required secrets。此行为只为独立环境启动验证；不能据此声称完成 Google 登录、任务续跑或模型验收。用自己的隔离测试凭据完成 [云端验收清单](docs/validation/acceptance.md)。
+
+## 代码入口与扩展
+
+| 位置 | 修改什么 |
+| --- | --- |
+| `src/browser/App.tsx` / `styles.css` / `ui/` | 登录、个人目录、主题和 shadcn 页面组件 |
+| `src/browser/Chat.tsx` / `transport.ts` | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
+| `src/browser/Panel.tsx` / `draft.ts` | OpenUI 面板、输入快照、500ms 保存与冲突反馈 |
+| `src/shared/catalog.tsx` | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查 |
+| `src/shared/compute.ts` / 两端 `compute.ts` | 有限 JSON、QuickJS 资源限制与 WASM 加载 |
+| `src/server/conversation.ts` | PiHarness、提交调和、队列准入与持久停止意图 |
+| `src/server/panel-tools.ts` / `limits.ts` | 生成程序/UI 的工具、指令和有限修正 |
+| `src/server/web.ts` | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
+| `src/server/models.ts` | 注册其他 Pi provider；保持显式模型和服务端凭据 |
+| `src/server/auth.ts` / `index.ts` | Better Auth、归属验证和八类业务 API |
+
+生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
+
+原生 `Query("run_program", args, fallback)` 在绑定面板内计算，`Set` / `Reset` 管理输入；`ToAssistant` 将点击时的原始输入快照作为新请求提交。派生值通常直接显示。仅需自动写回输入时使用：
+
+```text
+StateSync($target,result.next,result.ready,{result:result,inputs:currentArgs})
+```
+
+`result` 须为完整 Query 对象，`currentArgs` 须与当前 Query 参数一致，用于拒绝旧结果和错误来源。自动回写每个用户编辑链最多三次。动态 UI 最终渲染为原生组件，没有任意前端 eval 或生成 React 执行。
+
+会话按个人隔离，聊天内串行执行；运行中提交排队，上限 10 项。停止撤回当前及排队任务，Pi 真正 idle 前保持 stopping 并拒绝新提交。客户端 run UUID 对应 Pi operationId；不确定是否收到接受回执时，原样重试使用相同 UUID。
+
+程序限制：代码 64 KiB，输入＋数据及输出分别 1 MiB，VM 堆 16 MiB，栈 256 KiB，interrupt 1024 次。浏览器开始实际执行后 500ms 超时会终止 Worker，加载另有 15s watchdog。后端使用 interrupt 预算，不能承诺等价的 500ms CPU 上限。每个任务最多 20 次模型调用、初次失败后最多两次修正。
+
+保存使用聊天内面板引用和 CAS revision。409 时保留当前页面草稿，重新加载前请复制自己的改动；应用不会静默强制覆盖。历史程序引用从 Pi 的公开完整 entries 恢复，即使模型上下文已压缩。第一版没有附件、知识库、多用户共享、计费或任意代码沙箱工具。
+
+## 验证
+
+```sh
+pnpm typecheck
+pnpm test:unit
+pnpm test:workers
+pnpm test:e2e
+pnpm build
+pnpm exec wrangler deploy --dry-run
+```
+
+首次浏览器测试需 `pnpm exec playwright install chromium`。测试夹具替换模型 I/O，但 PiHarness / D1 / SQLite / workerd 真实运行；浏览器测试使用真实 QuickJS WASM、OpenUI 和 assistant-ui。夹具入口只在测试配置中，不进入生产构建。原有研究消融仅为基线，产品验证记录在 [implementation.md](docs/validation/implementation.md)，真实模型与云端结果另列，未完成不会用模拟结果填充。
+
+MIT；上游和借用组件归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

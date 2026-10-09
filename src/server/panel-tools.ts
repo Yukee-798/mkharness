@@ -1,7 +1,9 @@
 import {Type} from '@earendil-works/pi-ai';
 import {defineTool,type Extension,type ToolExecutionApi,type Harness} from '@earendil-works/pi-durable';
 import {createParser} from '@openuidev/lang-core';
-import {library} from '../shared/catalog';
+// OpenUI creates random library IDs; initialize within a request, never Worker global scope.
+let catalog:Promise<typeof import('../shared/catalog')>|undefined;
+const getLibrary=async()=>(await (catalog??=import('../shared/catalog'))).library;
 import {toolRef,successfulTool} from '../shared/references';
 import {jsonText,finiteJson,type Json,type Program} from '../shared/compute';
 import {computeProgram} from './compute';
@@ -10,7 +12,8 @@ async function ref(api:ToolExecutionApi,context:Parameters<Harness['close']>[0])
  if(!input||typeof input!=='object'||Array.isArray(input)||typeof input.assistant!=='number')throw new Error('Missing Pi calling entry');
  return toolRef(input.assistant,api.callId);
 }
-export function validateUI(ui:string,hasProgram:boolean){
+export async function validateUI(ui:string,hasProgram:boolean){
+ const library=await getLibrary();
  if(new TextEncoder().encode(ui).length>262144)throw new Error('UI exceeds 256 KiB');
  const parsed=createParser(library.toJSONSchema()).parse(ui);
  if(!parsed.root||parsed.meta.incomplete||parsed.meta.unresolved.length||parsed.meta.errors.length)throw new Error('Invalid OpenUI: '+JSON.stringify(parsed.meta));
@@ -32,9 +35,9 @@ export function panelTools(entries:()=>Promise<readonly import('@earendil-works/
  const present=defineTool({name:'present_openui',description:'Publish complete OpenUI Lang using the supplied component catalog. Optional programRef must refer to a committed successful prepare_program in this chat. Use native Query/Set/Reset and the continue_analysis host action.',parameters:Type.Object({ui:Type.String({maxLength:262144}),programRef:Type.Optional(Type.String({maxLength:512}))}),replay:'safe',execute:async(args,api,context)=>{
   try{
    if(args.programRef&&!successfulTool(await entries(),args.programRef,'prepare_program'))throw new Error('Program is missing or has not committed successfully');
-   validateUI(args.ui,!!args.programRef);const panelRef=await ref(api,context);
+   await validateUI(args.ui,!!args.programRef);const panelRef=await ref(api,context);
    return {content:[{type:'text',text:JSON.stringify({panelRef,ready:true})}],details:{ref:panelRef}};
   }catch(error){return {isError:true,content:[{type:'text',text:error instanceof Error?error.message:'Invalid UI'}]};}
  }});
- return {name:'panels',tools:[prepare,present],sections:[{key:'ui',render:()=>library.prompt({additionalRules:['Produce ordinary text when no interface helps. For complex computation, first prepare_program and wait for success, then present_openui referencing its programRef. UI defaults must reflect initialInputs and any submitted source.state. Parameter edits use run_program locally. Use Action([@ToAssistant("Analyze with these inputs")]) for another agent request. Prefer text inputs for numeric parameters when preserving unfinished decimal edits matters. Never invent a tool or business function. Show assumptions, units and source descriptions. StateSync(value,next,enabled,{result:theFullQueryResult,inputs:theSameCurrentQueryArguments}) is optional for automatic parameter normalization, not required for derived display values. For StateSync with a program, return an object from compute and pass its complete Query result and current inputs so the host can reject stale or mismatched writeback.']})}]};
+ return {name:'panels',tools:[prepare,present],sections:[{key:'ui',render:async()=>(await getLibrary()).prompt({additionalRules:['Produce ordinary text when no interface helps. For complex computation, first prepare_program and wait for success, then present_openui referencing its programRef. UI defaults must reflect initialInputs and any submitted source.state. Parameter edits use run_program locally. Use Action([@ToAssistant("Analyze with these inputs")]) for another agent request. Prefer text inputs for numeric parameters when preserving unfinished decimal edits matters. Never invent a tool or business function. Show assumptions, units and source descriptions. StateSync(value,next,enabled,{result:theFullQueryResult,inputs:theSameCurrentQueryArguments}) is optional for automatic parameter normalization, not required for derived display values. For StateSync with a program, return an object from compute and pass its complete Query result and current inputs so the host can reject stale or mismatched writeback.']})}]};
 }

@@ -1,3 +1,5 @@
+// Preload real catalog in test setup: Vite serves its module graph over HTTP, unlike bundled Cloudflare modules.
+import '../../src/shared/catalog';
 import {ConversationAgent as Base} from '../../src/server/conversation';
 import {fixtureModels} from '../fixture-model';
 import {Type} from '@earendil-works/pi-ai';
