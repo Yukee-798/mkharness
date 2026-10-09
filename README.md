@@ -22,7 +22,7 @@ pnpm dev
 | --- | --- |
 | `BETTER_AUTH_SECRET` | 至少 32 字符的随机 secret，每个环境独立 |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用 |
-| `MODEL_PROVIDER` | 当前提供 `openai` 或 `anthropic` |
+| `MODEL_PROVIDER` | 当前提供 `openai`、`anthropic` 或 `deepseek` |
 | `MODEL_ID` | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出 |
 | `MODEL_API_KEY` | 仅服务端使用的供应商密钥 |
 | `TAVILY_API_KEY` | 可选；缺少时搜索工具明确报告未配置 |
