@@ -2,6 +2,7 @@ import {lazy,Suspense,useEffect,useState} from 'react';
 import {authClient} from './auth';
 import {request} from './api';
 import {Button} from './ui/button';
+import {PanelDrafts} from './PanelDrafts';
 const Chat=lazy(()=>import('./Chat').then(module=>({default:module.Chat})));
 type Conversation={id:string;title:string;updated_at:number};
 type Directory={items:Conversation[];next:string|null};
@@ -27,7 +28,7 @@ function Workspace({name}:{name:string}){
  const choose=(value:string)=>{const url=new URL(location.href);url.searchParams.set('chat',value);history.pushState(null,'',url);setId(value);setMenu(false);};
  const create=async()=>{if(creating)return;setCreating(true);try{const chat=await request<{id:string;title:string}>('/conversations',{method:'POST'});setItems(current=>[{...chat,updated_at:Date.now()},...current]);choose(chat.id);setError('');}catch(e){setError((e as Error).message);}finally{setCreating(false);}};
  const current=items.find(item=>item.id===id);
- return <div className="workspace">
+ return <PanelDrafts><div className="workspace">
   <a className="skip-link" href="#conversation">跳到聊天</a>
   <header className="app-header"><Button className="mobile-menu" variant="ghost" aria-label={menu?'关闭聊天目录':'打开聊天目录'} aria-expanded={menu} aria-controls="chat-directory" onClick={()=>setMenu(!menu)}>☰</Button><a className="wordmark" href="/">AGENT / UI</a><span className="account-name">{name}</span><Button variant="ghost" onClick={async()=>{try{const result=await authClient.signOut();if(result.error)throw new Error(result.error.message??'退出失败');}catch(e){setError((e as Error).message);}}}>退出</Button></header>
   <aside id="chat-directory" className={'directory '+(menu?'is-open':'')} aria-label="个人聊天目录">
@@ -42,5 +43,5 @@ function Workspace({name}:{name:string}){
    {error&&<p role="alert" className="notice error">{error}</p>}
    {id?<><div className="conversation-heading"><h1>{current?.title??'聊天'}</h1><span className="muted">离开页面后，任务会继续运行</span></div><Suspense fallback={<p role="status">正在打开聊天…</p>}><Chat key={id} id={id}/></Suspense></>:<div className="empty-chat"><span className="wordmark">YOUR NEXT IDEA</span><h1>从一个问题开始。</h1><p>需要解释时，直接对话。需要比较和模拟时，让 Agent 生成可交互的面板。</p><Button onClick={()=>void create()} disabled={creating}>开始新聊天</Button></div>}
   </main>
- </div>;
+ </div></PanelDrafts>;
 }

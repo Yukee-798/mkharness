@@ -78,7 +78,7 @@ pnpm deploy:test
 | --- | --- |
 | `src/browser/App.tsx` / `styles.css` / `ui/` | 登录、个人目录、主题和 shadcn 页面组件 |
 | `src/browser/Chat.tsx` / `transport.ts` | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
-| `src/browser/Panel.tsx` / `draft.ts` | OpenUI 面板、输入快照、500ms 保存与冲突反馈 |
+| `src/browser/Panel.tsx` / `draft.ts` / `PanelDrafts.tsx` | OpenUI 面板、输入快照、用户内存草稿、500ms 保存与冲突反馈 |
 | `src/shared/catalog.tsx` | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查 |
 | `src/shared/compute.ts` / 两端 `compute.ts` | 有限 JSON、QuickJS 资源限制与 WASM 加载 |
 | `src/server/conversation.ts` | PiHarness、提交调和、队列准入与持久停止意图 |
@@ -97,11 +97,13 @@ StateSync($target,result.next,result.ready,{result:result,inputs:currentArgs})
 
 `result` 须为完整 Query 对象，`currentArgs` 须与当前 Query 参数一致，用于拒绝旧结果和错误来源。自动回写每个用户编辑链最多三次。动态 UI 最终渲染为原生组件，没有任意前端 eval 或生成 React 执行。
 
+原生 Slider 要求有限的 min < max、正步长，离散模式最多 256 个选项；超过时应增加步长或改用 continuous。这是一项通用渲染资源限制，不预置业务算法。发布和动态渲染均检查；错误局限在面板中，聊天仍可继续。
+
 会话按个人隔离，聊天内串行执行；运行中提交排队，上限 10 项。停止撤回当前及排队任务，Pi 真正 idle 前保持 stopping 并拒绝新提交。客户端 run UUID 对应 Pi operationId；不确定是否收到接受回执时，原样重试使用相同 UUID。
 
 程序限制：代码 64 KiB，输入＋数据及输出分别 1 MiB，VM 堆 16 MiB，栈 256 KiB，interrupt 1024 次。浏览器开始实际执行后 500ms 超时会终止 Worker，加载另有 15s watchdog。后端使用 interrupt 预算，不能承诺等价的 500ms CPU 上限。每个任务最多 20 次模型调用、初次失败后最多两次修正。
 
-保存使用聊天内面板引用和 CAS revision。409 时保留当前页面草稿，重新加载前请复制自己的改动；应用不会静默强制覆盖。历史程序引用从 Pi 的公开完整 entries 恢复，即使模型上下文已压缩。第一版没有附件、知识库、多用户共享、计费或任意代码沙箱工具。
+保存使用聊天内面板引用和 CAS revision。未保存输入和 409 冲突草稿在同一用户 Workspace 中保留，聊天切换或 runtime 恢复不会丢失；整页刷新或退出前请复制冲突改动。应用不会静默强制覆盖。历史程序引用从 Pi 的公开完整 entries 恢复，即使模型上下文已压缩。第一版没有附件、知识库、多用户共享、计费或任意代码沙箱工具。
 
 ## 验证
 

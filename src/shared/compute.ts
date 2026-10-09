@@ -28,6 +28,18 @@ export function jsonText(value: unknown, limit = LIMITS.json): string {
   if (encoder.encode(text).length > limit) throw new Error('JSON size limit exceeded');
   return text;
 }
+// Object insertion order is not part of JSON's value semantics. Keep arrays ordered,
+// and emit valid JSON so durable request records can still be decoded on recovery.
+export function canonicalJson(value: unknown): string {
+  finiteJson(value);jsonText(value);
+  const encode = (v: Json): string => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(encode).join(',') + ']';
+    return '{' + Object.keys(v).sort().map(key => JSON.stringify(key) + ':' + encode(v[key]!)).join(',') + '}';
+  };
+  return encode(value);
+}
+export const jsonEqual = (left: unknown, right: unknown): boolean => canonicalJson(left) === canonicalJson(right);
 export const failure = (kind: string, message: string): ComputeResult => ({ok:false,error:{kind,message}});
 // Each call owns the runtime and all handles; only the compiled WASM module is cached.
 export function createCompute(getModule: () => Promise<QuickJSWASMModule>) {

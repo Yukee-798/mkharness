@@ -6,6 +6,7 @@ import {toMessages} from '../shared/stream';
 import type {RunCommand} from '../shared/contracts';
 import {AttachAgent,partialUI,StreamReplaced} from './transport';
 import {Panel} from './Panel';
+import {PanelDrafts} from './PanelDrafts';
 import {request} from './api';
 import {createSubmitter} from './submission';
 import {Button} from './ui/button';
@@ -26,7 +27,7 @@ export function Chat({id}:{id:string}){
  const refresh=()=>{setRetries(0);setRevision(r=>r+1);};
  const reconnect=(replacement=false)=>{if(!replacement&&retries>=4){setError('恢复观察失败。任务仍在后端运行，可以重新连接。');return;}if(!replacement)setRetries(n=>n+1);setTimeout(()=>setRevision(r=>r+1),replacement?0:Math.min(500*2**retries,4000));};
  useEffect(()=>{if(!snapshot?.stopping)return;const timer=setTimeout(()=>setRevision(r=>r+1),1000);return()=>clearTimeout(timer);},[snapshot]);
- return <div className="chat">
+ return <PanelDrafts><div className="chat">
   {snapshot?<Runtime key={revision} id={id} snapshot={snapshot} submit={submit} done={refresh} reconnect={reconnect}/>:<p role="status">正在恢复聊天…</p>}
   {accepted.length>0&&<aside aria-label="已接受的任务"><p>任务已接受，忙碌时按顺序执行</p>{accepted.map((message,i)=><p key={i}>{message}</p>)}</aside>}
   {snapshot?.pending.length!==0&&snapshot&&<p role="status">{snapshot.pending.filter(p=>p.status==='queued').length} 项排队{snapshot.stopping?' · 正在停止…':''}</p>}
@@ -35,7 +36,7 @@ export function Chat({id}:{id:string}){
    <label htmlFor="message">消息</label><textarea id="message" value={text} onChange={e=>setText(e.target.value)} placeholder="描述你的问题，或请求一个可交互的分析面板" rows={3} disabled={snapshot?.stopping}/>
    <div><Button type="submit" disabled={!text.trim()||sending||snapshot?.stopping}>{sending?'提交中…':'发送'}</Button><Button type="button" disabled={!snapshot?.pending.length||snapshot.stopping} onClick={async()=>{try{await request(`/conversations/${id}/stop`,{method:'POST'});refresh();}catch(e){setError((e as Error).message);}}}>停止并撤回排队</Button></div>
   </form>
- </div>;
+ </div></PanelDrafts>;
 }
 function Runtime({id,snapshot,submit,done,reconnect}:{id:string;snapshot:Snapshot;submit:(text:string,source?:RunCommand['source'])=>Promise<void>;done:()=>void;reconnect:(replacement?:boolean)=>void}){
  const history=useMemo<ThreadHistoryAdapter>(()=>({append:async()=>{},load:async()=>{

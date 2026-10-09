@@ -4,7 +4,7 @@ import {PiHarness} from 'agents/harness/pi';
 import {Harness,createRegistry,type Cursor,type Extension,type EntryRecord} from '@earendil-works/pi-durable';
 import type {Models} from '@earendil-works/pi-ai/models';
 import {AppError,commandSchema,type RunCommand} from '../shared/contracts';
-import {jsonText} from '../shared/compute';
+import {jsonText,canonicalJson} from '../shared/compute';
 import {webTools} from './web';
 import {runLimits,withRunLimits} from './limits';
 import {panelTools,validateUI} from './panel-tools';
@@ -49,11 +49,11 @@ export class ConversationAgent extends Agent<Env> {
   }
   private async admit(raw:RunCommand){
     const parsed=commandSchema.safeParse(raw);if(!parsed.success)throw new AppError(400,'invalid_request');const command=parsed.data;
-    jsonText(command);const payload=JSON.stringify(command);
+    const payload=canonicalJson(command);
     return this.serial(async()=>{
       if(this.stopping)throw new AppError(409,'stopping');
       const record=this.rows<{payload:string;accepted:number}>('SELECT payload,accepted FROM app_requests WHERE id=?',command.runId)[0];
-      if(record && record.payload!==payload)throw new AppError(409,'request_conflict');
+      if(record && canonicalJson(JSON.parse(record.payload))!==payload)throw new AppError(409,'request_conflict');
       if(record?.accepted===-1)throw new AppError(409,'request_withdrawn');
       if(!record){
         if(command.source){if(command.source.action!=='continue_analysis')throw new AppError(400,'invalid_action');if(!successfulTool(await this.allEntries(),command.source.panelRef,'present_openui'))throw new AppError(404,'panel_not_found');}

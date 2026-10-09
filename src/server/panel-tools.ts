@@ -5,8 +5,9 @@ import {createParser} from '@openuidev/lang-core';
 let catalog:Promise<typeof import('../shared/catalog')>|undefined;
 const getLibrary=async()=>(await (catalog??=import('../shared/catalog'))).library;
 import {toolRef,successfulTool} from '../shared/references';
-import {jsonText,finiteJson,type Json,type Program} from '../shared/compute';
+import {jsonText,jsonEqual,finiteJson,type Json,type Program} from '../shared/compute';
 import {computeProgram} from './compute';
+import {validateSlider} from '../shared/slider';
 async function ref(api:ToolExecutionApi,context:Parameters<Harness['close']>[0]){
  const task=await api.getTask(api.taskId,context);const input=task?.input;
  if(!input||typeof input!=='object'||Array.isArray(input)||typeof input.assistant!=='number')throw new Error('Missing Pi calling entry');
@@ -19,7 +20,7 @@ export async function validateUI(ui:string,hasProgram:boolean){
  if(!parsed.root||parsed.meta.incomplete||parsed.meta.unresolved.length||parsed.meta.errors.length)throw new Error('Invalid OpenUI: '+JSON.stringify(parsed.meta));
  if(parsed.mutationStatements.length)throw new Error('Mutation is not available; use the continue_analysis host action');
  for(const query of parsed.queryStatements){if(!hasProgram||query.toolAST?.k!=='Str'||query.toolAST.v!=='run_program')throw new Error('Only the bound run_program Query is available');}
- const pending:unknown[]=[parsed.root];while(pending.length){const value=pending.pop();if(!value||typeof value!=='object')continue;const v=value as Record<string,unknown>;if(hasProgram&&v.typeName==='StateSync'&&!(v.props as Record<string,unknown>)?.computed)throw new Error('StateSync requires computation provenance {result,inputs}');for(const child of Object.values(v))if(child&&typeof child==='object')pending.push(child);}
+ const pending:unknown[]=[parsed.root];while(pending.length){const value=pending.pop();if(!value||typeof value!=='object')continue;const v=value as Record<string,unknown>;if(v.typeName==='Slider'&&!v.hasDynamicProps)validateSlider(v.props as Record<string,unknown>);if(hasProgram&&v.typeName==='StateSync'&&!(v.props as Record<string,unknown>)?.computed)throw new Error('StateSync requires computation provenance {result,inputs}');for(const child of Object.values(v))if(child&&typeof child==='object')pending.push(child);}
  return parsed;
 }
 export function panelTools(entries:()=>Promise<readonly import('@earendil-works/pi-durable').EntryRecord[]>):Extension {
@@ -27,7 +28,7 @@ export function panelTools(entries:()=>Promise<readonly import('@earendil-works/
   try{
    finiteJson(args.initialInputs);finiteJson(args.data);jsonText(args.cases);
    const program:Program={code:args.code,data:args.data};const initial=await computeProgram(program,args.initialInputs);if(!initial.ok)throw new Error(initial.error.kind+': '+initial.error.message);
-   for(const example of args.cases){finiteJson(example.inputs);finiteJson(example.expected);const computed=await computeProgram(program,example.inputs);if(!computed.ok)throw new Error(computed.error.message);if(jsonText(computed.value)!==jsonText(example.expected))throw new Error('Test case output differs from expected');}
+   for(const example of args.cases){finiteJson(example.inputs);finiteJson(example.expected);const computed=await computeProgram(program,example.inputs);if(!computed.ok)throw new Error(computed.error.message);if(!jsonEqual(computed.value,example.expected))throw new Error('Test case output differs from expected');}
    const programRef=await ref(api,context);
    return {content:[{type:'text',text:JSON.stringify({programRef,initial:initial.value})}],details:{ref:programRef,initial:initial.value}};
   }catch(error){return {isError:true,content:[{type:'text',text:error instanceof Error?error.message:'Invalid program'}]};}
