@@ -7,6 +7,7 @@ import {AppError,commandSchema,type RunCommand} from '../shared/contracts';
 import {jsonText} from '../shared/compute';
 import {panelTools} from './panel-tools';
 import {successfulTool} from '../shared/references';
+import {observeRun} from './observe';
 import {applicationModels} from './models';
 export const BG:Parameters<Harness['close']>[0]=Object.freeze({abortSignal:undefined,value:()=>undefined,toString:()=> '[Application background]'});
 class RequestRecovery extends LifecycleCapability {
@@ -111,6 +112,7 @@ export class ConversationAgent extends Agent<Env> {
   }
   async history(cursor?:Cursor){const root=await this.root();return root.entries({order:'ascending'},100,cursor,BG);}
   async allEntries():Promise<EntryRecord[]>{const all:EntryRecord[]=[];let cursor:Cursor|undefined;do{const page=await this.history(cursor);all.push(...page.items);cursor=page.next;}while(cursor);return all;}
+  async observeRun(runId:string,threadId="1"):Promise<Response>{return observeRun(this,runId,threadId);}
   async snapshot(rawCursor?:string):Promise<string>{
     let cursor:Cursor|undefined;try{cursor=rawCursor?JSON.parse(rawCursor):undefined;}catch{throw new AppError(400,'invalid_cursor');}
     const pi=await this.harness.pi();const inspection=await pi.inspect(BG);const pending=await this.harness.pending({session:'1'});

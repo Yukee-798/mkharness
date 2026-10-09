@@ -38,6 +38,7 @@ app.post('/api/conversations/:id/runs',async c=>{
 app.get('/api/conversations/:id/snapshot',async c=>{
  return c.body(await c.env.CONVERSATIONS.getByName(c.get('conversationId')).snapshot(c.req.query('cursor')),200,{'Content-Type':'application/json'});
 });
+app.get('/api/conversations/:id/runs/:runId/events',c=>c.env.CONVERSATIONS.getByName(c.get('conversationId')).observeRun(c.req.param('runId'),c.get('conversationId')));
 app.post('/api/conversations/:id/stop',async c=>c.json(await c.env.CONVERSATIONS.getByName(c.get('conversationId')).stopConversation(),202));
 app.get('/api/conversations/:id/panels/:ref',async c=>{
  const reply=JSON.parse(await c.env.CONVERSATIONS.getByName(c.get('conversationId')).loadPanel(c.req.param('ref')));

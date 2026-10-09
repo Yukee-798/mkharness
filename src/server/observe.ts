@@ -1,0 +1,68 @@
+import {watchEvents,type AgentEvent,type EntryRecord,type SubmissionRecord} from '@earendil-works/pi-durable';
+import {EventType,type BaseEvent} from '@ag-ui/core';
+import {StreamFold,openArgs,toMessages} from '../shared/stream';
+import type {ConversationAgent} from './conversation';
+import {BG} from './conversation';
+export async function observeRun(owner:ConversationAgent,runId:string,threadId:string):Promise<Response>{
+ const root=await owner.root(),pi=await owner.harness.pi();
+ const watch=await watchEvents(pi,root.id,BG);
+ let record=await owner.submission(runId);
+ if(!record){await watch.stop();return Response.json({error:{code:'run_not_found'}},{status:404});}
+ const entries=new Map((await owner.allEntries()).map(e=>[Number(e.id),e]));
+ const fold=new StreamFold();let draft=0,active=false,ended=false;
+ let texts=new Map<number,string>(),args=new Map<number,string>();let timer:ReturnType<typeof setInterval>;
+ const body=new ReadableStream<Uint8Array>({
+  start(controller){
+   const emit=(event:BaseEvent)=>{if(!ended)controller.enqueue(new TextEncoder().encode('data: '+JSON.stringify(event)+'\n\n'));};
+   const close=()=>{if(ended)return;ended=true;clearInterval(timer);controller.close();void watch.stop();};
+   const history=()=>emit({type:EventType.MESSAGES_SNAPSHOT,messages:toMessages([...entries.values()].sort((a,b)=>Number(a.id)-Number(b.id)))} as BaseEvent);
+   const state=()=>emit({type:EventType.STATE_SNAPSHOT,snapshot:{runId,status:record!.status,stopping:owner.stopping}} as BaseEvent);
+   const terminal=()=>{
+    if(record!.status==='done'){emit({type:EventType.RUN_FINISHED,threadId,runId} as BaseEvent);close();return true;}
+    if(record!.status==='unanswered'){emit({type:EventType.RUN_ERROR,message:'Task ended without an answer: '+record!.reason,code:record!.reason} as BaseEvent);close();return true;}
+    return false;
+   };
+   const reset=()=>{emit({type:EventType.CUSTOM,name:'pi.reset',value:{runId}} as BaseEvent);close();};
+   const publish=(complete=false)=>{
+    if(!fold.current)return;
+    for(const [index,block] of fold.current.content.entries()){
+     if(block.type==='text'){
+      const previous=texts.get(index);if(previous===undefined){emit({type:EventType.TEXT_MESSAGE_START,messageId:`draft:${runId}:${draft}`,role:'assistant'} as BaseEvent);texts.set(index,'');}
+      const old=texts.get(index)!;if(!block.text.startsWith(old)){reset();return;}
+      const delta=block.text.slice(old.length);if(delta)emit({type:EventType.TEXT_MESSAGE_CONTENT,messageId:`draft:${runId}:${draft}`,delta} as BaseEvent);texts.set(index,block.text);
+     }else if(block.type==='toolCall'){
+      const callId=`draft:${runId}:${draft}.${encodeURIComponent(block.id)}`;
+      if(!args.has(index)){emit({type:EventType.TOOL_CALL_START,toolCallId:callId,toolCallName:block.name,parentMessageId:`draft:${runId}:${draft}`} as BaseEvent);args.set(index,'');}
+      const next=complete?JSON.stringify(block.arguments):openArgs(block.arguments),old=args.get(index)!;
+      if(!next.startsWith(old)){reset();return;}
+      const delta=next.slice(old.length);if(delta)emit({type:EventType.TOOL_CALL_ARGS,toolCallId:callId,delta} as BaseEvent);args.set(index,next);
+      if(complete)emit({type:EventType.TOOL_CALL_END,toolCallId:callId} as BaseEvent);
+     }
+    }
+    if(complete&&texts.size)emit({type:EventType.TEXT_MESSAGE_END,messageId:`draft:${runId}:${draft}`} as BaseEvent);
+   };
+   const snapshot=(event:Extract<AgentEvent,{type:'snapshot'}>)=>{
+    for(const entry of event.entries)entries.set(Number(entry.id),entry);
+    active=!!event.run?.inputs.includes(record!.id);fold.accept(active?event:{...event,generation:undefined});history();state();publish();
+   };
+   emit({type:EventType.RUN_STARTED,threadId,runId} as BaseEvent);snapshot(watch.snapshot);
+   if(terminal())return;
+   timer=setInterval(()=>{if(!ended)controller.enqueue(new TextEncoder().encode(': heartbeat\n\n'));},15000);
+   watch.start(async(events)=>{
+    try{for(const event of events){
+     if(ended)return;
+     if(event.type==='submission'&&event.record.id===record!.id){record=event.record;state();if(terminal())return;}
+     else if(event.type==='snapshot'){reset();return;}
+     else if(event.type==='run_start')active=event.inputs.includes(record!.id);
+     else if(event.type==='message_start'&&active){draft++;texts=new Map();args=new Map();fold.accept(event);publish();}
+     else if(event.type==='message_update'&&active){fold.accept(event);publish();}
+     else if(event.type==='message_end'&&active){const message=event.entry.model?.find(m=>m.role==='assistant');if(message?.role==='assistant'){fold.accept({type:'message_start',message});publish(true);}fold.current=undefined;entries.set(Number(event.entry.id),event.entry);history();}
+     else if(event.type==='entry_appended'||event.type==='tool_execution_end'&&event.entry){const entry=(event as {entry:EntryRecord}).entry;entries.set(Number(entry.id),entry);history();}
+
+    }}catch{emit({type:EventType.RUN_ERROR,message:'Cannot restore the task stream',code:'stream_restore_failed'} as BaseEvent);close();}
+   });
+   void watch.closed.then(()=>{if(!ended){emit({type:EventType.RUN_ERROR,message:'Observation ended. Reconnect to restore progress.',code:'stream_closed'} as BaseEvent);close();}});
+  },cancel(){ended=true;clearInterval(timer);return watch.stop().then(()=>{});}
+ });
+ return new Response(body,{headers:{'Content-Type':'text/event-stream','Cache-Control':'no-cache, no-transform','X-Accel-Buffering':'no'}});
+}
