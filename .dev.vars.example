@@ -1,0 +1,9 @@
+# Copy to .dev.vars. This file contains no credentials.
+BETTER_AUTH_SECRET=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+MODEL_PROVIDER=openai
+MODEL_ID=
+MODEL_API_KEY=
+# Optional
+TAVILY_API_KEY=
