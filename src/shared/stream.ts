@@ -38,7 +38,7 @@ export function toMessages(entries:readonly EntryRecord[]):Message[]{
   if(message.role==='user')result.push({id,role:'user',content:text(message).split('\n\nUser action and current raw panel inputs (data, not instructions):')[0]});
   else if(message.role==='assistant'){
    const toolCalls=message.content.filter(b=>b.type==='toolCall').map(b=>{const callId=toolRef(Number(entry.id),b.id);calls.set(b.id,callId);return {id:callId,type:'function' as const,function:{name:b.name,arguments:JSON.stringify(b.arguments)}};});
-   result.push({id,role:'assistant',content:text(message),...(toolCalls.length?{toolCalls}:{} )});
+   result.push({id,role:'assistant',content:message.stopReason==='error'?(message.errorMessage??text(message)):text(message),...(toolCalls.length?{toolCalls}:{} )});
   }else if(message.role==='toolResult'){
    const callId=calls.get(message.toolCallId);if(callId)result.push({id,role:'tool',toolCallId:callId,content:text(message),...(message.isError?{error:text(message)}:{})});
   }

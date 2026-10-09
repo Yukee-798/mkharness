@@ -5,6 +5,8 @@ import {Harness,createRegistry,type Cursor,type Extension,type EntryRecord} from
 import type {Models} from '@earendil-works/pi-ai/models';
 import {AppError,commandSchema,type RunCommand} from '../shared/contracts';
 import {jsonText} from '../shared/compute';
+import {webTools} from './web';
+import {runLimits,withRunLimits} from './limits';
 import {panelTools} from './panel-tools';
 import {successfulTool} from '../shared/references';
 import {observeRun} from './observe';
@@ -28,13 +30,13 @@ export class ConversationAgent extends Agent<Env> {
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL)');
     this.harness=new PiHarness({defaults:{model:{provider:env.MODEL_PROVIDER,id:env.MODEL_ID}},harness:async({storage,context})=>{
       const registry=createRegistry();for(const extension of this.extensions())registry.install(extension);
-      return Harness.open(storage,{models:this.models(),registry,settings:{followUpMode:'one-at-a-time',steeringMode:'one-at-a-time',toolExecution:'sequential'},onReport:()=>console.error(JSON.stringify({stage:'pi',error:'runtime_report'}))},context);
+      return Harness.open(storage,{models:withRunLimits(this.models(),()=>this.allEntries()),registry,settings:{followUpMode:'one-at-a-time',steeringMode:'one-at-a-time',toolExecution:'sequential'},onReport:()=>console.error(JSON.stringify({stage:'pi',error:'runtime_report'}))},context);
     }});
     this.recovery=new RequestRecovery(this);
     this.lifecycle.use(this.harness).use(this.recovery);
   }
   protected models():Models{return applicationModels(this.env);}
-  protected extensions():Extension[]{return [panelTools(()=>this.allEntries())];}
+  protected extensions():Extension[]{return [panelTools(()=>this.allEntries()),webTools((this.env as Env & {TAVILY_API_KEY?:string}).TAVILY_API_KEY),runLimits(()=>this.allEntries())];}
   private serial<T>(fn:()=>Promise<T>):Promise<T>{const next=this.admission.then(fn);this.admission=next.catch(()=>{});return next;}
   private rows<T extends Record<string,SqlStorageValue>>(query:string,...args:SqlStorageValue[]){return this.ctx.storage.sql.exec<T>(query,...args).toArray();}
   get stopping(){return this.rows('SELECT value FROM app_meta WHERE key=?','stopping')[0]?.value==='1';}
