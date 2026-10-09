@@ -1,0 +1,17 @@
+allowBuilds:
+  '@openuidev/lang-core': true
+  esbuild: true
+  workerd: true
+  '@google/genai': false
+  core-js-pure: false
+  protobufjs: false
+minimumReleaseAgeExclude:
+  - '@assistant-ui/core@0.3.25'
+  - '@assistant-ui/generative-ui@0.0.1'
+  - '@assistant-ui/react-ag-ui@0.0.66'
+  - '@assistant-ui/react@0.15.26'
+  - '@assistant-ui/store@0.3.18'
+  - '@assistant-ui/tap@0.9.22'
+  - 'agents@0.28.0'
+  - 'assistant-cloud@0.2.6'
+  - 'assistant-stream@0.3.49'
