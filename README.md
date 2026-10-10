@@ -74,7 +74,7 @@ pnpm deploy:test
 
 ## 代码入口与扩展
 
-界面优先复用 assistant-ui 的消息、Markdown、Viewport、滚动与复制组件；工具展示采用其官方组件的只读部分。登录、个人聊天目录、状态提示与自定义控件使用 shadcn/ui + Tailwind CSS。生成面板仍由 OpenUI 的原生目录渲染。Composer 使用 assistant-ui 表单包装和 shadcn Textarea，但发送、排队与停止保持独立 HTTP 接口，不调用 runtime 的默认发送或取消行为。
+界面优先复用 assistant-ui 的消息、Markdown、Viewport 与滚动组件；工具展示采用其官方组件的只读部分。登录、个人聊天目录、状态提示与自定义控件使用 shadcn/ui + Tailwind CSS。生成面板仍由 OpenUI 的原生目录渲染。Composer 使用 assistant-ui 表单包装和 shadcn Textarea，但发送、排队与停止保持独立 HTTP 接口，不调用 runtime 的默认发送或取消行为。
 
 新增应用控件可执行 `pnpm dlx shadcn@latest add <component>`，新增 assistant-ui 展示组件可执行 `pnpm dlx shadcn@latest add @assistant-ui/<component>`。配置在 `components.json`，主题变量在 `src/browser/styles.css`；安装后检查依赖版本、导入路径及许可证记录。不要用默认 ThreadList 替代现有聊天目录，除非也明确接入应用的认证、D1 目录和 Pi 历史。
 
@@ -92,6 +92,10 @@ pnpm deploy:test
 | `src/server/auth.ts` / `index.ts`                        | Better Auth、归属验证和聊天业务 API                            |
 
 生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
+
+Agent 默认优先使用生成式 UI 组织有实质内容的回答，配合简短文字、卡片、对比表、步骤和有依据的图表；简短问候、单个事实或用户明确要求纯文本时可直接用文字。图片使用用户提供或可信来源中已有的真实 URL，并说明来源与替代文本；模板目前没有图片生成或搜图工具，不编造图片地址或图表数据。
+
+缺少会影响答案的用户信息或需要选择方案时，Agent 可直接发布原生澄清表单：单选、多选及补充文字，明确必填项和选项含义。推荐项不会自动视为用户的选择。编辑只更新本地状态并保存，用户点击提交后才向 Agent 发送当前答案快照；Agent 据此继续，避免重复提问。说明面板和澄清表单不需要计算程序，只有复杂计算才使用 `prepare_program` 与绑定的 Query。
 
 程序验证用例的 `expected` 必须是完整输出，对象字段顺序无关，数组顺序与值仍严格比较。不匹配时返回用例编号、首个差异的 JSON Pointer、预期/实际值及有界结果预览（诊断最多 8 KiB）；不会发放 `programRef`。Agent 应根据意图和可独立核算的小用例修正，不应直接照抄实际输出来通过验证。
 

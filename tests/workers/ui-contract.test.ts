@@ -31,3 +31,21 @@ it('rejects a program-backed static panel and accepts an explicitly bound local 
     ),
   ).resolves.toBeDefined();
 });
+
+it('requires component nodes in Card children and accepts a native Stack around a list', async () => {
+  const items = 'items=[TextContent("First"),TextContent("Second")]';
+  await expect(validateUI('root=Stack([Card([items])])\n' + items, false)).rejects.toThrow(
+    'got array',
+  );
+  await expect(
+    validateUI('root=Stack([Card([Stack(items)])])\n' + items, false),
+  ).resolves.toBeDefined();
+});
+
+it('requires all definitions when publishing a replacement rather than an edit fragment', async () => {
+  const fragment = 'root=Stack([header,body])\nheader=InlineHeader("Comparison")';
+  await expect(validateUI(fragment, false)).rejects.toThrow('"unresolved":["body"]');
+  await expect(
+    validateUI(fragment + '\nbody=Table([Col("Option",["A","B"])])', false),
+  ).resolves.toBeDefined();
+});

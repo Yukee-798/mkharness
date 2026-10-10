@@ -1,4 +1,62 @@
 import { test, expect } from '@playwright/test';
+
+test('native clarification form validates, saves choices and submits only on explicit confirmation', async ({
+  page,
+}) => {
+  const saved = new Map<string, { state: Record<string, unknown>; revision: number }>();
+  const ui = [
+    '$format = ""',
+    '$topics = {}',
+    '$notes = ""',
+    'root = Form("clarification",Buttons([Button("按我的选择继续",Action([@ToAssistant("根据我的答案继续")]))]),[FormControl("希望怎样展示？（必选）",RadioGroup("format",[RadioItem("方案对比","并列比较选项","comparison"),RadioItem("执行步骤","按顺序解释","steps")],null,{required:true},$format)),FormControl("关心哪些方面？（可多选）",CheckBoxGroup("topics",[CheckBoxItem("预算","说明成本","cost"),CheckBoxItem("时间","说明进度","timing")],null,$topics)),FormControl("其他要求（选填）",Input("notes","补充要求","text",null,$notes))])',
+  ].join('\n');
+  await page.route('**/api/conversations/test/panels/**', async (route) => {
+    const ref = route.request().url().includes('2.same') ? '2.same' : '8.same';
+    if (route.request().method() === 'PATCH') {
+      const { state, expectedRevision } = route.request().postDataJSON();
+      const revision = expectedRevision + 1;
+      saved.set(ref, { state, revision });
+      return route.fulfill({ json: { revision } });
+    }
+    return route.fulfill({
+      json: { panelRef: ref, ui, program: null, revision: 0, ...saved.get(ref) },
+    });
+  });
+  await page.goto('/tests/browser/panel.html');
+  const panels = page.getByRole('region', { name: 'Interactive answer' });
+  const form = panels.first();
+  const comparison = form.getByRole('radio', { name: '方案对比' });
+  await expect(comparison).not.toBeChecked();
+  await form.getByRole('button', { name: '按我的选择继续' }).click();
+  expect(await page.evaluate(() => (window as any).submissions)).toHaveLength(0);
+  await comparison.check();
+  await form.getByRole('checkbox', { name: '预算' }).check();
+  await form.getByPlaceholder('补充要求').fill('保留未知项，不代替我选择');
+  await expect.poll(() => saved.get('2.same')?.state.$notes).toBe('保留未知项，不代替我选择');
+  expect(await page.evaluate(() => (window as any).submissions)).toHaveLength(0);
+  await expect(panels.nth(1).getByRole('radio', { name: '方案对比' })).not.toBeChecked();
+  await expect(panels.nth(1).getByRole('checkbox', { name: '预算' })).not.toBeChecked();
+
+  await page.reload();
+  await expect(comparison).toBeChecked();
+  await expect(form.getByRole('checkbox', { name: '预算' })).toBeChecked();
+  await expect(form.getByPlaceholder('补充要求')).toHaveValue('保留未知项，不代替我选择');
+  await form.getByRole('button', { name: '按我的选择继续' }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).submissions.length)).toBe(1);
+  expect(await page.evaluate(() => (window as any).submissions[0])).toMatchObject({
+    text: '根据我的答案继续',
+    source: {
+      panelRef: '2.same',
+      action: 'continue_analysis',
+      state: {
+        $format: 'comparison',
+        $topics: { cost: true, timing: false },
+        $notes: '保留未知项，不代替我选择',
+      },
+    },
+  });
+});
+
 test('native streamed panel restores raw edits, isolates panels and submits a click snapshot', async ({
   page,
 }) => {
