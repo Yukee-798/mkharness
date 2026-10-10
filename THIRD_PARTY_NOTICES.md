@@ -1,6 +1,6 @@
 # Third-party notices
 
-The source Button in `src/browser/ui/button.tsx` is adapted from [shadcn/ui](https://github.com/shadcn-ui/ui), new-york-v4 registry Button, under MIT (Copyright (c) 2023 shadcn). Its license notice follows. The Slot import is adjusted to the standalone Radix package; utilities are local.
+The components in `src/browser/ui/` are copied or adapted from the official [shadcn/ui](https://github.com/shadcn-ui/ui) registry under MIT (Copyright (c) 2023 shadcn). The utilities remain local. `components.json` records the registry configuration for adding further components. Its license notice follows.
 
 ```text
 MIT License
@@ -25,6 +25,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+`src/browser/markdown-text.tsx`, `tooltip-icon-button.tsx`, `hooks/use-copy-to-clipboard.ts` and the read-only display subset in `tool-fallback.tsx` are copied or adapted from the official [assistant-ui registry](https://www.assistant-ui.com/elements/thread), under MIT (Copyright (c) 2026 AgentbaseAI Inc.). The Markdown copy label is translated; the tool fallback uses shadcn Collapsible and Chinese labels, and omits approval controls. The MIT permission and warranty text above also applies to these files, with this copyright holder.
 
 Runtime dependencies are installed by pnpm; their own licenses remain in the package distributions. React, assistant-ui, AG-UI, OpenUI, Cloudflare Agents, Pi AI/Pi Durable, QuickJS Emscripten, Better Auth, Hono, Tailwind CSS and Radix are used through their public interfaces. QuickJS upstream uses MIT; `class-variance-authority` uses Apache-2.0. Keep these upstream notices when redistributing bundled assets.
 

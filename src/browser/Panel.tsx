@@ -206,7 +206,7 @@ export function Panel({
   };
   return (
     <section
-      className="generated-panel"
+      className="generated-panel my-4 min-w-0 max-w-full overflow-x-auto rounded-xl border bg-background p-4 whitespace-normal sm:p-5"
       aria-label="Interactive answer"
       onChangeCapture={edit}
       onClickCapture={edit}
@@ -233,12 +233,12 @@ export function Panel({
       </div>
       {panelRef && !bundle && !error && <p role="status">正在恢复面板…</p>}
       {bundle?.program && (
-        <p className="muted">
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
           参数调整在本地重算；计算出错时，图表可能保留上次结果。单位、数据与假设以面板说明为准。
         </p>
       )}
       {bundle && (
-        <p className="save-status" role="status">
+        <p className="save-status mt-3 text-xs leading-relaxed text-muted-foreground" role="status">
           {
             {
               saved: '已保存',

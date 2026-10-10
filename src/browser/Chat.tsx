@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useState, useRef, createContext, useContext } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  createContext,
+  useContext,
+  type ReactNode,
+} from 'react';
 import {
   AssistantRuntimeProvider,
+  ComposerPrimitive,
+  ActionBarPrimitive,
+  useAuiState,
   ThreadPrimitive,
   MessagePrimitive,
   fromThreadMessageLike,
@@ -17,6 +28,19 @@ import { PanelDrafts } from './PanelDrafts';
 import { request } from './api';
 import { createSubmitter } from './submission';
 import { Button } from './ui/button';
+import { Textarea } from './ui/textarea';
+import { Badge } from './ui/badge';
+import { Alert, AlertDescription } from './ui/alert';
+import { MarkdownText } from './markdown-text';
+import { TooltipIconButton } from './tooltip-icon-button';
+import {
+  ToolFallbackRoot,
+  ToolFallbackTrigger,
+  ToolFallbackContent,
+  ToolFallbackResult,
+  ToolFallbackError,
+} from './tool-fallback';
+import { ArrowUp, ArrowDown, Check, Copy, MessageSquare, Square, LoaderCircle } from 'lucide-react';
 export type Snapshot = {
   entries: EntryRecord[];
   cursor?: unknown;
@@ -91,39 +115,42 @@ export function Chat({ id }: { id: string }) {
     const timer = setTimeout(() => setRevision((r) => r + 1), 1000);
     return () => clearTimeout(timer);
   }, [snapshot]);
-  return (
-    <PanelDrafts>
-      <div className="chat">
-        {snapshot ? (
-          <Runtime
-            key={revision}
-            id={id}
-            snapshot={snapshot}
-            submit={submit}
-            done={refresh}
-            reconnect={reconnect}
-          />
-        ) : (
-          <p role="status">正在恢复聊天…</p>
-        )}
-        {accepted.length > 0 && (
-          <aside aria-label="已接受的任务">
-            <p>任务已接受，忙碌时按顺序执行</p>
+  // The wrapper uses assistant-ui focus behavior; submission deliberately stays HTTP-only.
+  // Calling runtime.send/abort here would replace the live subscription or cancel a durable task.
+  const ComposerRoot = snapshot ? ComposerPrimitive.Root : 'form';
+  const footer = (
+    <div className="space-y-3">
+      {accepted.length > 0 && (
+        <aside
+          aria-label="已接受的任务"
+          className="rounded-lg border bg-muted/40 px-3 py-2 text-xs"
+        >
+          <p className="font-medium">任务已接受，忙碌时按顺序执行</p>
+          <div className="mt-1 max-h-20 space-y-1 overflow-y-auto text-muted-foreground">
             {accepted.map((message, i) => (
-              <p key={i}>{message}</p>
+              <p key={i} className="truncate">
+                {message}
+              </p>
             ))}
-          </aside>
-        )}
-        {snapshot?.pending.length !== 0 && snapshot && (
-          <p role="status">
-            {snapshot.pending.filter((p) => p.status === 'queued').length} 项排队
-            {snapshot.stopping ? ' · 正在停止…' : ''}
-          </p>
-        )}
-        {error && (
-          <p role="alert">
-            {error}{' '}
+          </div>
+        </aside>
+      )}
+      {!!snapshot?.pending.length && (
+        <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="secondary">
+            <LoaderCircle className="size-3 motion-safe:animate-spin" />
+            {snapshot.stopping ? '正在停止…' : '任务运行中'}
+          </Badge>
+          <span>{snapshot.pending.filter((p) => p.status === 'queued').length} 项排队</span>
+        </div>
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            {error}
             <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setRetries(0);
                 setError('');
@@ -132,53 +159,105 @@ export function Chat({ id }: { id: string }) {
             >
               重新连接
             </Button>
-          </p>
-        )}
-        <form
-          className="composer"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!text.trim() || sending) return;
-            setSending(true);
-            try {
-              await submit(text);
-              setText('');
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
-              setSending(false);
+          </AlertDescription>
+        </Alert>
+      )}
+      <ComposerRoot
+        className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!text.trim() || sending || snapshot?.stopping) return;
+          setSending(true);
+          try {
+            await submit(text);
+            setText('');
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setSending(false);
+          }
+        }}
+      >
+        <label htmlFor="message" className="sr-only">
+          消息
+        </label>
+        <Textarea
+          id="message"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={2}
+          placeholder="描述你的问题，或请求一个可交互的分析面板"
+          className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
+          disabled={snapshot?.stopping}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
             }
           }}
-        >
-          <label htmlFor="message">消息</label>
-          <textarea
-            id="message"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="描述你的问题，或请求一个可交互的分析面板"
-            rows={3}
-            disabled={snapshot?.stopping}
-          />
-          <div>
-            <Button type="submit" disabled={!text.trim() || sending || snapshot?.stopping}>
-              {sending ? '提交中…' : '发送'}
-            </Button>
+        />
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="px-1 text-[11px] text-muted-foreground">Shift + Enter 换行</span>
+          <div className="flex items-center gap-2">
+            {!!snapshot?.pending.length && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-label="停止并撤回排队"
+                disabled={snapshot.stopping}
+                onClick={async () => {
+                  try {
+                    await request(`/conversations/${id}/stop`, { method: 'POST' });
+                    refresh();
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                }}
+              >
+                <Square className="size-3" />
+                停止
+              </Button>
+            )}
             <Button
-              type="button"
-              disabled={!snapshot?.pending.length || snapshot.stopping}
-              onClick={async () => {
-                try {
-                  await request(`/conversations/${id}/stop`, { method: 'POST' });
-                  refresh();
-                } catch (e) {
-                  setError((e as Error).message);
-                }
-              }}
+              type="submit"
+              size="icon"
+              className="rounded-full"
+              aria-label={sending ? '提交中…' : '发送'}
+              disabled={!text.trim() || sending || snapshot?.stopping}
             >
-              停止并撤回排队
+              {sending ? (
+                <LoaderCircle className="size-4 motion-safe:animate-spin" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
             </Button>
           </div>
-        </form>
+        </div>
+      </ComposerRoot>
+    </div>
+  );
+  return (
+    <PanelDrafts>
+      <div className="chat flex min-h-0 flex-1 flex-col">
+        {snapshot ? (
+          <Runtime
+            key={revision}
+            id={id}
+            snapshot={snapshot}
+            submit={submit}
+            done={refresh}
+            reconnect={reconnect}
+            footer={footer}
+          />
+        ) : (
+          <>
+            <p role="status" className="flex-1 p-8 text-sm text-muted-foreground">
+              正在恢复聊天…
+            </p>
+            <div className="mx-auto w-full max-w-3xl px-4 pb-4">{footer}</div>
+          </>
+        )}
       </div>
     </PanelDrafts>
   );
@@ -189,12 +268,14 @@ function Runtime({
   submit,
   done,
   reconnect,
+  footer,
 }: {
   id: string;
   snapshot: Snapshot;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
   done: () => void;
   reconnect: (replacement?: boolean) => void;
+  footer: ReactNode;
 }) {
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
@@ -244,10 +325,40 @@ function Runtime({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ChatContext value={{ id, submit }}>
-        <ThreadPrimitive.Root aria-label="聊天历史">
-          <ThreadPrimitive.Messages
-            components={{ UserMessage: User, AssistantMessage: Assistant }}
-          />
+        <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
+          <ThreadPrimitive.Viewport
+            data-slot="chat-viewport"
+            className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+          >
+            <ThreadPrimitive.Empty>
+              <div className="mx-auto mt-[12vh] max-w-md px-6 text-center">
+                <MessageSquare className="mx-auto mb-4 size-6 text-muted-foreground" />
+                <p className="text-xl font-medium tracking-tight">今天想解决什么问题？</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  直接提问，或描述你想比较、计算和调整的内容。
+                </p>
+              </div>
+            </ThreadPrimitive.Empty>
+            <div
+              data-slot="chat-messages"
+              className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-8 pb-6 sm:px-6"
+            >
+              <ThreadPrimitive.Messages
+                components={{ UserMessage: User, AssistantMessage: Assistant }}
+              />
+            </div>
+            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl bg-background px-4 pt-3 pb-4 sm:px-6">
+              <ThreadPrimitive.ScrollToBottom asChild>
+                <TooltipIconButton
+                  tooltip="回到最新消息"
+                  className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm"
+                >
+                  <ArrowDown className="size-4" />
+                </TooltipIconButton>
+              </ThreadPrimitive.ScrollToBottom>
+              {footer}
+            </ThreadPrimitive.ViewportFooter>
+          </ThreadPrimitive.Viewport>
         </ThreadPrimitive.Root>
       </ChatContext>
     </AssistantRuntimeProvider>
@@ -276,12 +387,12 @@ function Tool(part: ToolCallMessagePartProps) {
     const panelRef = typeof reference === 'string' ? reference : undefined;
     if (part.isError)
       return (
-        <details className="tool" open>
-          <summary>界面未发布</summary>
-          <p role="alert">
+        <Alert variant="destructive" className="my-3">
+          <AlertDescription>
+            界面未发布：
             {typeof part.result === 'string' ? part.result : JSON.stringify(part.result)}
-          </p>
-        </details>
+          </AlertDescription>
+        </Alert>
       );
     return (
       <Panel
@@ -293,28 +404,48 @@ function Tool(part: ToolCallMessagePartProps) {
       />
     );
   }
+  const names: Record<string, string> = {
+    prepare_program: '准备计算程序',
+    read_webpage: '读取网页',
+    search_web: '联网搜索',
+  };
   return (
-    <details className="tool">
-      <summary>
-        {part.toolName}
-        {part.isError ? ' · 失败' : part.result !== undefined ? ' · 已完成' : ' · 执行中'}
-      </summary>
-      <pre>
-        {typeof part.result === 'string' ? part.result : JSON.stringify(part.result, null, 2)}
-      </pre>
-    </details>
+    <ToolFallbackRoot defaultOpen={part.isError} className="my-3">
+      <ToolFallbackTrigger toolName={names[part.toolName] ?? part.toolName} status={part.status} />
+      <ToolFallbackContent>
+        <ToolFallbackResult result={part.result} />
+        <ToolFallbackError status={part.status} />
+      </ToolFallbackContent>
+    </ToolFallbackRoot>
   );
 }
 function Assistant() {
   return (
-    <MessagePrimitive.Root className="message assistant">
-      <MessagePrimitive.Parts components={{ tools: { Fallback: Tool } }} />
+    <MessagePrimitive.Root className="group/message mb-8 min-w-0 text-sm leading-relaxed wrap-anywhere">
+      <MessagePrimitive.Parts components={{ Text: MarkdownText, tools: { Fallback: Tool } }} />
+      <ActionBarPrimitive.Root
+        hideWhenRunning
+        autohide="not-last"
+        className="mt-2 flex items-center"
+      >
+        <CopyMessage />
+      </ActionBarPrimitive.Root>
     </MessagePrimitive.Root>
+  );
+}
+function CopyMessage() {
+  const copied = useAuiState((s) => s.message.isCopied);
+  return (
+    <ActionBarPrimitive.Copy asChild>
+      <TooltipIconButton tooltip={copied ? '已复制' : '复制回答'}>
+        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+      </TooltipIconButton>
+    </ActionBarPrimitive.Copy>
   );
 }
 function User() {
   return (
-    <MessagePrimitive.Root className="message user">
+    <MessagePrimitive.Root className="mb-8 ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
       <MessagePrimitive.Parts />
     </MessagePrimitive.Root>
   );

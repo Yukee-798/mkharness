@@ -74,6 +74,10 @@ pnpm deploy:test
 
 ## 代码入口与扩展
 
+界面优先复用 assistant-ui 的消息、Markdown、Viewport、滚动与复制组件；工具展示采用其官方组件的只读部分。登录、个人聊天目录、状态提示与自定义控件使用 shadcn/ui + Tailwind CSS。生成面板仍由 OpenUI 的原生目录渲染。Composer 使用 assistant-ui 表单包装和 shadcn Textarea，但发送、排队与停止保持独立 HTTP 接口，不调用 runtime 的默认发送或取消行为。
+
+新增应用控件可执行 `pnpm dlx shadcn@latest add <component>`，新增 assistant-ui 展示组件可执行 `pnpm dlx shadcn@latest add @assistant-ui/<component>`。配置在 `components.json`，主题变量在 `src/browser/styles.css`；安装后检查依赖版本、导入路径及许可证记录。不要用默认 ThreadList 替代现有聊天目录，除非也明确接入应用的认证、D1 目录和 Pi 历史。
+
 | 位置                                                     | 修改什么                                                       |
 | -------------------------------------------------------- | -------------------------------------------------------------- |
 | `src/browser/App.tsx` / `styles.css` / `ui/`             | 登录、个人目录、主题和 shadcn 页面组件                         |
