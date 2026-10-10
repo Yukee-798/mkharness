@@ -45,3 +45,26 @@ it('refuses a source panel from another chat or an unpublished call', async () =
     }),
   ).toMatchObject({ error: { status: 404 } });
 });
+it('finishes at committed visual content without another model round, then accepts the next request', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const snapshot = await generate(stub);
+  const messages = snapshot.entries.flatMap((entry: any) => entry.model ?? []);
+  expect(messages.filter((message: any) => message.role === 'assistant')).toHaveLength(2);
+  expect(messages.at(-1)).toMatchObject({
+    role: 'toolResult',
+    toolName: 'present_openui',
+    isError: false,
+  });
+  await stub.submitRun({ runId: crypto.randomUUID(), text: 'reasoning_trace' });
+  for (let i = 0; i < 600; i++) {
+    const next = JSON.parse(await stub.snapshot());
+    if (!next.pending.length) {
+      expect(next.entries.at(-1).model[0].content).toEqual(
+        expect.arrayContaining([{ type: 'text', text: 'Comparison complete.' }]),
+      );
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('The next request did not settle');
+});

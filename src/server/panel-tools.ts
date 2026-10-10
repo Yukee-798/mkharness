@@ -168,7 +168,7 @@ export function panelTools(
   const present = defineTool({
     name: 'present_openui',
     description:
-      'Display the answer or clarification questions using complete OpenUI Lang and the supplied component catalog. This content is the conversational answer itself; a successful result needs no publication announcement or repeated summary. Call this tool to display content; printing UI code in chat does not render it. Static content and forms need no programRef. Optional programRef must refer to a committed successful prepare_program in this chat. Use native Query/Set/Reset and ToAssistant for explicit user submission.',
+      'Display the final answer or clarification questions using complete OpenUI Lang and the supplied component catalog. Call this tool alone after all necessary research and computation. Include useful next steps in the displayed content. Success commits the answer and ends this reply without another model round; validation failure permits repair. Printing UI code in chat does not render it. Static content and forms need no programRef. Optional programRef must refer to a committed successful prepare_program in this chat. Use native Query/Set/Reset and ToAssistant for explicit user submission.',
     parameters: Type.Object({
       ui: Type.String({ maxLength: 262144 }),
       programRef: Type.Optional(Type.String({ maxLength: 512 })),
@@ -183,6 +183,8 @@ export function panelTools(
         return {
           content: [{ type: 'text', text: JSON.stringify({ panelRef, ready: true }) }],
           details: { ref: panelRef },
+          // Pi commits the result before ending this run and placing queued inputs.
+          control: { terminate: true },
         };
       } catch (error) {
         return {
@@ -214,10 +216,10 @@ export function panelTools(
               'Use native @Set($variable,value) and @Reset($variable,...) on declared bindings. @Reset takes variables, never a Form name or string. Prefer text inputs for numeric parameters when preserving unfinished decimal edits matters. Keep @Each templates inline so their row variable remains in scope.',
               'Only the bound run_program Query is available, and only in content with a programRef. Its arguments are compute(inputs,data) inputs, with data supplied by the bound program. This is browser-local computation, not an Agent tool or a network request. Mutation and other tools are unavailable. Never invent a tool, business function, script or action handler. Use Action([@ToAssistant("Analyze with these inputs")]) for another agent request; parameter edits calculate locally without model requests.',
               'Show assumptions, units and source descriptions. StateSync(value,next,enabled,{result:theFullQueryResult,inputs:theSameCurrentQueryArguments}) is optional for automatic parameter normalization, not required for derived display values. For StateSync with a program, return an object from compute and pass its complete Query result and current inputs so the host can reject stale or mismatched writeback.',
-              'Before finishing an answer that uses visual content, actually call present_openui and check its successful result. A textual UI description, fenced code or <ui> block is never rendered content in this application.',
+              'Complete required research and computation before calling present_openui alone as the final tool. The host validates the content and ends the reply only after a successful commit; a failure returns an error for repair. A textual UI description, fenced code or <ui> block is never rendered content in this application.',
               'Each present_openui call supplies a complete replacement document, including repairs. Always include root and every definition it references. Never submit only changed statements or a truncated fragment. When validation fails, fix the reported issue and resubmit the whole document; simplify the composition if necessary rather than adding more sections. An incomplete document with no listed type errors still needs its syntax completed before calling this tool again.',
               'Describe only interactions that the displayed content actually supports. Do not promise blank submission or skipping required fields when form validation prevents it; do not promise automatic defaults, saving or other actions that have not been implemented. Recommendations are suggestions until the user explicitly submits a choice.',
-              'Write titles, labels and explanations about the user\'s subject, not the UI mechanism. These components form the answer itself; do not label ordinary content as a generated UI, panel or dashboard (生成式 UI、面板、交互面板), unless a dashboard is what the user actually requested. Put the substantive answer and its necessary assumptions here. A successful tool result is an internal acknowledgement: normally end the turn with no further prose. Never announce "已发布交互面板" or summarize the layout and contents again. Add at most one short sentence only for a necessary next action, and refer naturally to the actual chart, comparison or question.',
+              'Write titles, labels and explanations about the user\'s subject, not the UI mechanism. These components form the answer itself; do not label ordinary content as a generated UI, panel or dashboard (生成式 UI、面板、交互面板), unless a dashboard is what the user actually requested. Put the substantive answer and its necessary assumptions here. Include any necessary next action within this content, referring naturally to the actual chart, comparison or question. A successful tool result ends the reply automatically; no closing model round is needed. Never announce "已发布交互面板" or summarize the layout and contents again.',
             ],
           }),
       },
