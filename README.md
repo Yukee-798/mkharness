@@ -89,7 +89,7 @@ pnpm deploy:test
 | `src/server/panel-tools.ts` / `limits.ts`                | 生成程序/UI 的工具、指令和有限修正                             |
 | `src/server/web.ts`                                      | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
 | `src/server/models.ts`                                   | 注册其他 Pi provider；保持显式模型和服务端凭据                 |
-| `src/server/auth.ts` / `index.ts`                        | Better Auth、归属验证和八类业务 API                            |
+| `src/server/auth.ts` / `index.ts`                        | Better Auth、归属验证和聊天业务 API                            |
 
 生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
 
@@ -104,6 +104,10 @@ StateSync($target,result.next,result.ready,{result:result,inputs:currentArgs})
 原生 Slider 要求有限的 min < max、正步长，离散模式最多 256 个选项；超过时应增加步长或改用 continuous。这是一项通用渲染资源限制，不预置业务算法。发布和动态渲染均检查；错误局限在面板中，聊天仍可继续。
 
 会话按个人隔离，聊天内串行执行；运行中提交排队，上限 10 项。停止撤回当前及排队任务，Pi 真正 idle 前保持 stopping 并拒绝新提交。客户端 run UUID 对应 Pi operationId；不确定是否收到接受回执时，原样重试使用相同 UUID。
+
+聊天行的操作菜单提供重命名和删除，桌面悬停或键盘聚焦时显示，移动端直接显示。重命名接受去除首尾空白后的 1–120 字符标题；手动名称不会被首条消息覆盖。删除需确认，会停止当前任务、撤回队列，并删除历史、面板输入和目录记录；删除完成后切换到另一段聊天，最后一段删除后返回起始页。失败保留确认框并允许重试，其他标签页返回时自动同步目录。
+
+对应接口为 `PATCH /api/conversations/:id`（`{"title":"新名称"}`）和 `DELETE /api/conversations/:id`，沿用登录、同源和归属验证。删除意图写入现有 DO 元数据，复用任务调和机制恢复；等待工具结束后通过 Agent 的 `destroy()` 清理持久存储，不增加历史副本表。已有安装在更新后运行 `pnpm db:migrate`，部署环境执行对应的远端 D1 迁移。
 
 程序限制：代码 64 KiB，输入＋数据及输出分别 1 MiB，VM 堆 16 MiB，栈 256 KiB，interrupt 1024 次。浏览器开始实际执行后 500ms 超时会终止 Worker，加载另有 15s watchdog。后端使用 interrupt 预算，不能承诺等价的 500ms CPU 上限。每个任务最多 20 次模型调用、初次失败后最多两次修正。
 

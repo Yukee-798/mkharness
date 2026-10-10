@@ -25,7 +25,7 @@ import type { RunCommand } from '../shared/contracts';
 import { AttachAgent, partialUI, StreamReplaced } from './transport';
 import { Panel } from './Panel';
 import { PanelDrafts } from './PanelDrafts';
-import { request } from './api';
+import { request, ApiError } from './api';
 import { createSubmitter } from './submission';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -60,7 +60,17 @@ export async function loadSnapshot(id: string, signal?: AbortSignal) {
   }
   return first;
 }
-export function Chat({ id, onDirectoryChange }: { id: string; onDirectoryChange?: () => void }) {
+export function Chat({
+  id,
+  onDirectoryChange,
+  onUnavailable,
+}: {
+  id: string;
+  onDirectoryChange?: () => void;
+  onUnavailable?: () => void;
+}) {
+  const unavailable = useRef(onUnavailable);
+  unavailable.current = onUnavailable;
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
     [error, setError] = useState(''),
@@ -77,7 +87,11 @@ export function Chat({ id, onDirectoryChange }: { id: string; onDirectoryChange?
         setAccepted([]);
       })
       .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
+        if (!controller.signal.aborted) {
+          if (e instanceof ApiError && e.status === 404 && unavailable.current)
+            unavailable.current();
+          else setError(e.message);
+        }
       });
     return () => controller.abort();
   }, [id, revision]);

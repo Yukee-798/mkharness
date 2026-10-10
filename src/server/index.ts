@@ -2,7 +2,12 @@ import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { auth } from './auth';
 import { boundedText } from './web';
-import { AppError, commandSchema, type RawState } from '../shared/contracts';
+import {
+  AppError,
+  commandSchema,
+  conversationTitleSchema,
+  type RawState,
+} from '../shared/contracts';
 const app = new Hono<{ Bindings: Env; Variables: { userId: string; conversationId: string } }>();
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth(c.env).handler(c.req.raw));
 app.use('/api/*', async (c, next) => {
@@ -48,6 +53,37 @@ app.use('/api/conversations/:id/*', async (c, next) => {
   c.set('conversationId', id);
   await next();
 });
+app.patch('/api/conversations/:id', async (c) => {
+  let raw: string;
+  try {
+    raw = await boundedText(new Response(c.req.raw.body, { headers: c.req.raw.headers }), 2048);
+  } catch {
+    throw new AppError(413, 'request_too_large');
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new AppError(400, 'invalid_json');
+  }
+  const title = conversationTitleSchema.safeParse(
+    body && typeof body === 'object' && 'title' in body ? body.title : undefined,
+  );
+  if (!title.success) throw new AppError(400, 'invalid_title', '标题需为 1 至 120 个字符');
+  const renamed = await c.env.DB.prepare(
+    'UPDATE conversations SET title=?,title_custom=1 WHERE id=? AND owner=? RETURNING id,title,updated_at',
+  )
+    .bind(title.data, c.get('conversationId'), c.get('userId'))
+    .first();
+  if (!renamed) throw new AppError(404, 'not_found');
+  return c.json(renamed);
+});
+app.delete('/api/conversations/:id', async (c) => {
+  await c.env.CONVERSATIONS.getByName(c.get('conversationId')).deleteConversation(
+    c.get('conversationId'),
+  );
+  return c.json({ deleted: true });
+});
 app.post('/api/conversations/:id/runs', async (c) => {
   let raw: string;
   try {
@@ -69,18 +105,17 @@ app.post('/api/conversations/:id/runs', async (c) => {
   if ('error' in result)
     return c.json({ error: result.error }, result.error.status as ContentfulStatusCode);
   await c.env.DB.prepare(
-    "UPDATE conversations SET title=CASE WHEN title='新聊天' THEN ? ELSE title END,updated_at=? WHERE id=? AND owner=?",
+    "UPDATE conversations SET title=CASE WHEN title_custom=0 AND title='新聊天' THEN ? ELSE title END,updated_at=? WHERE id=? AND owner=?",
   )
     .bind(parsed.data.text.slice(0, 60), Date.now(), c.get('conversationId'), c.get('userId'))
     .run();
   return c.json(result, 202);
 });
 app.get('/api/conversations/:id/snapshot', async (c) => {
-  return c.body(
+  const reply = JSON.parse(
     await c.env.CONVERSATIONS.getByName(c.get('conversationId')).snapshot(c.req.query('cursor')),
-    200,
-    { 'Content-Type': 'application/json' },
   );
+  return c.json(reply, reply.error?.status ?? 200);
 });
 app.get('/api/conversations/:id/runs/:runId/events', (c) =>
   c.env.CONVERSATIONS.getByName(c.get('conversationId')).observeRun(

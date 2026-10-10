@@ -12,6 +12,7 @@ export const commandSchema = z.object({
     .optional(),
 });
 export type RunCommand = z.infer<typeof commandSchema>;
+export const conversationTitleSchema = z.string().trim().min(1).max(120);
 export type RawState = { [key: string]: Json };
 export class AppError extends Error {
   constructor(

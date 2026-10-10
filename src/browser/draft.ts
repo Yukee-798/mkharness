@@ -102,6 +102,14 @@ export function createPanelDrafts() {
       drafts.set(key, draft);
       return draft;
     },
+    removeConversation(id: string) {
+      for (const [key, draft] of drafts) {
+        if (key.startsWith(id + '/')) {
+          draft.saver.dispose();
+          drafts.delete(key);
+        }
+      }
+    },
     dispose() {
       for (const draft of drafts.values()) draft.saver.dispose();
       drafts.clear();

@@ -3,6 +3,7 @@ import { authClient } from './auth';
 import { request } from './api';
 import { Button } from './ui/button';
 import { PanelDrafts } from './PanelDrafts';
+import { ConversationActions } from './ConversationActions';
 import { MessageSquare, PanelLeft, Plus, LogOut, ArrowRight } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
@@ -100,6 +101,7 @@ function Workspace({ name }: { name: string }) {
   const refreshDirectory = useCallback(() => setVersion((v) => v + 1), []);
   useEffect(() => {
     const controller = new AbortController();
+    const selectionAtStart = selectedChat();
     setLoading(true);
     void (async () => {
       const data = await request<Directory>('/conversations', { signal: controller.signal });
@@ -116,6 +118,21 @@ function Workspace({ name }: { name: string }) {
         setItems(data.items);
         setNext(data.next);
         setError('');
+        // Only an exhaustive list can confirm a chat was removed in another tab.
+        if (
+          selectionAtStart &&
+          selectedChat() === selectionAtStart &&
+          !data.next &&
+          !data.items.some((chat) => chat.id === selectionAtStart)
+        ) {
+          const fallback = data.items[0]?.id ?? '';
+          const url = new URL(location.href);
+          if (fallback) url.searchParams.set('chat', fallback);
+          else url.searchParams.delete('chat');
+          history.replaceState(null, '', url);
+          setId(fallback);
+          setMenu(false);
+        }
       }
     })()
       .catch((e) => {
@@ -145,12 +162,19 @@ function Workspace({ name }: { name: string }) {
     addEventListener('popstate', pop);
     return () => removeEventListener('popstate', pop);
   }, []);
-  const choose = (value: string) => {
+  const choose = (value: string, replace = false) => {
     const url = new URL(location.href);
-    url.searchParams.set('chat', value);
-    history.pushState(null, '', url);
+    if (value) url.searchParams.set('chat', value);
+    else url.searchParams.delete('chat');
+    if (replace) history.replaceState(null, '', url);
+    else history.pushState(null, '', url);
     setId(value);
     setMenu(false);
+  };
+  const deleted = (value: string) => {
+    setItems((current) => current.filter((item) => item.id !== value));
+    if (selectedChat() === value) choose(items.find((item) => item.id !== value)?.id ?? '', true);
+    refreshDirectory();
   };
   const create = async () => {
     if (creating) return;
@@ -194,25 +218,42 @@ function Workspace({ name }: { name: string }) {
         )}
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto" aria-label="聊天记录">
           {items.map((item) => (
-            <Button
+            <div
               key={item.id}
-              variant="ghost"
-              aria-current={id === item.id ? 'page' : undefined}
-              className="h-auto w-full justify-start gap-2 px-2 py-2.5 text-left font-normal aria-[current=page]:bg-accent aria-[current=page]:font-medium"
-              onClick={() => choose(item.id)}
+              role="group"
+              aria-label={`聊天：${item.title}`}
+              className="group/chat flex items-center rounded-md has-[button[aria-current=page]]:bg-accent"
             >
-              <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate">{item.title}</span>
-              <time
-                className="shrink-0 text-[10px] text-muted-foreground"
-                dateTime={new Date(item.updated_at).toISOString()}
+              <Button
+                variant="ghost"
+                aria-current={id === item.id ? 'page' : undefined}
+                className="h-auto min-w-0 flex-1 justify-start gap-2 px-2 py-2.5 text-left font-normal aria-[current=page]:font-medium"
+                onClick={() => choose(item.id)}
               >
-                {new Date(item.updated_at).toLocaleDateString('zh-CN', {
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </time>
-            </Button>
+                <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                <time
+                  className="shrink-0 text-[10px] text-muted-foreground"
+                  dateTime={new Date(item.updated_at).toISOString()}
+                >
+                  {new Date(item.updated_at).toLocaleDateString('zh-CN', {
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </time>
+              </Button>
+              <ConversationActions
+                id={item.id}
+                title={item.title}
+                onRenamed={(title) => {
+                  setItems((current) =>
+                    current.map((chat) => (chat.id === item.id ? { ...chat, title } : chat)),
+                  );
+                  refreshDirectory();
+                }}
+                onDeleted={() => deleted(item.id)}
+              />
+            </div>
           ))}
           {next && (
             <Button
@@ -301,7 +342,12 @@ function Workspace({ name }: { name: string }) {
                     </p>
                   }
                 >
-                  <Chat key={id} id={id} onDirectoryChange={refreshDirectory} />
+                  <Chat
+                    key={id}
+                    id={id}
+                    onDirectoryChange={refreshDirectory}
+                    onUnavailable={() => deleted(id)}
+                  />
                 </Suspense>
               </>
             ) : (

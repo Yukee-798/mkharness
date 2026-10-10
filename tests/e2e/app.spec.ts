@@ -25,18 +25,23 @@ test('personal directory creates and restores a chat with keyboard access on mob
       },
     }),
   );
-  await page.route('**/api/conversations', (route) =>
-    route.fulfill({
+  let created = false;
+  await page.route('**/api/conversations', (route) => {
+    if (route.request().method() === 'POST') created = true;
+    return route.fulfill({
       status: route.request().method() === 'POST' ? 201 : 200,
       json:
         route.request().method() === 'POST'
           ? { id: 'created', title: '新聊天' }
           : {
-              items: [{ id: 'existing', title: '方案比较', updated_at: 1791576000000 }],
+              items: [
+                ...(created ? [{ id: 'created', title: '新聊天', updated_at: 1791576000001 }] : []),
+                { id: 'existing', title: '方案比较', updated_at: 1791576000000 },
+              ],
               next: null,
             },
-    }),
-  );
+    });
+  });
   await page.route('**/api/conversations/*/snapshot', (route) =>
     route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
   );

@@ -47,6 +47,8 @@ export class ConversationAgent extends Agent<Env> {
   private admission: Promise<unknown> = Promise.resolve();
   private recovery: RequestRecovery;
   private stopWork?: Promise<void>;
+  private deletionId?: string;
+  private deleteWork?: Promise<void>;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(
@@ -58,6 +60,10 @@ export class ConversationAgent extends Agent<Env> {
     ctx.storage.sql.exec(
       'CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL)',
     );
+    const deletion = ctx.storage.sql
+      .exec('SELECT value FROM app_meta WHERE key=?', 'deleting')
+      .toArray()[0]?.value;
+    this.deletionId = typeof deletion === 'string' ? deletion : undefined;
     this.harness = new PiHarness({
       defaults: { model: { provider: env.MODEL_PROVIDER, id: env.MODEL_ID } },
       harness: async ({ storage, context }) => {
@@ -106,9 +112,14 @@ export class ConversationAgent extends Agent<Env> {
   get stopping() {
     return this.rows('SELECT value FROM app_meta WHERE key=?', 'stopping')[0]?.value === '1';
   }
+  get deleting() {
+    return this.deletionId !== undefined;
+  }
   needsRecovery() {
     return (
-      this.stopping || this.rows('SELECT id FROM app_requests WHERE accepted=0 LIMIT 1').length > 0
+      this.deleting ||
+      this.stopping ||
+      this.rows('SELECT id FROM app_requests WHERE accepted=0 LIMIT 1').length > 0
     );
   }
   private setStopping(value: boolean) {
@@ -119,7 +130,9 @@ export class ConversationAgent extends Agent<Env> {
     );
   }
   async root() {
+    if (this.deleting) throw new AppError(404, 'not_found');
     const pi = await this.harness.pi();
+    if (this.deleting) throw new AppError(404, 'not_found');
     return pi.root(BG, {
       agent: { model: { provider: this.env.MODEL_PROVIDER, modelId: this.env.MODEL_ID } },
     });
@@ -143,6 +156,7 @@ export class ConversationAgent extends Agent<Env> {
     const command = parsed.data;
     const payload = canonicalJson(command);
     return this.serial(async () => {
+      if (this.deleting) throw new AppError(404, 'not_found');
       if (this.stopping) throw new AppError(409, 'stopping');
       const record = this.rows<{ payload: string; accepted: number }>(
         'SELECT payload,accepted FROM app_requests WHERE id=?',
@@ -189,11 +203,16 @@ export class ConversationAgent extends Agent<Env> {
     this.ctx.storage.sql.exec('UPDATE app_requests SET accepted=1 WHERE id=?', command.runId);
   }
   async reconcile() {
+    if (this.deleting) {
+      await this.finishDelete();
+      return;
+    }
     if (this.stopping) {
       await this.finishStop();
       return;
     }
     await this.serial(async () => {
+      if (this.deleting || this.stopping) return;
       for (const record of this.rows<{ id: string; payload: string }>(
         'SELECT id,payload FROM app_requests WHERE accepted=0 ORDER BY rowid',
       )) {
@@ -204,11 +223,38 @@ export class ConversationAgent extends Agent<Env> {
   }
   async stopConversation() {
     return this.serial(async () => {
+      if (this.deleting) return { stopping: true as const };
       this.setStopping(true);
       await this.recovery.schedule();
       this.ctx.waitUntil(this.finishStop());
       return { stopping: true as const };
     });
+  }
+  async deleteConversation(id: string) {
+    await this.serial(async () => {
+      if (this.deletionId && this.deletionId !== id) throw new AppError(409, 'deletion_conflict');
+      this.ctx.storage.sql.exec(
+        'INSERT INTO app_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        'deleting',
+        id,
+      );
+      this.deletionId = id;
+      this.setStopping(true);
+      await this.recovery.schedule();
+    });
+    await this.finishDelete();
+  }
+  private finishDelete(): Promise<void> {
+    return (this.deleteWork ??= (async () => {
+      // Wait for tools to settle before disposing Pi and erasing the DO database.
+      await this.finishStop();
+      await this.env.DB.prepare('DELETE FROM conversations WHERE id=?')
+        .bind(this.deletionId!)
+        .run();
+      await this.destroy();
+    })().finally(() => {
+      this.deleteWork = undefined;
+    }));
   }
   private finishStop(): Promise<void> {
     return (this.stopWork ??= (async () => {
@@ -222,6 +268,7 @@ export class ConversationAgent extends Agent<Env> {
     }));
   }
   async loadPanel(ref: string): Promise<string> {
+    if (this.deleting) return JSON.stringify({ error: { status: 404, code: 'not_found' } });
     const entries = await this.allEntries(),
       panel = successfulTool(entries, ref, 'present_openui');
     if (!panel) return JSON.stringify({ error: { status: 404, code: 'panel_not_found' } });
@@ -253,6 +300,7 @@ export class ConversationAgent extends Agent<Env> {
   ): Promise<{ revision: number } | { error: { status: number; code: string } }> {
     const panel = JSON.parse(await this.loadPanel(ref));
     if (panel.error) return panel;
+    if (this.deleting) return { error: { status: 404, code: 'not_found' } };
     let text: string;
     try {
       text = jsonText(state);
@@ -297,9 +345,11 @@ export class ConversationAgent extends Agent<Env> {
     return all;
   }
   async observeRun(runId: string, threadId = '1'): Promise<Response> {
+    if (this.deleting) return Response.json({ error: { code: 'not_found' } }, { status: 404 });
     return observeRun(this, runId, threadId);
   }
   async snapshot(rawCursor?: string): Promise<string> {
+    if (this.deleting) return JSON.stringify({ error: { status: 404, code: 'not_found' } });
     let cursor: Cursor | undefined;
     try {
       cursor = rawCursor ? JSON.parse(rawCursor) : undefined;
