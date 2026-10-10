@@ -7,6 +7,8 @@ import type { ReactNode } from 'react';
 import { ChevronRightIcon } from 'lucide-react';
 import { CollapsibleTrigger } from './ui/collapsible';
 import { ShimmerLabel } from './surfaces';
+import { traceRowClass } from './trace';
+import { cn } from './ui/utils';
 import {
   ToolFallbackRoot,
   ToolFallbackContent,
@@ -49,7 +51,10 @@ export function ToolCall({
     <ToolFallbackRoot data-slot="tool-call" open={open} onOpenChange={onOpenChange}>
       <CollapsibleTrigger
         aria-label={ariaLabel}
-        className="group/trigger flex w-fit max-w-full items-center gap-2 rounded-md py-1 text-[13.5px] leading-5 text-muted-foreground transition-colors outline-none hover:text-foreground/90 focus-visible:ring-1 focus-visible:ring-ring/50"
+        className={cn(
+          'group/trigger w-fit max-w-full rounded-md text-[13.5px] text-muted-foreground transition-colors outline-none hover:text-foreground/90 focus-visible:ring-1 focus-visible:ring-ring/50',
+          traceRowClass,
+        )}
       >
         <span aria-hidden="true" className="shrink-0 [&>svg]:size-4">
           {statusIcon ?? icon}

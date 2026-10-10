@@ -573,17 +573,24 @@ const groupAssistantParts = groupPartByType({
   'standalone-tool-call': [],
 });
 function Assistant() {
-  const toolTail = useAuiState((s) => {
-    const last = s.message.content.findLast(
+  const traceTail = useAuiState((s) => {
+    const internal = s.message.content.some(
       (part) =>
+        part.type === 'tool-call' &&
+        (part.toolName === 'prepare_program' || part.toolName === 'present_openui'),
+    );
+    // Match AssistantText/Tool visibility so hidden publication parts leave no spacing.
+    const last = s.message.content.findLast((part) => {
+      if (part.type === 'text') return !internal && part.text !== '';
+      return (
         part.type !== 'tool-call' ||
         (part.toolName !== 'prepare_program' &&
-          (part.toolName !== 'present_openui' || !part.isError)),
-    );
+          (part.toolName !== 'present_openui' || !part.isError))
+      );
+    });
     return (
-      last?.type === 'tool-call' &&
-      last.toolName !== 'prepare_program' &&
-      last.toolName !== 'present_openui'
+      last?.type === 'reasoning' ||
+      (last?.type === 'tool-call' && last.toolName !== 'present_openui')
     );
   });
   const generating = useAuiState(
@@ -600,8 +607,8 @@ function Assistant() {
   return (
     <MessagePrimitive.Root
       data-slot="assistant-message"
-      data-tool-tail={toolTail}
-      className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[tool-tail=true]:mb-2"
+      data-trace-tail={traceTail || generating}
+      className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[trace-tail=true]:mb-2"
     >
       {generating && <GenerationProgress />}
       <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
@@ -610,7 +617,7 @@ function Assistant() {
             case 'group-tool':
               if (part.indices.length === 1) return <>{children}</>;
               return (
-                <ToolGroupRoot variant="ghost" defaultOpen className="my-1">
+                <ToolGroupRoot variant="ghost" defaultOpen>
                   <DisclosureTrigger
                     live={part.status.type === 'running'}
                     label={part.status.type === 'running' ? '正在调用' : '已调用'}
@@ -627,7 +634,7 @@ function Assistant() {
                 <ReasoningRoot
                   variant="ghost"
                   streaming={part.status.type === 'running'}
-                  className="my-1 mb-3"
+                  className="mb-0"
                 >
                   <DisclosureTrigger
                     live={part.status.type === 'running'}

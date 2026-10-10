@@ -120,6 +120,68 @@ test('tool rows have consistent spacing within a group and between standalone Pi
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('collapsed reasoning, tool groups and single tools share spacing across Pi message boundaries', async ({
+  page,
+}) => {
+  const thinking = { type: 'thinking', thinking: '核对来源与关键假设。' };
+  const call = (id: string, name = 'read_web') => ({
+    type: 'toolCall',
+    id,
+    name,
+    arguments: { url: 'https://example.com/data' },
+  });
+  const assistant = (id: number, content: unknown[]) => ({
+    id,
+    model: [{ role: 'assistant', content }],
+  });
+  const entries = [
+    assistant(1, [thinking, call('one'), call('two')]),
+    assistant(2, [thinking, call('three'), call('hidden', 'prepare_program')]),
+    assistant(3, [thinking]),
+    // Internal publication messages must not leave empty spacing between traces.
+    assistant(4, [
+      { type: 'text', text: 'Preparing a computation program.' },
+      call('hidden-again', 'prepare_program'),
+    ]),
+    assistant(5, [thinking]),
+    assistant(6, [{ type: 'text', text: '这是最终结论。' }]),
+  ];
+  await page.route('**/api/conversations/**', (route) =>
+    route.fulfill({ json: { entries, pending: [], stopping: false } }),
+  );
+  await page.goto('/tests/browser/chat.html');
+  const group = page.getByRole('button', { name: '已调用 2 个工具', exact: true });
+  await group.click();
+  await expect(group).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('[data-slot="tool-group-content"]')).not.toBeVisible();
+  const rows = page.locator(
+    '[data-slot="reasoning-trigger"], [data-slot="tool-group-trigger"], [data-slot="assistant-message"] > [data-slot="tool-call"] > button',
+  );
+  await expect(rows).toHaveCount(6);
+  const expectEqualSpacing = async () => {
+    const boxes = await rows.evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top, bottom: box.bottom, height: box.height };
+      }),
+    );
+    for (const box of boxes) expect(box.height).toBeCloseTo(boxes[0].height, 3);
+    for (let i = 1; i < boxes.length; i++)
+      expect(boxes[i].top - boxes[i - 1].bottom).toBeCloseTo(8, 3);
+  };
+  await expectEqualSpacing();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectEqualSpacing();
+  // Opening and closing an official reasoning disclosure must restore the same layout.
+  const reasoning = page.getByRole('button', { name: '思考过程', exact: true }).first();
+  await reasoning.click();
+  await expect(page.getByText(thinking.thinking, { exact: true })).toBeVisible();
+  await reasoning.click();
+  await expect(page.locator('[data-slot="reasoning-content"]').first()).not.toBeVisible();
+  await expectEqualSpacing();
+  await expect(page.getByText('Preparing a computation program.', { exact: true })).toHaveCount(0);
+});
+
 test('reasoning streams before the answer, finishes honestly and survives history reload', async ({
   page,
 }) => {

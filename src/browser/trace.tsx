@@ -7,6 +7,9 @@ import { ShimmerLabel } from './surfaces';
 import { CollapsibleTrigger } from './ui/collapsible';
 import { cn } from './ui/utils';
 
+// The parent owns spacing between traces; all collapsed rows share the same height.
+export const traceRowClass = 'flex items-center gap-2 py-1 leading-5';
+
 /**
  * The mark every trace line carries. A disclosure rotates it and a plain line
  * does not, so the two read as the same grammar rather than two symbols; it
@@ -41,7 +44,7 @@ export function TraceLine({
   meta?: string;
 }): ReactNode {
   return (
-    <div className="my-1 flex items-baseline gap-2 font-mono text-[12px] [font-variant-ligatures:none]">
+    <div className={cn('font-mono text-[12px] [font-variant-ligatures:none]', traceRowClass)}>
       <TraceMarker live={live} />
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
         {live ? (
@@ -66,6 +69,7 @@ export function DisclosureTrigger({
   live,
   label,
   detail,
+  className,
   ...props
 }: {
   live: boolean;
@@ -75,7 +79,11 @@ export function DisclosureTrigger({
   return (
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
-      className="group/trigger my-1 flex max-w-full items-baseline gap-2 text-left font-mono text-[12px] outline-none [font-variant-ligatures:none] focus-visible:underline"
+      className={cn(
+        'group/trigger max-w-full text-left font-mono text-[12px] outline-none [font-variant-ligatures:none] focus-visible:underline',
+        traceRowClass,
+        className,
+      )}
       {...props}
     >
       <TraceMarker
