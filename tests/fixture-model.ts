@@ -134,6 +134,15 @@ export function fixtureModels() {
           },
         ];
     }
+    if (text?.includes('mcp lookup') && last?.role === 'user')
+      content = [
+        {
+          type: 'toolCall',
+          id: 'same-call',
+          name: 'mcp_reference_lookup',
+          arguments: { query: 'hi' },
+        },
+      ];
     if (text?.includes('multiple_text_blocks'))
       content = [
         { type: 'text', text: 'First section' },

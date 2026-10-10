@@ -11,6 +11,14 @@ import {
   type ToolExecutionApi,
 } from '@earendil-works/pi-durable';
 export class ConversationAgent extends Base {
+  protected override mcpConfiguration() {
+    const sql = this.ctx.storage.sql;
+    if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_mcp'").toArray().length)
+      return [
+        { serverId: 'reference', endpoint: 'https://mcp.example.test/mcp', allowlist: ['lookup'] },
+      ];
+    return super.mcpConfiguration();
+  }
   protected override models() {
     return fixtureModels();
   }

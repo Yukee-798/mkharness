@@ -5,6 +5,7 @@ import {
   Harness,
   ROOT_CONVERSATION_ID,
   createRegistry,
+  createSession,
   type Cursor,
   type Extension,
   type EntryRecord,
@@ -13,6 +14,7 @@ import type { Models } from '@earendil-works/pi-ai/models';
 import { AppError, commandSchema, USER_ACTION_CONTEXT, type RunCommand } from '../shared/contracts';
 import { jsonText, canonicalJson } from '../shared/compute';
 import { applicationExtensions } from './assembly';
+import { MCPBindings, buildMcp, mcpConfiguration, type MCPConfig } from './mcp';
 import { validateExtensions } from './extensions';
 import { withRunLimits } from './limits';
 import { validateUI } from './panel-tools';
@@ -57,6 +59,7 @@ export class ConversationAgent extends Agent<Env> {
   private recovery: RequestRecovery;
   private stopWork?: Promise<void>;
   private deletionId?: string;
+  private mcpPrepared?: Awaited<ReturnType<typeof buildMcp>>;
   private deleteWork?: Promise<void>;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -77,6 +80,20 @@ export class ConversationAgent extends Agent<Env> {
       defaults: { model: { provider: env.MODEL_PROVIDER, id: env.MODEL_ID } },
       harness: async ({ storage, context }) => {
         const registry = createRegistry();
+        // A read-only bootstrap snapshot avoids calling the not-yet-open Harness from its factory.
+        const saved = await createSession(storage).snapshot(
+          MCPBindings,
+          ROOT_CONVERSATION_ID,
+          context,
+        );
+        const configs = this.mcpConfiguration();
+        if (configs.length || saved?.bindings.length)
+          this.mcpPrepared = await buildMcp(
+            this.mcp,
+            configs,
+            this.env as unknown as Record<string, unknown>,
+            saved?.bindings,
+          );
         const extensions = await this.extensions();
         validateExtensions(extensions);
         for (const extension of extensions) registry.install(extension);
@@ -94,10 +111,19 @@ export class ConversationAgent extends Agent<Env> {
               steeringMode: 'one-at-a-time',
               toolExecution: 'sequential',
             },
+            conversationCreated: async (tx, conversation) => {
+              if (this.mcpPrepared?.bindings.length && conversation.id === ROOT_CONVERSATION_ID)
+                (await tx.doc(MCPBindings, conversation.id)).bindings = this.mcpPrepared.bindings;
+            },
             onReport: () => console.error(JSON.stringify({ stage: 'pi', error: 'runtime_report' })),
           },
           context,
         );
+        const existing = await pi.conversation(ROOT_CONVERSATION_ID, context);
+        if (existing && this.mcpPrepared?.bindings.length)
+          await existing.commit(async (tx) => {
+            (await tx.doc(MCPBindings, existing.id)).bindings = this.mcpPrepared!.bindings;
+          }, context);
         // Native Pi leaves incompatible definitions blocked. Settle them explicitly on deployment
         // recovery so unsupported work cannot hold the conversation in a permanent running state.
         for (const task of (await pi.inspect(context)).tasks)
@@ -151,8 +177,14 @@ export class ConversationAgent extends Agent<Env> {
       );
     return { model, thinkingLevel: selection.thinkingLevel };
   }
-  protected extensions(): Extension[] | Promise<Extension[]> {
-    return applicationExtensions(this.env, () => this.allEntries());
+  protected mcpConfiguration(): MCPConfig[] {
+    return mcpConfiguration(this.env as unknown as Record<string, unknown>);
+  }
+  protected async extensions(): Promise<Extension[]> {
+    return [
+      ...(await applicationExtensions(this.env, () => this.allEntries())),
+      ...(this.mcpPrepared ? [this.mcpPrepared.extension] : []),
+    ];
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.admission.then(fn);
@@ -446,6 +478,7 @@ export class ConversationAgent extends Agent<Env> {
       stopping: this.stopping,
       modelCatalog,
       selection,
+      capabilityIssues: this.mcpPrepared?.diagnostics ?? [],
       runtimeIssues: terminalTasks.items
         .filter((t) => t.state.status === 'terminal' && t.state.outcome.status === 'orphaned')
         .map((t) => ({ taskId: Number(t.id), code: 'task_definition_unavailable' })),
