@@ -60,7 +60,7 @@ export async function loadSnapshot(id: string, signal?: AbortSignal) {
   }
   return first;
 }
-export function Chat({ id }: { id: string }) {
+export function Chat({ id, onDirectoryChange }: { id: string; onDirectoryChange?: () => void }) {
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
     [error, setError] = useState(''),
@@ -90,6 +90,7 @@ export function Chat({ id }: { id: string }) {
   );
   const submit = async (message: string, source?: RunCommand['source']) => {
     await send(message, source);
+    onDirectoryChange?.();
     setAccepted((a) => [...a, message]);
     setRetries(0);
     setError('');
@@ -98,6 +99,7 @@ export function Chat({ id }: { id: string }) {
   const refresh = () => {
     setRetries(0);
     setRevision((r) => r + 1);
+    onDirectoryChange?.();
   };
   const reconnect = (replacement = false) => {
     if (!replacement && retries >= 4) {

@@ -1,11 +1,10 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { authClient } from './auth';
 import { request } from './api';
 import { Button } from './ui/button';
 import { PanelDrafts } from './PanelDrafts';
-import { MessageSquare, PanelLeft, Plus, RefreshCw, LogOut, ArrowRight } from 'lucide-react';
+import { MessageSquare, PanelLeft, Plus, LogOut, ArrowRight } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
-import { Separator } from './ui/separator';
 import { Skeleton } from './ui/skeleton';
 import {
   Sheet,
@@ -96,16 +95,29 @@ function Workspace({ name }: { name: string }) {
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
     [creating, setCreating] = useState(false),
-    [version, setVersion] = useState(0);
+    [version, setVersion] = useState(0),
+    [pages, setPages] = useState(1);
+  const refreshDirectory = useCallback(() => setVersion((v) => v + 1), []);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void request<Directory>('/conversations', { signal: controller.signal })
-      .then((data) => {
+    void (async () => {
+      const data = await request<Directory>('/conversations', { signal: controller.signal });
+      // Reload the visible pages together so reordered chats do not duplicate or disappear.
+      for (let page = 1; page < pages && data.next; page++) {
+        const more = await request<Directory>(
+          '/conversations?cursor=' + encodeURIComponent(data.next),
+          { signal: controller.signal },
+        );
+        data.items.push(...more.items);
+        data.next = more.next;
+      }
+      if (!controller.signal.aborted) {
         setItems(data.items);
         setNext(data.next);
         setError('');
-      })
+      }
+    })()
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
       })
@@ -113,7 +125,18 @@ function Workspace({ name }: { name: string }) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [version]);
+  }, [version, pages]);
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshDirectory();
+    };
+    addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [refreshDirectory]);
   useEffect(() => {
     const pop = () => {
       setId(selectedChat());
@@ -138,6 +161,7 @@ function Workspace({ name }: { name: string }) {
       });
       setItems((current) => [{ ...chat, updated_at: Date.now() }, ...current]);
       choose(chat.id);
+      refreshDirectory();
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -159,7 +183,7 @@ function Workspace({ name }: { name: string }) {
       </Button>
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         <h2 className="px-2 text-xs font-medium text-muted-foreground">聊天记录</h2>
-        {loading && (
+        {loading && !items.length && (
           <div className="space-y-2" role="status" aria-label="正在读取目录">
             <Skeleton className="h-9 w-full" />
             <Skeleton className="h-9 w-4/5" />
@@ -194,32 +218,14 @@ function Workspace({ name }: { name: string }) {
             <Button
               variant="ghost"
               className="w-full"
-              onClick={async () => {
-                try {
-                  const data = await request<Directory>(
-                    '/conversations?cursor=' + encodeURIComponent(next),
-                  );
-                  setItems((old) => [...old, ...data.items]);
-                  setNext(data.next);
-                } catch (e) {
-                  setError((e as Error).message);
-                }
-              }}
+              disabled={loading}
+              onClick={() => setPages((value) => value + 1)}
             >
               更多聊天
             </Button>
           )}
         </nav>
       </div>
-      <Separator />
-      <Button
-        variant="ghost"
-        className="justify-start text-muted-foreground"
-        onClick={() => setVersion((v) => v + 1)}
-      >
-        <RefreshCw className="size-4" />
-        刷新目录
-      </Button>
     </div>
   );
   return (
@@ -295,7 +301,7 @@ function Workspace({ name }: { name: string }) {
                     </p>
                   }
                 >
-                  <Chat key={id} id={id} />
+                  <Chat key={id} id={id} onDirectoryChange={refreshDirectory} />
                 </Suspense>
               </>
             ) : (
