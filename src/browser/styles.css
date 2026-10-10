@@ -80,7 +80,11 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply m-0 bg-background font-sans text-foreground antialiased;
+    @apply m-0 bg-background font-sans font-medium text-foreground antialiased;
+  }
+  pre,
+  code {
+    @apply font-normal;
   }
   button:not(:disabled),
   summary {
@@ -94,6 +98,10 @@
   }
 }
 /* Small appearance adjustments; native OpenUI state and actions remain intact. */
+/* OpenUI inline code uses body font tokens; keep it independent of prose weight. */
+.generated-panel :is(pre, code) {
+  font-weight: 400;
+}
 .generated-panel .openui-card-sunk {
   box-shadow: none;
 }

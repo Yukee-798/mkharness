@@ -265,7 +265,7 @@ test('reasoning streams before the answer, finishes honestly and survives histor
     await expect
       .poll(() =>
         disclosure
-          .locator('[data-slot="trace-marker"]')
+          .locator('[data-slot="disclosure-chevron"]')
           .evaluate((element) => getComputedStyle(element).rotate),
       )
       .toBe('90deg');

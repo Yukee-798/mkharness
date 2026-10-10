@@ -4,10 +4,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { ChevronRightIcon } from 'lucide-react';
 import { CollapsibleTrigger } from './ui/collapsible';
 import { ShimmerLabel } from './surfaces';
-import { traceRowClass } from './trace';
+import { DisclosureChevron, traceRowClass } from './trace';
 import { cn } from './ui/utils';
 import {
   ToolFallbackRoot,
@@ -62,11 +61,8 @@ export function ToolCall({
         <ShimmerLabel active={running} className="shrink-0 font-mono">
           {running ? activeLabel : label}
         </ShimmerLabel>
-        <span className="min-w-0 truncate text-muted-foreground/70">{query}</span>
-        <ChevronRightIcon
-          data-slot="tool-call-chevron"
-          className="size-3.5 shrink-0 opacity-60 transition-transform duration-200 group-data-open/trigger:rotate-90 motion-reduce:transition-none"
-        />
+        {query && <span className="min-w-0 truncate text-muted-foreground/70">{query}</span>}
+        <DisclosureChevron data-slot="tool-call-chevron" />
       </CollapsibleTrigger>
       <ToolFallbackContent>
         <p className="text-xs text-muted-foreground">请求参数</p>

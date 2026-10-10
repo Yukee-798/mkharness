@@ -256,7 +256,7 @@ function Workspace({ name }: { name: string }) {
               <Button
                 variant="ghost"
                 aria-current={id === item.id ? 'page' : undefined}
-                className="h-auto min-w-0 flex-1 justify-start gap-2 px-2 py-2.5 text-left font-normal aria-[current=page]:font-medium"
+                className="h-auto min-w-0 flex-1 justify-start gap-2 px-2 py-2.5 text-left font-medium aria-[current=page]:font-semibold"
                 onClick={() => choose(item.id)}
               >
                 <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
@@ -365,7 +365,7 @@ function AccountMenu({
         <Button
           variant="ghost"
           className={cn(
-            'h-12 w-full justify-start gap-3 px-2 font-normal',
+            'h-12 w-full justify-start gap-3 px-2 font-medium',
             collapsed && 'justify-center px-0',
           )}
           aria-label={`账号：${name}`}

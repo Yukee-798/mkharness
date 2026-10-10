@@ -1,8 +1,9 @@
 // Source: https://github.com/assistant-ui/assistant-ui/tree/main/apps/docs/components/pages/home/demo/trace.tsx
 // Copyright (c) 2026 AgentbaseAI Inc. (MIT); see THIRD_PARTY_NOTICES.md.
-// TraceMarker and TraceLine: apps/docs/components/shared/trace-line.tsx.
+// TraceLine: apps/docs/components/shared/trace-line.tsx; disclosure affordances adapted locally.
 import type { ReactNode } from 'react';
 import type { ComponentProps } from 'react';
+import { ChevronRightIcon } from 'lucide-react';
 import { ShimmerLabel } from './surfaces';
 import { CollapsibleTrigger } from './ui/collapsible';
 import { cn } from './ui/utils';
@@ -10,25 +11,24 @@ import { cn } from './ui/utils';
 // The parent owns spacing between traces; all collapsed rows share the same height.
 export const traceRowClass = 'flex items-center gap-2 py-1 leading-5';
 
-/**
- * The mark every trace line carries. A disclosure rotates it and a plain line
- * does not, so the two read as the same grammar rather than two symbols; it
- * stays a glyph rather than an icon because an icon on a line that cannot open
- * reads as an affordance.
- */
-export function TraceMarker({ live, className }: { live: boolean; className?: string }): ReactNode {
+// Keep space reserved when hidden so hover/focus never moves the label or source.
+export function DisclosureChevron({
+  className,
+  ...props
+}: ComponentProps<typeof ChevronRightIcon>): ReactNode {
   return (
-    <span
-      aria-hidden
-      data-slot="trace-marker"
+    <ChevronRightIcon
+      aria-hidden="true"
+      data-slot="disclosure-chevron"
       className={cn(
-        'inline-block shrink-0 transition-transform',
-        live ? 'text-blue-500' : 'text-muted-foreground/50',
+        'size-3.5 shrink-0 opacity-0 transition-[opacity,rotate] duration-200 motion-reduce:transition-none',
+        'group-hover/trigger:opacity-60 group-focus-visible/trigger:opacity-60',
+        'group-data-open/trigger:opacity-60 group-data-panel-open/trigger:opacity-60',
+        'group-data-open/trigger:rotate-90 group-data-panel-open/trigger:rotate-90',
         className,
       )}
-    >
-      {'>'}
-    </span>
+      {...props}
+    />
   );
 }
 
@@ -45,7 +45,6 @@ export function TraceLine({
 }): ReactNode {
   return (
     <div className={cn('font-mono text-[12px] [font-variant-ligatures:none]', traceRowClass)}>
-      <TraceMarker live={live} />
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
         {live ? (
           <ShimmerLabel>
@@ -80,16 +79,12 @@ export function DisclosureTrigger({
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
       className={cn(
-        'group/trigger max-w-full text-left font-mono text-[12px] outline-none [font-variant-ligatures:none] focus-visible:underline',
+        'group/trigger w-fit max-w-full text-left font-mono text-[12px] outline-none [font-variant-ligatures:none] focus-visible:underline',
         traceRowClass,
         className,
       )}
       {...props}
     >
-      <TraceMarker
-        live={live}
-        className="group-data-open/trigger:rotate-90 group-data-panel-open/trigger:rotate-90"
-      />
       <span className="text-muted-foreground group-hover/trigger:text-foreground min-w-0 truncate transition-colors">
         {live ? (
           <ShimmerLabel>
@@ -103,6 +98,7 @@ export function DisclosureTrigger({
           </>
         )}
       </span>
+      <DisclosureChevron />
     </CollapsibleTrigger>
   );
 }
