@@ -97,6 +97,23 @@ export function fixtureModels() {
           },
         },
       ];
+    if (
+      text?.includes('invalid_program') &&
+      context.messages.filter((m) => m.role === 'toolResult' && m.toolName === 'prepare_program')
+        .length >= 3
+    ) {
+      content =
+        last?.role === 'toolResult' && last.toolName === 'describe_text'
+          ? [{ type: 'text', text: 'UI failed; ordinary tool still works.' }]
+          : [
+              {
+                type: 'toolCall',
+                id: 'same-call',
+                name: 'describe_text',
+                arguments: { text: 'abc' },
+              },
+            ];
+    }
     if (text?.includes('multiple_text_blocks'))
       content = [
         { type: 'text', text: 'First section' },

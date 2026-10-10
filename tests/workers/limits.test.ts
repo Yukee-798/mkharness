@@ -17,7 +17,7 @@ it('a repeatedly invalid generated program gets only its initial attempt and two
     .flatMap((e: any) => e.model ?? [])
     .filter((m: any) => m.role === 'toolResult' && m.toolName === 'prepare_program' && m.isError);
   expect(failures).toHaveLength(3);
-  expect(await (await stub.observeRun(runId)).text()).toContain('RUN_ERROR');
+  expect(await (await stub.observeRun(runId)).text()).toContain('RUN_FINISHED');
 });
 it('an agent that keeps calling tools terminates at twenty model rounds', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID()),

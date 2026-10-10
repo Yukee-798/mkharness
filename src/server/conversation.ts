@@ -3,6 +3,7 @@ import { LifecycleCapability } from 'agents/lifecycle';
 import { PiHarness } from 'agents/harness/pi';
 import {
   Harness,
+  ROOT_CONVERSATION_ID,
   createRegistry,
   type Cursor,
   type Extension,
@@ -11,9 +12,10 @@ import {
 import type { Models } from '@earendil-works/pi-ai/models';
 import { AppError, commandSchema, USER_ACTION_CONTEXT, type RunCommand } from '../shared/contracts';
 import { jsonText, canonicalJson } from '../shared/compute';
-import { webTools } from './web';
-import { runLimits, withRunLimits } from './limits';
-import { panelTools, validateUI } from './panel-tools';
+import { applicationExtensions } from './assembly';
+import { validateExtensions } from './extensions';
+import { withRunLimits } from './limits';
+import { validateUI } from './panel-tools';
 import { successfulTool } from '../shared/references';
 import { observeRun } from './observe';
 import { browserEntries } from '../shared/stream';
@@ -75,8 +77,10 @@ export class ConversationAgent extends Agent<Env> {
       defaults: { model: { provider: env.MODEL_PROVIDER, id: env.MODEL_ID } },
       harness: async ({ storage, context }) => {
         const registry = createRegistry();
-        for (const extension of this.extensions()) registry.install(extension);
-        return Harness.open(
+        const extensions = await this.extensions();
+        validateExtensions(extensions);
+        for (const extension of extensions) registry.install(extension);
+        const pi = await Harness.open(
           storage,
           {
             models: withRunLimits(
@@ -94,6 +98,11 @@ export class ConversationAgent extends Agent<Env> {
           },
           context,
         );
+        // Native Pi leaves incompatible definitions blocked. Settle them explicitly on deployment
+        // recovery so unsupported work cannot hold the conversation in a permanent running state.
+        for (const task of (await pi.inspect(context)).tasks)
+          if (task.state.kind === 'blocked') await pi.abortTask(task.record.id, context);
+        return pi;
       },
     });
     this.recovery = new RequestRecovery(this);
@@ -142,12 +151,8 @@ export class ConversationAgent extends Agent<Env> {
       );
     return { model, thinkingLevel: selection.thinkingLevel };
   }
-  protected extensions(): Extension[] {
-    return [
-      panelTools(() => this.allEntries()),
-      webTools((this.env as Env & { TAVILY_API_KEY?: string }).TAVILY_API_KEY),
-      runLimits(() => this.allEntries()),
-    ];
+  protected extensions(): Extension[] | Promise<Extension[]> {
+    return applicationExtensions(this.env, () => this.allEntries());
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.admission.then(fn);
@@ -220,6 +225,7 @@ export class ConversationAgent extends Agent<Env> {
         throw new AppError(409, 'request_conflict');
       if (record?.accepted === -1) throw new AppError(409, 'request_withdrawn');
       if (!record) {
+        await this.root();
         if (command.source) {
           if (command.source.action !== 'continue_analysis')
             throw new AppError(400, 'invalid_action');
@@ -410,6 +416,15 @@ export class ConversationAgent extends Agent<Env> {
     const pi = await this.harness.pi();
     const inspection = await pi.inspect(BG);
     const pending = await this.harness.pending({ session: '1' });
+    const terminalTasks = await pi.commit(
+      (tx) =>
+        tx.scanTasks(
+          { conversationId: ROOT_CONVERSATION_ID, status: 'terminal', order: 'descending' },
+          100,
+          undefined,
+        ),
+      BG,
+    );
     const history = await this.history(cursor);
     const modelCatalog = this.modelCatalog();
     const lastRequest = this.rows<{ payload: string }>(
@@ -431,6 +446,9 @@ export class ConversationAgent extends Agent<Env> {
       stopping: this.stopping,
       modelCatalog,
       selection,
+      runtimeIssues: terminalTasks.items
+        .filter((t) => t.state.status === 'terminal' && t.state.outcome.status === 'orphaned')
+        .map((t) => ({ taskId: Number(t.id), code: 'task_definition_unavailable' })),
       tools: inspection.tasks
         .filter((t) => t.record.kind === 'pi.tool')
         .map((t) => ({ taskId: Number(t.record.id) })),

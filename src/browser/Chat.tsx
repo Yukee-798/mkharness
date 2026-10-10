@@ -39,6 +39,7 @@ import { ModelPicker } from './model-picker';
 import type { ModelCatalog, ModelSelection } from '../shared/model-selection';
 import { TooltipIconButton } from './tooltip-icon-button';
 import { ToolCall } from './tool-call';
+import { toolResults } from './tool-results';
 import { ToolGroupRoot, ToolGroupContent } from './tool-group';
 import { DisclosureTrigger, disclosureContentClass, TraceLine } from './trace';
 import {
@@ -499,7 +500,8 @@ function Tool(part: ToolCallMessagePartProps) {
       </>
     );
   }
-  return <ToolActivity part={part} />;
+  const Result = toolResults[part.toolName];
+  return Result ? <Result {...part} /> : <ToolActivity part={part} />;
 }
 function ToolActivity({ part }: { part: ToolCallMessagePartProps }) {
   const [open, setOpen] = useState(false);

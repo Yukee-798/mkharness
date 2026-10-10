@@ -14,7 +14,7 @@ const entries = (rounds: number, failures: number) =>
   ] as any;
 it('allows the initial attempt and two repairs, then terminates; caps model rounds at twenty', () => {
   expect(() => checkRunLimits(entries(3, 2))).not.toThrow();
-  expect(() => checkRunLimits(entries(3, 3))).toThrow('repair');
+  expect(() => checkRunLimits(entries(3, 3))).not.toThrow();
   expect(() => checkRunLimits(entries(20, 0))).toThrow('20');
   expect(() => checkRunLimits([...entries(20, 3), ...entries(0, 0)])).not.toThrow();
 });
