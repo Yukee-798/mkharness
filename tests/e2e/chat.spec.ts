@@ -77,6 +77,7 @@ test('a genuine streaming response renders an inert native preview before the to
   const { createServer } = await import('node:http');
   let finish = () => {},
     reveal = () => {},
+    started = false,
     committed = false;
   const ui =
     'root = Stack([Text("text","Streamed native preview"),Button("Analyze",Action([@ToAssistant("Analyze")]))])';
@@ -141,6 +142,7 @@ test('a genuine streaming response renders an inert native preview before the to
       emit({ type: 'RUN_FINISHED', threadId: 'a', runId });
       res.end();
     };
+    started = true;
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const port = (server.address() as any).port;
@@ -192,8 +194,9 @@ test('a genuine streaming response renders an inert native preview before the to
       return route.fulfill({ status: 404 });
     });
     await page.goto('/tests/browser/chat.html');
-    await expect(page.getByText('正在生成交互界面…', { exact: true })).toBeVisible();
-    await expect(page.getByText('正在生成交互界面…', { exact: true })).toHaveCount(1);
+    await expect.poll(() => started).toBe(true);
+    // Internal preparation has no user-facing loading copy; native content still streams.
+    await expect(page.getByText('正在生成交互界面…', { exact: true })).toHaveCount(0);
     await expect(page.getByText('internal computation', { exact: false })).toHaveCount(0);
     reveal();
     await expect(page.getByText('Streamed native preview', { exact: true })).toBeVisible();

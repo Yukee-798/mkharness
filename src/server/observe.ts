@@ -38,6 +38,9 @@ export async function observeRun(
   });
   const initialRemote = (await pi.snapshot(RemoteIntents, root.id, BG))?.operations ?? {};
   const fold = new StreamFold();
+  // A committed snapshot must update the draft already visible in this observation.
+  // Pi entry ids remain authoritative in storage and on the next attachment.
+  const liveMessageIds = new Map<string, string>();
   let draft = 0,
     active = false,
     ended = false;
@@ -62,7 +65,10 @@ export async function observeRun(
       const history = () =>
         emit({
           type: EventType.MESSAGES_SNAPSHOT,
-          messages: toMessages([...entries.values()].sort((a, b) => Number(a.id) - Number(b.id))),
+          messages: toMessages(
+            [...entries.values()].sort((a, b) => Number(a.id) - Number(b.id)),
+            liveMessageIds,
+          ),
         } as BaseEvent);
       const state = () =>
         emit({
@@ -101,6 +107,16 @@ export async function observeRun(
       };
       const publish = (complete = false) => {
         if (!fold.current) return;
+        // assistant-ui starts a distinct message on TEXT_MESSAGE_START, including rounds
+        // containing only reasoning/tools. Start before reasoning so it belongs to this round.
+        if (textPrefix === undefined) {
+          emit({
+            type: EventType.TEXT_MESSAGE_START,
+            messageId: `draft:${runId}:${draft}`,
+            role: 'assistant',
+          } as BaseEvent);
+          textPrefix = '';
+        }
         // Reasoning is model-provided text, not a synthesized status message. Opaque/redacted
         // blocks and provider signatures stay in Pi history and never enter the browser stream.
         for (const [index, previous] of reasoning) {
@@ -141,14 +157,6 @@ export async function observeRun(
         }
         const blocks = fold.current.content.filter((b) => b.type === 'text');
         if (blocks.length) {
-          if (textPrefix === undefined) {
-            emit({
-              type: EventType.TEXT_MESSAGE_START,
-              messageId: `draft:${runId}:${draft}`,
-              role: 'assistant',
-            } as BaseEvent);
-            textPrefix = '';
-          }
           const next = blocks.map((b) => b.text).join('\n');
           if (!next.startsWith(textPrefix)) {
             reset();
@@ -231,10 +239,15 @@ export async function observeRun(
               fold.accept(event);
               publish();
             } else if (event.type === 'message_end' && active) {
-              const message = event.entry.model?.find((m) => m.role === 'assistant');
+              const index = event.entry.model?.findIndex((m) => m.role === 'assistant') ?? -1;
+              const message = event.entry.model?.[index];
               if (message?.role === 'assistant') {
                 fold.accept({ type: 'message_start', message });
                 publish(true);
+                liveMessageIds.set(
+                  index ? `${event.entry.id}:${index}` : String(event.entry.id),
+                  `draft:${runId}:${draft}`,
+                );
               }
               fold.current = undefined;
               entries.set(Number(event.entry.id), event.entry);

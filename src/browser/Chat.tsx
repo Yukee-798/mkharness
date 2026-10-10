@@ -681,13 +681,6 @@ function ToolActivity({ part }: { part: ToolCallMessagePartProps }) {
     />
   );
 }
-function GenerationProgress() {
-  return (
-    <div role="status">
-      <TraceLine live label="正在生成交互界面…" />
-    </div>
-  );
-}
 function AssistantText(part: TextMessagePartProps) {
   const internal = useAuiState((s) =>
     s.message.content.some(
@@ -752,7 +745,6 @@ function Assistant() {
       data-trace-tail={traceTail || generating}
       className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[trace-tail=true]:mb-2 has-[+[data-slot=assistant-message]]:mb-2"
     >
-      {generating && <GenerationProgress />}
       <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
         {({ part, children }) => {
           switch (part.type) {

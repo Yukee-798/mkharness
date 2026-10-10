@@ -46,6 +46,46 @@ it('starts each streamed assistant message once when Pi has multiple text blocks
   ).toBe('First section\nSecond section');
 });
 
+it('committed snapshots retain streamed identities across tool-only model rounds', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const runId = crypto.randomUUID();
+  await stub.submitRun({ runId, text: 'slow panel' });
+  const events = (await (await stub.observeRun(runId)).text())
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => JSON.parse(line.slice(6)));
+  const starts = events.filter((event) => event.type === 'TOOL_CALL_START');
+  expect(starts).toHaveLength(2);
+  // The fixture deliberately reuses the provider call id in the next model round.
+  expect(starts[0].toolCallId).not.toBe(starts[1].toolCallId);
+  for (const start of starts) {
+    const messageStart = events.findIndex(
+      (event) => event.type === 'TEXT_MESSAGE_START' && event.messageId === start.parentMessageId,
+    );
+    expect(messageStart).toBeGreaterThanOrEqual(0);
+    expect(messageStart).toBeLessThan(events.indexOf(start));
+    const committed = events
+      .filter((event) => event.type === 'MESSAGES_SNAPSHOT')
+      .flatMap((event) => event.messages)
+      .filter(
+        (message: any) =>
+          message.role === 'assistant' &&
+          message.toolCalls?.some((call: any) => call.id === start.toolCallId),
+      );
+    expect(committed.length).toBeGreaterThan(0);
+    expect(committed.every((message: any) => message.id === start.parentMessageId)).toBe(true);
+    expect(
+      events
+        .filter((event) => event.type === 'MESSAGES_SNAPSHOT')
+        .flatMap((event) => event.messages)
+        .some((message: any) => message.role === 'tool' && message.toolCallId === start.toolCallId),
+    ).toBe(true);
+  }
+  // A fresh attachment restores canonical history, without retaining a previous stream alias.
+  const restored = await (await stub.observeRun(runId)).text();
+  expect(restored).not.toContain('draft:');
+});
+
 it('streams reasoning before completion and restores it from committed history without signatures', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   const runId = crypto.randomUUID();

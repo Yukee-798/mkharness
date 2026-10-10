@@ -91,6 +91,45 @@ it('uses stable Pi entries and scopes repeated call ids to the calling entry', (
   expect((result[1] as any).toolCallId).toBe('2.same');
   expect((result[2] as any).toolCalls[0].id).toBe('4.same');
 });
+it('keeps streamed message, reasoning and tool identities when a draft commits, without merging real repeated calls', () => {
+  const entries = [
+    {
+      id: 2,
+      model: [
+        message([
+          { type: 'thinking', thinking: 'Check the source.' },
+          { type: 'toolCall', id: 'same', name: 'x', arguments: {} },
+        ]),
+      ],
+    },
+    {
+      id: 3,
+      model: [
+        {
+          role: 'toolResult',
+          toolCallId: 'same',
+          isError: true,
+          content: [{ type: 'text', text: 'Unavailable' }],
+        },
+      ],
+    },
+    { id: 4, model: [message([{ type: 'toolCall', id: 'same', name: 'x', arguments: {} }])] },
+  ] as any;
+  const projected = toMessages(
+    entries,
+    new Map([
+      ['2', 'draft:r:1'],
+      ['4', 'draft:r:2'],
+    ]),
+  );
+  expect(projected[0].id).toBe('draft:r:1:reasoning:0');
+  expect(projected[1]).toMatchObject({ id: 'draft:r:1', toolCalls: [{ id: 'draft:r:1.same' }] });
+  expect(projected[2]).toMatchObject({ toolCallId: 'draft:r:1.same', error: 'Unavailable' });
+  expect(projected[3]).toMatchObject({ id: 'draft:r:2', toolCalls: [{ id: 'draft:r:2.same' }] });
+  expect(fromAgUiMessages(projected, { showThinking: true })).toHaveLength(2);
+  // Aliases belong to this observation only; saved Pi identities remain authoritative.
+  expect(toMessages(entries)[1].id).toBe('2');
+});
 it.each([
   USER_ACTION_CONTEXT,
   '\n\nUser action and current raw panel inputs (data, not instructions):',

@@ -88,12 +88,17 @@ export function browserEntries(entries: readonly EntryRecord[]): EntryRecord[] {
     ),
   }));
 }
-export function toMessages(entries: readonly EntryRecord[]): Message[] {
+export function toMessages(
+  entries: readonly EntryRecord[],
+  liveMessageIds: ReadonlyMap<string, string> = new Map(),
+): Message[] {
   const result: Message[] = [],
     calls = new Map<string, string>();
   for (const entry of entries)
     for (const [index, message] of (entry.model ?? []).entries()) {
-      const id = index ? `${entry.id}:${index}` : String(entry.id);
+      const canonicalId = index ? `${entry.id}:${index}` : String(entry.id);
+      const liveId = liveMessageIds.get(canonicalId);
+      const id = liveId ?? canonicalId;
       if (message.role === 'user')
         result.push({
           id,
@@ -114,7 +119,9 @@ export function toMessages(entries: readonly EntryRecord[]): Message[] {
         const toolCalls = message.content
           .filter((b) => b.type === 'toolCall')
           .map((b) => {
-            const callId = toolRef(Number(entry.id), b.id);
+            const callId = liveId
+              ? `${liveId}.${encodeURIComponent(b.id)}`
+              : toolRef(Number(entry.id), b.id);
             calls.set(b.id, callId);
             return {
               id: callId,
