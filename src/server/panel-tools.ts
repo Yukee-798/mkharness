@@ -13,6 +13,7 @@ import { toolRef, successfulTool } from '../shared/references';
 import { jsonText, jsonEqual, finiteJson, type Program, type Json } from '../shared/compute';
 import { computeProgram } from './compute';
 import { validateSlider } from '../shared/slider';
+import { UI_ACTION_RULE, validateUIActions } from '../shared/ui-actions';
 function difference(
   expected: Json | undefined,
   actual: Json | undefined,
@@ -81,8 +82,11 @@ export async function validateUI(ui: string, hasProgram: boolean) {
     parsed.meta.errors.length
   )
     throw new Error('Invalid OpenUI: ' + JSON.stringify(parsed.meta));
+  validateUIActions(parsed);
   if (parsed.mutationStatements.length)
-    throw new Error('Mutation is not available; use the continue_analysis host action');
+    throw new Error(
+      'Mutation is not available; use Action([@ToAssistant(...)]) for an agent request',
+    );
   for (const query of parsed.queryStatements) {
     if (!hasProgram || query.toolAST?.k !== 'Str' || query.toolAST.v !== 'run_program')
       throw new Error('Only the bound run_program Query is available');
@@ -208,8 +212,9 @@ export function panelTools(
             bindings: true,
             tools: ['run_program'],
             additionalRules: [
+              UI_ACTION_RULE,
               'For explanations longer than a brief answer, recommendations, comparisons, plans and data exploration, show the answer with present_openui instead of a lengthy Markdown answer followed by an offer to create UI. Use native cards, tables, steps, charts and images to organize the answer, with concise supporting text. Static explanations and clarification forms need neither programRef nor Query: use present_openui directly. For complex computation, first prepare_program and wait for success, then present_openui referencing its programRef. This does not wait for a browser.',
-              'For clarification, use Form(name,buttons,fields) and FormControl(label,input,hint) with native RadioGroup or Select for single choice, CheckBoxGroup for multiple choice, and Input or TextArea for other details. Form buttons must be Buttons([Button(...)]) rather than a bare Button. Bind answers to declared $variables so edits persist. RadioGroup value is a string; CheckBoxGroup value is an object mapping item names to booleans, not an array. Leave unanswered choices empty unless the user has already supplied them; never set defaultChecked:true merely because an option is recommended. Use rules to mark genuinely required fields. Provide an explicit submit Button with Action([@ToAssistant("Continue using my answers")]); use the user\'s language for its label and message. Local selection and editing must not invoke the Agent; only explicit submission does. The host includes the click-time raw bindings and form state with the new request, so do not hardcode selections into the action message or invent a submit tool. Treat that state as the user\'s answers, then continue without asking the same questions again.',
+              'For clarification, use Form(name,buttons,fields) and FormControl(label,input,hint) with native RadioGroup or Select for single choice, CheckBoxGroup for multiple choice, and Input or TextArea for other details. Form buttons must be Buttons([Button(...)]) rather than a bare Button. Bind answers to declared $variables so edits persist. RadioGroup value is a string; CheckBoxGroup value is an object mapping item names to booleans, not an array. Leave unanswered choices empty unless the user has already supplied them; never set defaultChecked:true merely because an option is recommended. Use rules to mark genuinely required fields. Provide an explicit submit Button with Action([@ToAssistant("Continue using my answers")]); use the user\'s language for its label and message. Local selection and editing must not invoke the Agent; only explicit submission does. The host includes click-time raw bindings and form state as source.state and the action context/selected card details as source.params (finite JSON, at most 16 KiB) with the new request, so do not hardcode selections into the action message or invent a submit tool. Treat this state and context as the user\'s answers, then continue without asking the same questions again.',
               'Use appropriate visual components, not just a long paragraph placed in a card. Charts must represent actual data or clearly labeled assumptions, with units and sources. Use Image, ImageBlock, ImageGallery or ImageText only with real image URLs supplied by the user or available in trustworthy source data; include meaningful alt text and source context. There is no image generation or image search tool in this application. When no usable image source is available, use native steps, comparisons, tables or other suitable visuals instead of inventing image URLs.',
               'Use the smallest useful composition: a static explanation usually needs only a few sections, such as a key distinction, a comparison table and an example. Do not expand every answer into a dashboard. For qualitative topics use comparisons or diagrams rather than inventing numeric scores or radar charts, unless the user explicitly requests a hypothetical scoring model. Follow component signatures exactly. Card children must be component nodes, not nested arrays; flatten the nodes or wrap a list in Stack. Avoid trailing commas in component argument lists.',
               'Content with a programRef MUST declare a Query("run_program",inputs,fallback). Declare editable inputs as $variables seeded from initialInputs or submitted source.state; bind controls to those variables using the catalog signatures, and include them in Query arguments. Display computed values from the Query result, not copied constants from the initial result. The fallback must match the output shape. Query result variables are ordinary identifiers, not $bindings.',

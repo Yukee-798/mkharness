@@ -1,5 +1,109 @@
 import { test, expect } from '@playwright/test';
 
+test('native links open safely during the click without submitting an agent request', async ({
+  page,
+}) => {
+  const ui =
+    'root=ListBlock([ListItem("Video A","Source example.com",null,"观看",Action([@OpenUrl("https://example.com/video/1")]))],"number")';
+  await page.addInitScript(() => {
+    (window as any).openedUrls = [];
+    window.open = (url, target, features) => {
+      (window as any).openedUrls.push({
+        url,
+        target,
+        features,
+        active: navigator.userActivation.isActive,
+      });
+      return null;
+    };
+  });
+  await page.route('**/api/conversations/test/panels/**', (route) =>
+    route.fulfill({ json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 } }),
+  );
+  await page.goto('/tests/browser/panel.html');
+  await page.getByRole('region', { name: 'Interactive answer' }).first().getByText('观看').click();
+  expect(await page.evaluate(() => (window as any).openedUrls)).toEqual([
+    {
+      url: 'https://example.com/video/1',
+      target: '_blank',
+      features: 'noopener,noreferrer',
+      active: true,
+    },
+  ]);
+  expect(await page.evaluate(() => (window as any).submissions)).toEqual([]);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('native assistant actions retain click-time context and inputs', async ({ page }) => {
+  const ui =
+    '$choice="A"\nroot=Stack([Input("choice","Choice","text",null,$choice),Button("Explain",Action([@ToAssistant("Explain this choice","Selected item: B")]))])';
+  await page.route('**/api/conversations/test/panels/**', (route) =>
+    route.fulfill({ json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 } }),
+  );
+  await page.goto('/tests/browser/panel.html');
+  const panel = page.getByRole('region', { name: 'Interactive answer' }).first();
+  await panel.getByPlaceholder('Choice').fill('B');
+  await panel.getByRole('button', { name: 'Explain' }).click();
+  expect(await page.evaluate(() => (window as any).submissions[0])).toEqual({
+    text: 'Explain this choice',
+    source: {
+      panelRef: '2.same',
+      action: 'continue_analysis',
+      state: { $choice: 'B' },
+      params: { context: 'Selected item: B' },
+    },
+  });
+});
+
+test('checks dynamic, row and legacy links on click while preserving local Set and Reset', async ({
+  page,
+}) => {
+  // Mock loading bypasses publication so the browser guard faces adversarial content too.
+  const ui = [
+    '$url="https://example.com/initial"',
+    'rows=[{title:"Safe row",url:"https://example.com/row"},{title:"Unsafe row",url:"javascript:alert(1)"}]',
+    'root=Stack([Input("url","URL","text",null,$url),Button("Dynamic",Action([@OpenUrl($url)])),Button("Legacy",{type:"open_url",url:$url}),Button("Object step",Action([{type:"open_url",url:$url}])),ListBlock(@Each(rows,"r",ListItem(r.title,null,null,"Open",Action([@OpenUrl(r.url)]))),"number"),Button("Preset",Action([@Set($url,"https://example.net/preset")])),Button("Reset",Action([@Reset($url)])),Button("Missing",{type:"open_url"}),Button("Unavailable",{type:"delete_record",params:{id:42}})])',
+  ].join('\n');
+  await page.addInitScript(() => {
+    (window as any).openedUrls = [];
+    window.open = (url) => {
+      (window as any).openedUrls.push(url);
+      return null;
+    };
+  });
+  await page.route('**/api/conversations/test/panels/**', (route) =>
+    route.fulfill({ json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 } }),
+  );
+  await page.goto('/tests/browser/panel.html');
+  const panel = page.getByRole('region', { name: 'Interactive answer' }).first();
+  await panel.getByPlaceholder('URL').fill('javascript:alert(1)');
+  for (const name of ['Dynamic', 'Legacy', 'Object step', 'Missing']) {
+    await panel.getByRole('button', { name, exact: true }).click();
+    await expect(panel.getByRole('alert')).toContainText('完整 HTTP 或 HTTPS 地址');
+  }
+  await panel.getByRole('button', { name: /Unsafe row/ }).click();
+  expect(await page.evaluate(() => (window as any).openedUrls)).toEqual([]);
+  await panel.getByRole('button', { name: /Safe row/ }).click();
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+  await panel.getByPlaceholder('URL').fill('https://example.org/current');
+  for (const name of ['Dynamic', 'Legacy', 'Object step'])
+    await panel.getByRole('button', { name, exact: true }).click();
+  expect(await page.evaluate(() => (window as any).openedUrls)).toEqual([
+    'https://example.com/row',
+    'https://example.org/current',
+    'https://example.org/current',
+    'https://example.org/current',
+  ]);
+  await panel.getByRole('button', { name: 'Preset', exact: true }).click();
+  await expect(panel.getByPlaceholder('URL')).toHaveValue('https://example.net/preset');
+  await panel.getByRole('button', { name: 'Reset', exact: true }).click();
+  await expect(panel.getByPlaceholder('URL')).toHaveValue('https://example.com/initial');
+  await panel.getByRole('button', { name: 'Unavailable', exact: true }).click();
+  await expect(panel.getByRole('alert')).toContainText('此操作暂不可用');
+  expect(await page.evaluate(() => (window as any).openedUrls.length)).toBe(4);
+  expect(await page.evaluate(() => (window as any).submissions)).toEqual([]);
+});
+
 test('native select portals share the application theme and preserve keyboard selection', async ({
   page,
 }) => {

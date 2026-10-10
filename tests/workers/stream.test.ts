@@ -58,12 +58,27 @@ it('committed snapshots retain streamed identities across tool-only model rounds
   expect(starts).toHaveLength(2);
   // The fixture deliberately reuses the provider call id in the next model round.
   expect(starts[0].toolCallId).not.toBe(starts[1].toolCallId);
+  const results = events.filter((event) => event.type === 'TOOL_CALL_RESULT');
+  expect(results.map((event) => event.toolCallId)).toEqual(starts.map((event) => event.toolCallId));
+  expect(new Set(results.map((event) => event.messageId)).size).toBe(results.length);
   for (const start of starts) {
     const messageStart = events.findIndex(
       (event) => event.type === 'TEXT_MESSAGE_START' && event.messageId === start.parentMessageId,
     );
     expect(messageStart).toBeGreaterThanOrEqual(0);
     expect(messageStart).toBeLessThan(events.indexOf(start));
+    const alias = events.findIndex(
+      (event) =>
+        event.type === 'STATE_SNAPSHOT' &&
+        Object.values(event.snapshot.messageIds).includes(start.parentMessageId),
+    );
+    const committedSnapshot = events.findIndex(
+      (event) =>
+        event.type === 'MESSAGES_SNAPSHOT' &&
+        event.messages.some((message: any) => message.id === start.parentMessageId),
+    );
+    expect(alias).toBeGreaterThan(messageStart);
+    expect(alias).toBeLessThan(committedSnapshot);
     const committed = events
       .filter((event) => event.type === 'MESSAGES_SNAPSHOT')
       .flatMap((event) => event.messages)
@@ -84,6 +99,7 @@ it('committed snapshots retain streamed identities across tool-only model rounds
   // A fresh attachment restores canonical history, without retaining a previous stream alias.
   const restored = await (await stub.observeRun(runId)).text();
   expect(restored).not.toContain('draft:');
+  expect(restored).not.toContain('TOOL_CALL_RESULT');
 });
 
 it('streams reasoning before completion and restores it from committed history without signatures', async () => {
@@ -117,6 +133,11 @@ it('streams reasoning before completion and restores it from committed history w
       .join(''),
   ).toBe('核对来源，再比较结果。');
   const reasoningEnd = events.findIndex((e) => e.type === 'REASONING_MESSAGE_END');
+  const reasoningStart = events.findIndex((e) => e.type === 'REASONING_MESSAGE_START');
+  const messageStart = events.findIndex((e) => e.type === 'TEXT_MESSAGE_START');
+  const reasoningContent = events.findIndex((e) => e.type === 'REASONING_MESSAGE_CONTENT');
+  expect(reasoningStart).toBeLessThan(messageStart);
+  expect(messageStart).toBeLessThan(reasoningContent);
   expect(reasoningEnd).toBeLessThan(events.findIndex((e) => e.type === 'TEXT_MESSAGE_CONTENT'));
   expect(events.at(-1).type).toBe('RUN_FINISHED');
   expect(await stub.snapshot()).not.toContain('fixture-private-signature');

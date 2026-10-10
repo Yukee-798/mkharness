@@ -4,8 +4,15 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       main: './tests/workers/entry.ts',
+      remoteBindings: false,
       miniflare: {
+        compatibilityDate: '2026-10-06',
+        compatibilityFlags: ['nodejs_compat'],
+        modulesRules: [{ type: 'CompiledWasm', include: ['**/*.wasm'], fallthrough: true }],
+        durableObjects: { CONVERSATIONS: { className: 'ConversationAgent', useSQLite: true } },
+        d1Databases: ['DB'],
         bindings: {
+          APP_URL: 'http://localhost:5173',
           MODEL_PROVIDER: 'fixture',
           MODEL_ID: 'fixture',
           BETTER_AUTH_SECRET: 'test-secret-is-long-and-only-in-fixtures-12345',
@@ -14,7 +21,6 @@ export default defineConfig({
           MODEL_API_KEY: 'fixture',
         },
       },
-      wrangler: { configPath: './wrangler.jsonc' },
     }),
   ],
   test: {

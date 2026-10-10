@@ -1,8 +1,16 @@
 import { AbstractAgent, runHttpRequest, transformHttpEventStream } from '@ag-ui/client';
-import { EventType, type RunAgentInput, type BaseEvent, type CustomEvent } from '@ag-ui/core';
+import {
+  EventType,
+  type RunAgentInput,
+  type BaseEvent,
+  type CustomEvent,
+  type MessagesSnapshotEvent,
+  type ToolCallResultEvent,
+} from '@ag-ui/core';
 import { Observable } from 'rxjs';
 import { parsePartialJsonObject } from 'assistant-stream/utils';
 import type { RemoteProgress } from '../shared/remote-progress';
+import { aliasMessages, messageAliases } from '../shared/stream';
 export class StreamReplaced extends Error {}
 export function partialUI(argsText: string) {
   const value = parsePartialJsonObject(argsText);
@@ -16,6 +24,7 @@ export class AttachAgent extends AbstractAgent {
     private replaced: () => void,
     private connected: () => void = () => {},
     private progress: (runId: string, value: RemoteProgress[]) => void = () => {},
+    private messageIds = new Map<string, string>(),
   ) {
     super({ threadId: conversationId });
   }
@@ -26,6 +35,7 @@ export class AttachAgent extends AbstractAgent {
       this.replaced,
       this.connected,
       this.progress,
+      this.messageIds,
     );
   }
   run(input: RunAgentInput) {
@@ -40,6 +50,7 @@ export class AttachAgent extends AbstractAgent {
       const controller = new AbortController();
       let terminal = false;
       let lastRevision = -1;
+      let references = new Map<string, string>();
       input.runId = config.runId;
       const runId = config.runId;
       input.threadId = this.conversationId;
@@ -55,9 +66,17 @@ export class AttachAgent extends AbstractAgent {
           if (event.type === EventType.STATE_SNAPSHOT) {
             const state = (
               event as BaseEvent & {
-                snapshot?: { runId?: string; remoteRevision?: number; remote?: RemoteProgress[] };
+                snapshot?: {
+                  runId?: string;
+                  remoteRevision?: number;
+                  remote?: RemoteProgress[];
+                  messageIds?: Record<string, string>;
+                };
               }
             ).snapshot;
+            if (state?.runId === runId && state.messageIds)
+              for (const [canonicalId, liveId] of Object.entries(state.messageIds))
+                if (!this.messageIds.has(canonicalId)) this.messageIds.set(canonicalId, liveId);
             if (
               state?.runId === runId &&
               Array.isArray(state.remote) &&
@@ -67,6 +86,20 @@ export class AttachAgent extends AbstractAgent {
               lastRevision = state.remoteRevision;
               this.progress(runId, state.remote);
             }
+          }
+          if (event.type === EventType.MESSAGES_SNAPSHOT) {
+            references = messageAliases((event as MessagesSnapshotEvent).messages, this.messageIds);
+            event = {
+              ...event,
+              messages: aliasMessages((event as MessagesSnapshotEvent).messages, this.messageIds),
+            } as MessagesSnapshotEvent;
+          }
+          if (event.type === EventType.TOOL_CALL_RESULT) {
+            const result = event as ToolCallResultEvent;
+            event = {
+              ...result,
+              toolCallId: references.get(result.toolCallId) ?? result.toolCallId,
+            };
           }
           if (event.type === EventType.RUN_STARTED) this.connected();
           if (event.type === EventType.CUSTOM && (event as CustomEvent).name === 'pi.reset') {

@@ -14,7 +14,13 @@ import type { Models } from '@earendil-works/pi-ai/models';
 import { AppError, commandSchema, USER_ACTION_CONTEXT, type RunCommand } from '../shared/contracts';
 import { jsonText, canonicalJson } from '../shared/compute';
 import { applicationExtensions } from './assembly';
-import { MCPBindings, buildMcp, mcpConfiguration, type MCPConfig } from './mcp';
+import {
+  MCPBindings,
+  buildMcp,
+  configureMcpStartup,
+  mcpConfiguration,
+  type MCPConfig,
+} from './mcp';
 import {
   RemoteIntents,
   remoteBlocked,
@@ -73,6 +79,11 @@ export class ConversationAgent extends Agent<Env> {
   private deleteWork?: Promise<void>;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    configureMcpStartup(
+      this.mcp,
+      () => this.mcpConfiguration(),
+      env as unknown as Record<string, unknown>,
+    );
     ctx.storage.sql.exec(
       'CREATE TABLE IF NOT EXISTS app_requests (id TEXT PRIMARY KEY,payload TEXT NOT NULL,accepted INTEGER NOT NULL DEFAULT 0)',
     );

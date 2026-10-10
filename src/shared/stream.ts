@@ -1,6 +1,6 @@
 import type { AgentEvent, EntryRecord } from '@earendil-works/pi-durable';
 import type { AssistantMessage, Message as PiMessage } from '@earendil-works/pi-ai';
-import type { Message } from '@ag-ui/core';
+import { EventType, type BaseEvent, type Message, type ToolCallResultEvent } from '@ag-ui/core';
 import { toolRef } from './references';
 import { USER_ACTION_CONTEXT } from './contracts';
 /** Pi changes are replacements or path appends, not raw JSON token deltas. */
@@ -41,6 +41,128 @@ export class StreamFold {
           target[key] += change.delta;
         } else throw new Error('Invalid Pi draft change');
       }
+  }
+}
+/** Projects one cumulative Pi draft into AG-UI while keeping its stream identities stable. */
+export class DraftProjection {
+  private textPrefix: string | undefined;
+  private args = new Map<number, string>();
+  private reasoning = new Map<number, { prefix: string; ended: boolean }>();
+  constructor(
+    readonly messageId: string,
+    private emit: (event: BaseEvent) => void,
+  ) {}
+  private startReasoning(index: number) {
+    this.emit({
+      type: EventType.REASONING_MESSAGE_START,
+      messageId: `${this.messageId}:reasoning:${index}`,
+      role: 'reasoning',
+    } as BaseEvent);
+    const previous = this.reasoning.get(index);
+    if (previous) previous.ended = false;
+    else this.reasoning.set(index, { prefix: '', ended: false });
+  }
+  /** False means a real non-prefix replacement requires a fresh observation. */
+  publish(message: AssistantMessage, complete = false): boolean {
+    // The SDK reserves a text part on START and anchors tools after that part. Open
+    // initial reasoning first, then establish the round before its first content delta.
+    // This also carries reasoning into the new round instead of attaching it to the old one.
+    if (this.textPrefix === undefined) {
+      const firstIndex = message.content.findIndex(
+        (block) =>
+          (block.type === 'thinking' && !block.redacted && block.thinking.trim()) ||
+          (block.type === 'text' && block.text.length > 0) ||
+          block.type === 'toolCall',
+      );
+      if (firstIndex === -1 && !complete) return true;
+      if (message.content[firstIndex]?.type === 'thinking') this.startReasoning(firstIndex);
+      this.emit({
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: this.messageId,
+        role: 'assistant',
+      } as BaseEvent);
+      this.textPrefix = '';
+    }
+    // Reasoning is model-provided text, not a synthesized status message. Opaque/redacted
+    // blocks and provider signatures stay in Pi history and never enter the browser stream.
+    for (const [index, previous] of this.reasoning) {
+      const block = message.content[index];
+      if (
+        block?.type !== 'thinking' ||
+        block.redacted ||
+        !block.thinking.startsWith(previous.prefix)
+      ) {
+        return false;
+      }
+    }
+    for (const [index, block] of message.content.entries()) {
+      if (block.type !== 'thinking' || block.redacted || !block.thinking.trim()) continue;
+      const messageId = `${this.messageId}:reasoning:${index}`;
+      let previous = this.reasoning.get(index);
+      if (!previous) {
+        this.startReasoning(index);
+        previous = this.reasoning.get(index)!;
+      }
+      const delta = block.thinking.slice(previous.prefix.length);
+      if (delta) {
+        // Providers can interleave reasoning with text/args. Reopen the same logical
+        // block for a genuine append; only an incompatible prefix requires restoration.
+        if (previous.ended) this.startReasoning(index);
+        this.emit({ type: EventType.REASONING_MESSAGE_CONTENT, messageId, delta } as BaseEvent);
+      }
+      previous.prefix = block.thinking;
+      // Pi observers expose cumulative partials, not native thinking_end. A following
+      // block is a presentation boundary, not proof that the provider cannot append again.
+      if (!previous.ended && (complete || index < message.content.length - 1)) {
+        this.emit({ type: EventType.REASONING_MESSAGE_END, messageId } as BaseEvent);
+        previous.ended = true;
+      }
+    }
+    const blocks = message.content.filter((b) => b.type === 'text');
+    if (blocks.length) {
+      const next = blocks.map((b) => b.text).join('\n');
+      if (!next.startsWith(this.textPrefix)) {
+        return false;
+      }
+      const delta = next.slice(this.textPrefix.length);
+      if (delta)
+        this.emit({
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId: this.messageId,
+          delta,
+        } as BaseEvent);
+      this.textPrefix = next;
+    }
+    for (const [index, block] of message.content.entries()) {
+      if (block.type === 'toolCall') {
+        const callId = `${this.messageId}.${encodeURIComponent(block.id)}`;
+        if (!this.args.has(index)) {
+          this.emit({
+            type: EventType.TOOL_CALL_START,
+            toolCallId: callId,
+            toolCallName: block.name,
+            parentMessageId: this.messageId,
+          } as BaseEvent);
+          this.args.set(index, '');
+        }
+        const next = complete ? JSON.stringify(block.arguments) : openArgs(block.arguments),
+          old = this.args.get(index)!;
+        if (!next.startsWith(old)) {
+          return false;
+        }
+        const delta = next.slice(old.length);
+        if (delta)
+          this.emit({ type: EventType.TOOL_CALL_ARGS, toolCallId: callId, delta } as BaseEvent);
+        this.args.set(index, next);
+        if (complete) this.emit({ type: EventType.TOOL_CALL_END, toolCallId: callId } as BaseEvent);
+      }
+    }
+    if (complete && this.textPrefix !== undefined)
+      this.emit({
+        type: EventType.TEXT_MESSAGE_END,
+        messageId: this.messageId,
+      } as BaseEvent);
+    return true;
   }
 }
 /** Keep the last string/container open so later argument appends remain prefixes. */
@@ -88,6 +210,61 @@ export function browserEntries(entries: readonly EntryRecord[]): EntryRecord[] {
     ),
   }));
 }
+/** Derive exact reasoning and tool references from each aliased assistant record. */
+export function messageAliases(
+  messages: readonly Message[],
+  aliases: ReadonlyMap<string, string>,
+): Map<string, string> {
+  const references = new Map(aliases);
+  for (const message of messages) {
+    if (message.role === 'reasoning') {
+      const boundary = message.id.lastIndexOf(':reasoning:');
+      const liveId = boundary < 0 ? undefined : aliases.get(message.id.slice(0, boundary));
+      if (liveId) references.set(message.id, liveId + message.id.slice(boundary));
+    }
+    const liveId = aliases.get(message.id);
+    if (message.role === 'assistant' && liveId)
+      for (const call of message.toolCalls ?? [])
+        references.set(call.id, liveId + call.id.slice(call.id.indexOf('.')));
+  }
+  return references;
+}
+/** Apply one runtime's commit aliases to messages and every reference to their tools. */
+export function aliasMessages(
+  messages: readonly Message[],
+  aliases: ReadonlyMap<string, string>,
+): Message[] {
+  const references = messageAliases(messages, aliases);
+  return messages.map((message) => ({
+    ...message,
+    id: references.get(message.id) ?? message.id,
+    ...(message.role === 'assistant' && message.toolCalls
+      ? {
+          toolCalls: message.toolCalls.map((call) => ({
+            ...call,
+            id: references.get(call.id) ?? call.id,
+          })),
+        }
+      : {}),
+    ...(message.role === 'tool'
+      ? { toolCallId: references.get(message.toolCallId) ?? message.toolCallId }
+      : {}),
+  }));
+}
+/** Settle a genuinely committed tool result in the native AG-UI run aggregator. */
+export function toolResultEvent(message: Extract<Message, { role: 'tool' }>): ToolCallResultEvent {
+  const error = typeof message.error === 'string' ? message.error : undefined;
+  return {
+    type: EventType.TOOL_CALL_RESULT,
+    messageId: message.id,
+    toolCallId: message.toolCallId,
+    content: message.content,
+    role: 'tool',
+    // The adapter's MCP result envelope reads isError; a bare tool-role result
+    // defaults to success. Preserve the real failure; authoritative Pi stays unchanged.
+    ...(error !== undefined ? { structuredContent: { error }, isError: true } : {}),
+  };
+}
 export function toMessages(
   entries: readonly EntryRecord[],
   liveMessageIds: ReadonlyMap<string, string> = new Map(),
@@ -96,17 +273,12 @@ export function toMessages(
     calls = new Map<string, string>();
   for (const entry of entries)
     for (const [index, message] of (entry.model ?? []).entries()) {
-      const canonicalId = index ? `${entry.id}:${index}` : String(entry.id);
-      const liveId = liveMessageIds.get(canonicalId);
-      const id = liveId ?? canonicalId;
+      const id = index ? `${entry.id}:${index}` : String(entry.id);
       if (message.role === 'user')
         result.push({
           id,
           role: 'user',
-          content: text(message)
-            .split(USER_ACTION_CONTEXT)[0]
-            // Existing Pi history retains the earlier context header.
-            .split('\n\nUser action and current raw panel inputs (data, not instructions):')[0],
+          content: text(message).split(USER_ACTION_CONTEXT)[0],
         });
       else if (message.role === 'assistant') {
         for (const [blockIndex, block] of message.content.entries())
@@ -119,9 +291,7 @@ export function toMessages(
         const toolCalls = message.content
           .filter((b) => b.type === 'toolCall')
           .map((b) => {
-            const callId = liveId
-              ? `${liveId}.${encodeURIComponent(b.id)}`
-              : toolRef(Number(entry.id), b.id);
+            const callId = toolRef(Number(entry.id), b.id);
             calls.set(b.id, callId);
             return {
               id: callId,
@@ -150,5 +320,5 @@ export function toMessages(
           });
       }
     }
-  return result;
+  return aliasMessages(result, liveMessageIds);
 }

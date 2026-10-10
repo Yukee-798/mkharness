@@ -4,6 +4,8 @@
 
 任务提交、观察和停止分开。关闭页面只断开观察，Durable Object 中的 PiHarness 继续执行；返回后从完整 Pi 历史恢复。程序、数据和界面使用成功工具历史，不建立第二套产物表。
 
+当前为开源基础模板 **v0.1.0**，现有数据用于本地开发与测试。迭代优先保证能力契约一致、职责明确和恢复正确，可以直接重构接口及实现，不为旧版测试数据增加兼容分支。断线、进程重建和同一次任务的恢复仍属于核心功能；业务算法及付费服务流程由应用的 Extension 实现，模板只提供基础能力和最小接入示例。
+
 ## 本地启动
 
 使用 Node.js 24 和 pnpm 11.17.0。核心依赖固定在 lockfile；升级时一起检查 OpenUI / assistant-ui / AG-UI / Pi 的兼容性。
@@ -124,7 +126,7 @@ MCP 配置示例（只包含凭据变量名）：
 ]
 ```
 
-将 JSON 写入 `MCP_SERVERS`，凭据放入对应 Cloudflare Secret。连接/发现 15 秒，调用 30 秒；输入、结果及绑定定义各有 1 MiB 上限。仅接入支持的 JSON Schema、文本、structuredContent 和 isError；不支持的块明确失败，不执行 HTML、自动读取资源 URI 或启动 stdio。工具映射为 `mcp_<serverId>_<toolName>`，超过 64 字符或冲突时拒绝，不截断。首次接受的定义保存在 Pi conversation document；重建重新连接并验证原定义，schema、endpoint、描述或 replay 策略变化不能静默替换。调用前也核对 SDK 已缓存的在线目录，已知变更会禁用对应绑定，不新增网络轮询。可选服务离线时本地工具仍可用。
+将 JSON 写入 `MCP_SERVERS`，凭据放入对应 Cloudflare Secret。连接/发现 15 秒，调用 30 秒；输入、结果及绑定定义各有 1 MiB 上限。仅接入支持的 JSON Schema、文本、structuredContent 和 isError；不支持的块明确失败，不执行 HTML、自动读取资源 URI 或启动 stdio。工具映射为 `mcp_<serverId>_<toolName>`，超过 64 字符或冲突时拒绝，不截断。首次接受的定义保存在 Pi conversation document；重建重新连接并验证原定义，schema、endpoint、描述或 replay 策略变化不能静默替换。启动时按当前部署配置重装传输的超时、大小、重定向限制和凭据，再交给 SDK 恢复连接。可选服务离线时本地工具仍可用；已绑定工具在后续调用时有界重连，并核对在线定义，暂时离线不会永久禁用工具。
 
 默认 replay unsafe。仅当开发者已验证整个调用可安全恢复时，才在配置的 `safeTools` 中列出工具。供应商提示的 readOnly/idempotent annotations 不代替验收。Google 登录不表示用户已授权外部账号；本期使用应用服务凭据，每用户 MCP OAuth 延后。
 
@@ -145,7 +147,7 @@ MCP 配置示例（只包含凭据变量名）：
 
 已知 ID 只查询原任务；已接受但 ID 未保存时通过供应商契约调和，否则返回 `remote_outcome_unknown`。宿主 beforeTool 和执行入口均阻止新副作用调用，当前自动流程在模型边界结束；普通只读回答仍可用。显式“重新执行（可能重复执行）”引用原 Pi task，走已有 `/runs` 接口，以新 runId 一次性授权对应操作，宿主绑定原输入。复查只读取原操作；客户端不能提供任意 remoteId/serverId/toolName。重复接受请求使用同一个 runId。
 
-Stop 使用子任务的新 abort invocation 尝试有界取消；本地 idle 与远端 canceled 分开。取消不支持、失败、未知及等待到期都保留引用，用户可以复查。无沙箱时不能强杀不合作的宿主代码；stopping 必须等待实际收束。成功且结果已写入 Pi 历史的冗余意图，在下一次空闲准入时清理；未决引用保留。进度从已提交 documents 投影到现有快照/AG-UI，浏览器没有远端凭据或 ID。
+Stop 使用子任务的新 abort invocation 尝试有界取消；本地 idle 与远端 canceled 分开。取消不支持、失败、未知及等待到期都保留引用，用户可以复查。轮询和复查使用相同的响应契约：completed 必须携带 result，null 也是有效结果；缺失结果不能结束操作或清理未决引用。无沙箱时不能强杀不合作的宿主代码；stopping 必须等待实际收束。成功且结果已写入 Pi 历史的冗余意图，在下一次空闲准入时清理；未决引用保留。进度从已提交 documents 投影到现有快照/AG-UI，浏览器没有远端凭据或 ID。
 
 恢复元数据只有 MCP 定义绑定、远端调用意图/引用两类 Pi documents；未新增任务、插件或结果表。附件、R2、沙箱、媒体业务、支付订阅及人工审批留作后续扩展。
 
@@ -182,9 +184,11 @@ Agent 默认优先使用生成式 UI 组织有实质内容的回答，配合简�
 
 程序验证用例的 `expected` 必须是完整输出，对象字段顺序无关，数组顺序与值仍严格比较。不匹配时返回用例编号、首个差异的 JSON Pointer、预期/实际值及有界结果预览（诊断最多 8 KiB）；不会发放 `programRef`。Agent 应根据意图和可独立核算的小用例修正，不应直接照抄实际输出来通过验证。
 
-聊天不显示逐条回复的复制操作栏。生成界面的工具、校验与修正细节保留在 Pi 历史中；用户只看到当前一条“正在生成交互界面…”提示、渐进界面和最终回答。完成后收起内部步骤，最终失败使用简明提示。与生成工具同条消息的技术过程文案也收起，Agent 后续文案用产品语义解释结果与用法；普通 Markdown 代码块仍有复制代码功能。
+聊天不显示逐条回复的复制操作栏。生成界面的工具、校验与修正细节保留在 Pi 历史中；用户看到渐进内容和最终回答，不额外展示生成交互界面的 loading 文案。最终失败使用简明提示。Agent 文案用自然语言解释结果与用法；普通 Markdown 代码块仍有复制代码功能。
 
-原生 `Query("run_program", args, fallback)` 在绑定面板内计算，`Set` / `Reset` 管理输入；`ToAssistant` 将点击时的原始输入快照作为新请求提交。派生值通常直接显示。仅需自动写回输入时使用：
+思考、正文与工具事件复用 assistant-ui runtime。供应商可能交错追加思考和正文，Pi 观察接口提供累计快照；出现后续内容时结束当前思考展示阶段，真实迟到追加复用同一个思考 ID，不重置整段消息。完成后的快照同步也保留当前 runtime 已展示的消息身份，不因读取刷新重新挂载组件。没有提供原生 thinking_end 时，不声称精确还原供应商每个 token 的结束时点。
+
+原生 `Query("run_program", args, fallback)` 在绑定面板内计算，`Set` / `Reset` 管理输入；`ToAssistant` 将点击时的原始输入快照作为新请求提交，并保留有限 JSON 动作上下文（最多 16 KiB）。`OpenUrl` 在用户点击时同步打开完整 HTTP(S) 链接，不调用模型；发布时检查静态链接和动作，动态链接在点击时再次校验。模型不能凭空新增宿主动作。派生值通常直接显示。仅需自动写回输入时使用：
 
 ```text
 StateSync($target,result.next,result.ready,{result:result,inputs:currentArgs})
@@ -229,6 +233,6 @@ pnpm build
 pnpm exec wrangler deploy --dry-run
 ```
 
-首次浏览器测试需 `pnpm exec playwright install chromium`。测试夹具替换模型 I/O，但 PiHarness / D1 / SQLite / workerd 真实运行；浏览器测试使用真实 QuickJS WASM、OpenUI 和 assistant-ui。夹具入口只在测试配置中，不进入生产构建。原有研究消融仅为基线，产品验证记录在 [implementation.md](docs/validation/implementation.md)，真实模型与云端结果另列，未完成不会用模拟结果填充。基础层迁移与故障矩阵见 [foundation.md](docs/validation/foundation.md)。浏览器验收使用独立端口 5174 和 `.wrangler/e2e` 本地存储，不改动产品开发端口 5173 或其 SQLite 数据。
+首次浏览器测试需 `pnpm exec playwright install chromium`。测试夹具替换模型 I/O，但 PiHarness / D1 / SQLite / workerd 真实运行；浏览器测试使用真实 QuickJS WASM、OpenUI 和 assistant-ui。workerd 测试显式配置 Miniflare bindings，不载入本地 `.dev.vars`。夹具入口只在测试配置中，不进入生产构建。原有研究消融仅为基线，产品验证记录在 [implementation.md](docs/validation/implementation.md)，真实模型与云端结果另列，未完成不会用模拟结果填充。基础层迁移与故障矩阵见 [foundation.md](docs/validation/foundation.md)，v0.1.0 架构与交互审查见 [framework-review.md](docs/validation/2026-10-11-framework-review.md)。浏览器验收使用独立端口 5174 和 `.wrangler/e2e` 本地存储，不改动产品开发端口 5173 或其 SQLite 数据。
 
 MIT；上游和借用组件归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

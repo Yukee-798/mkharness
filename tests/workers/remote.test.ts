@@ -304,6 +304,65 @@ it('readonly recheck exposes only status and result, not supplier references or 
   }
 });
 
+it('readonly recheck preserves an unresolved reference when completion has no result', async () => {
+  let rechecking = false;
+  let includeResult = false;
+  let submits = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === 'POST') {
+      submits++;
+      return Response.json({ id: 'original-job' });
+    }
+    if (request.method === 'DELETE') return new Response(null, { status: 405 });
+    return Response.json(
+      rechecking
+        ? { status: 'completed', ...(includeResult ? { result: null } : {}) }
+        : { status: 'pending' },
+    );
+  });
+  const stub = await setup('none');
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !!Object.values(await operations(stub))[0]?.remoteId);
+    await stub.stopConversation();
+    await waitUntil(async () => {
+      const state = JSON.parse(await stub.snapshot());
+      return !state.pending.length && !state.stopping;
+    });
+    const original = Object.values(await operations(stub))[0];
+    rechecking = true;
+    await stub.submitRun({
+      runId: crypto.randomUUID(),
+      text: 'recheck',
+      source: { action: 'recheck_remote', taskId: original.taskId },
+    });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect((await operations(stub))[original.taskId]).toMatchObject({
+      status: original.status,
+      remoteId: original.remoteId,
+    });
+    const messages = JSON.parse(await stub.snapshot()).entries.flatMap((e: any) => e.model ?? []);
+    expect(messages.findLast((m: any) => m.toolName === 'example_recheck')).toMatchObject({
+      isError: true,
+    });
+    expect(JSON.stringify(messages)).toContain('remote_response_invalid');
+
+    includeResult = true;
+    await stub.submitRun({
+      runId: crypto.randomUUID(),
+      text: 'recheck',
+      source: { action: 'recheck_remote', taskId: original.taskId },
+    });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect((await operations(stub))[original.taskId].status).toBe('completed');
+    expect(submits).toBe(1);
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});
+
 it('committed progress reaches AG-UI state snapshots and restoration without leaking remote references', async () => {
   let submits = 0,
     queries = 0;

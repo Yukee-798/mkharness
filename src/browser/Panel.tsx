@@ -12,6 +12,7 @@ import { library, PanelContext, type PanelGuard } from '../shared/catalog';
 import type { Program, Json } from '../shared/compute';
 import { finiteJson, jsonEqual, canonicalJson } from '../shared/compute';
 import type { RawState, RunCommand } from '../shared/contracts';
+import { actionParams, externalURL, UI_ACTIONS } from '../shared/ui-actions';
 import { computeProgram } from './compute';
 import { request } from './api';
 import { type PanelDraft, type SaveStatus } from './draft';
@@ -183,15 +184,33 @@ export function Panel({
   const act = useCallback(
     (event: ActionEvent) => {
       if (!bundle) return;
-      if (event.type !== 'continue_conversation') {
-        setError('This action is not available in this application');
+      if (event.type === UI_ACTIONS.link) {
+        try {
+          const url = externalURL(event.params?.url);
+          // Keep navigation in the original user gesture, before any asynchronous work.
+          window.open(url, '_blank', 'noopener,noreferrer');
+          setError('');
+        } catch (error) {
+          setError(error instanceof Error ? error.message : '链接暂时无法打开。');
+        }
         return;
       }
-      void submit(event.humanFriendlyMessage || 'Analyze the current inputs', {
-        panelRef: bundle.panelRef,
-        action: 'continue_analysis',
-        state: structuredClone({ ...state.current, ...event.formState }),
-      }).catch((e) => setError(e.message));
+      if (event.type !== UI_ACTIONS.assistant) {
+        setError('此操作暂不可用，请继续发送消息。');
+        return;
+      }
+      try {
+        const params = actionParams(event.params);
+        void submit(event.humanFriendlyMessage || 'Analyze the current inputs', {
+          panelRef: bundle.panelRef,
+          action: 'continue_analysis',
+          state: structuredClone({ ...state.current, ...event.formState }),
+          ...(Object.keys(params).length ? { params } : {}),
+        }).catch((e) => setError(e.message));
+        setError('');
+      } catch (error) {
+        setError(error instanceof Error ? error.message : '此操作暂不可用，请继续发送消息。');
+      }
     },
     [bundle, submit],
   );

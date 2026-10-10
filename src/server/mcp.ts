@@ -240,6 +240,87 @@ function convertResult(raw: unknown) {
     ],
   };
 }
+function serverOptions(
+  config: MCPConfig,
+  env: Record<string, unknown>,
+): Parameters<MCPClientManager['registerServer']>[1] {
+  return {
+    url: config.endpoint,
+    name: config.serverId,
+    transport: {
+      type: 'streamable-http' as const,
+      requestInit: {
+        redirect: 'manual' as const,
+        headers: config.credential ? { Authorization: `Bearer ${env[config.credential]}` } : {},
+      },
+      fetch: async (url: RequestInfo | URL, init?: RequestInit) => {
+        const response = await fetch(url, {
+          ...init,
+          redirect: 'manual',
+          signal: AbortSignal.any([
+            ...(init?.signal ? [init.signal] : []),
+            AbortSignal.timeout(30000),
+          ]),
+        });
+        if (response.status >= 300 && response.status < 400)
+          throw new AppError(503, 'mcp_redirect_blocked');
+        if (!response.body) return response;
+        let bytes = 0;
+        const boundedBody = response.body.pipeThrough(
+          new TransformStream({
+            transform(chunk, controller) {
+              bytes += chunk.byteLength;
+              if (bytes > 2 * 1024 * 1024) throw new AppError(503, 'mcp_result_too_large');
+              controller.enqueue(chunk);
+            },
+          }),
+        );
+        return new Response(boundedBody, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        });
+      },
+    },
+  };
+}
+
+/** Install before Lifecycle startup; deployment configuration owns live connections. */
+export function configureMcpStartup(
+  manager: MCPClientManager,
+  configs: () => MCPConfig[],
+  env: Record<string, unknown>,
+) {
+  const restore = manager.restoreConnectionsFromStorage.bind(manager);
+  // SDK 0.28 restores before Pi starts, omits fetch from persistence, and registerServer
+  // reuses an existing connection rather than updating its transport. Assemble first,
+  // after the SDK creates its catalog, then let native restoration reuse these connections.
+  manager.restoreConnectionsFromStorage = async (clientName) => {
+    const current = configs();
+    for (const server of manager.listServers())
+      if (!current.some((config) => config.serverId === server.id))
+        await manager.removeServer(server.id);
+    for (const config of current)
+      await manager.registerServer(config.serverId, serverOptions(config, env));
+    await restore(clientName);
+  };
+}
+
+async function connect(manager: MCPClientManager, serverId: string) {
+  if (manager.mcpConnections[serverId]?.connectionState === 'ready') return;
+  const connected = await manager.connectToServer(serverId).catch(() => {
+    throw new AppError(503, 'mcp_connection_failed');
+  });
+  if (connected.state !== 'connected')
+    throw new AppError(
+      503,
+      connected.state === 'authenticating' ? 'mcp_unauthorized' : 'mcp_connection_failed',
+    );
+  const found = await manager.discoverIfConnected(serverId, { timeoutMs: 15000 }).catch(() => {
+    throw new AppError(503, 'mcp_discovery_failed');
+  });
+  if (!found?.success) throw new AppError(503, 'mcp_discovery_failed');
+}
 /** Adapter only: discovery and calls use the SDK manager; Pi owns tool execution/history. */
 export async function buildMcp(
   manager: MCPClientManager,
@@ -261,55 +342,8 @@ export async function buildMcp(
     try {
       await bounded(
         (async () => {
-          await manager.registerServer(config.serverId, {
-            url: config.endpoint,
-            name: config.serverId,
-            transport: {
-              type: 'streamable-http',
-              requestInit: {
-                redirect: 'manual',
-                headers: config.credential
-                  ? { Authorization: `Bearer ${env[config.credential]}` }
-                  : {},
-              },
-              fetch: async (url, init) => {
-                const response = await fetch(url, {
-                  ...init,
-                  redirect: 'manual',
-                  signal: AbortSignal.any([
-                    ...(init?.signal ? [init.signal] : []),
-                    AbortSignal.timeout(30000),
-                  ]),
-                });
-                if (response.status >= 300 && response.status < 400)
-                  throw new AppError(503, 'mcp_redirect_blocked');
-                if (!response.body) return response;
-                let bytes = 0;
-                const boundedBody = response.body.pipeThrough(
-                  new TransformStream({
-                    transform(chunk, controller) {
-                      bytes += chunk.byteLength;
-                      if (bytes > 2 * 1024 * 1024) throw new AppError(503, 'mcp_result_too_large');
-                      controller.enqueue(chunk);
-                    },
-                  }),
-                );
-                return new Response(boundedBody, {
-                  status: response.status,
-                  statusText: response.statusText,
-                  headers: response.headers,
-                });
-              },
-            },
-          });
-          const connected = await manager.connectToServer(config.serverId);
-          if (connected.state !== 'connected')
-            throw new AppError(
-              503,
-              connected.state === 'authenticating' ? 'mcp_unauthorized' : 'mcp_connection_failed',
-            );
-          const found = await manager.discoverIfConnected(config.serverId, { timeoutMs: 15000 });
-          if (!found?.success) throw new AppError(503, 'mcp_discovery_failed');
+          await manager.registerServer(config.serverId, serverOptions(config, env));
+          await connect(manager, config.serverId);
         })(),
         15000,
       );
@@ -318,7 +352,6 @@ export async function buildMcp(
     } catch (e) {
       const code = e instanceof AppError ? e.code : 'mcp_connection_failed';
       diagnostics.push({ serverId: config.serverId, code });
-      for (const binding of previous) availability.set(binding.name, code);
       continue;
     }
     if (!previous.length) {
@@ -397,6 +430,9 @@ export async function buildMcp(
           if (availability.has(binding.name)) return failure(availability.get(binding.name)!);
           try {
             jsonText(args);
+            // A prior transient outage is not a changed definition. Retry connection on this
+            // tool invocation only; retain the binding and verify the recovered live catalog.
+            await bounded(connect(manager, binding.serverId), 15000);
             // SDK list_changed notifications update this in-memory catalog. Check it without
             // network rediscovery and never dispatch a known changed definition under the old name.
             const tool = manager
@@ -417,6 +453,13 @@ export async function buildMcp(
               });
               return failure('mcp_definition_changed');
             }
+            for (let i = diagnostics.length - 1; i >= 0; i--)
+              if (
+                diagnostics[i].serverId === binding.serverId &&
+                !diagnostics[i].toolName &&
+                diagnostics[i].code !== 'mcp_definition_changed'
+              )
+                diagnostics.splice(i, 1);
             const result = await bounded(
               manager.callTool(
                 { serverId: binding.serverId, name: binding.remoteName, arguments: args },

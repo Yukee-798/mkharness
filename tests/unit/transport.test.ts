@@ -75,3 +75,85 @@ it('committed progress rejects foreign-run and older projections; no execution i
     vi.unstubAllGlobals();
   }
 });
+it('cloned observations retain committed identities across runs without accepting foreign or replacement aliases', async () => {
+  const ids = new Map([['2', 'draft:earlier:1']]);
+  const events = [
+    { type: 'RUN_STARTED', threadId: 'c', runId: 'r' },
+    {
+      type: 'STATE_SNAPSHOT',
+      snapshot: { runId: 'foreign', messageIds: { '4': 'draft:foreign:1' } },
+    },
+    {
+      type: 'STATE_SNAPSHOT',
+      snapshot: { runId: 'r', messageIds: { '2': 'draft:r:wrong', '4': 'draft:r:1' } },
+    },
+    {
+      type: 'MESSAGES_SNAPSHOT',
+      messages: [
+        { id: '2:reasoning:0', role: 'reasoning', content: 'Earlier thinking' },
+        {
+          id: '2',
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            { id: '2.same.with.dot', type: 'function', function: { name: 'x', arguments: '{}' } },
+          ],
+        },
+        { id: '3', role: 'tool', toolCallId: '2.same.with.dot', content: 'done' },
+        { id: '4:reasoning:0', role: 'reasoning', content: 'Current thinking' },
+        { id: '4', role: 'assistant', content: 'Current answer' },
+      ],
+    },
+    {
+      type: 'TOOL_CALL_RESULT',
+      messageId: '5',
+      role: 'tool',
+      toolCallId: '2.same.with.dot',
+      content: 'settled after reattachment',
+    },
+    { type: 'RUN_FINISHED', threadId: 'c', runId: 'r' },
+  ];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+    ),
+  );
+  try {
+    const agent = new AttachAgent(
+      'c',
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      ids,
+    );
+    const observed: any[] = [];
+    await new Promise<void>((resolve, reject) =>
+      agent
+        .clone()
+        .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
+        .subscribe({ next: (event) => observed.push(event), complete: resolve, error: reject }),
+    );
+    expect([...ids]).toEqual([
+      ['2', 'draft:earlier:1'],
+      ['4', 'draft:r:1'],
+    ]);
+    expect(observed.find((event) => event.type === 'MESSAGES_SNAPSHOT').messages).toMatchObject([
+      { id: 'draft:earlier:1:reasoning:0' },
+      { id: 'draft:earlier:1', toolCalls: [{ id: 'draft:earlier:1.same.with.dot' }] },
+      { id: '3', toolCallId: 'draft:earlier:1.same.with.dot' },
+      { id: 'draft:r:1:reasoning:0' },
+      { id: 'draft:r:1' },
+    ]);
+    expect(observed.find((event) => event.type === 'TOOL_CALL_RESULT')).toMatchObject({
+      messageId: '5',
+      toolCallId: 'draft:earlier:1.same.with.dot',
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

@@ -433,6 +433,7 @@ export function Chat({
       <div className="chat flex min-h-0 flex-1 flex-col">
         {snapshot ? (
           <Runtime
+            key={`${userId}:${id}`}
             id={id}
             snapshot={snapshot}
             restoration={restoration}
@@ -474,8 +475,10 @@ function Runtime({
   progress: (value: RemoteProgress[]) => void;
   footer: ReactNode;
 }) {
+  // Commit aliases belong to this runtime only. Fresh mounts restore canonical Pi IDs.
+  const messageIds = useMemo(() => new Map<string, string>(), []);
   const history = useMemo(() => {
-    const messages = fromAgUiMessages(toMessages(snapshot.entries), {
+    const messages = fromAgUiMessages(toMessages(snapshot.entries, messageIds), {
       showThinking: true,
     }).map((m) => fromThreadMessageLike(m, m.id!, { type: 'complete', reason: 'stop' }));
     return {
@@ -485,7 +488,7 @@ function Runtime({
       })),
       headId: messages.at(-1)?.id ?? null,
     };
-  }, [snapshot.entries]);
+  }, [snapshot.entries, messageIds]);
   const callbacks = useRef({ done, reconnect, connected, progress, snapshot });
   callbacks.current = { done, reconnect, connected, progress, snapshot };
   const agent = useMemo(
@@ -500,8 +503,9 @@ function Runtime({
           const active = pending.find((p) => p.status === 'running') ?? pending[0];
           if (active?.operationId === runId) callbacks.current.progress(value);
         },
+        messageIds,
       ),
-    [id],
+    [id, messageIds],
   );
   const runtime = useAgUiRuntime({
     agent,

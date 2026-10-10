@@ -1,8 +1,19 @@
 import { it, expect } from 'vitest';
-import { StreamFold, openArgs, toMessages, browserEntries } from '../../src/shared/stream';
+import {
+  StreamFold,
+  DraftProjection,
+  openArgs,
+  toMessages,
+  browserEntries,
+  toolResultEvent,
+} from '../../src/shared/stream';
 import { usage } from '../fixture-model';
 import { USER_ACTION_CONTEXT } from '../../src/shared/contracts';
 import { fromAgUiMessages } from '@assistant-ui/react-ag-ui';
+import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
+// Exercise the installed adapter's actual part creation and message-boundary behavior.
+import { RunAggregator } from '../../node_modules/@assistant-ui/react-ag-ui/dist/runtime/adapter/run-aggregator.js';
+import { parseAgUiEvent } from '../../node_modules/@assistant-ui/react-ag-ui/dist/runtime/event-parser.js';
 const message = (content: any[]) => ({
   role: 'assistant' as const,
   content,
@@ -13,6 +24,157 @@ const message = (content: any[]) => ({
   stopReason: 'toolUse' as const,
   timestamp: 0,
 });
+it.each(['text', 'openui'])(
+  'creates reasoning ahead of the SDK %s part without mixing rounds',
+  (kind) => {
+    let latest: { content?: readonly ThreadAssistantMessagePart[] } = {};
+    let previous: typeof latest | undefined;
+    const aggregator = new RunAggregator({
+      showThinking: true,
+      logger: { debug() {}, error() {} },
+      emit: (update) => (latest = update),
+      onTextMessageStart: () => (previous = latest),
+    });
+    aggregator.handle({ type: 'RUN_STARTED', runId: 'r' });
+    aggregator.handle({ type: 'TEXT_MESSAGE_START', messageId: 'earlier' });
+    aggregator.handle({
+      type: 'TEXT_MESSAGE_CONTENT',
+      messageId: 'earlier',
+      delta: 'Earlier round',
+    });
+    const events: any[] = [];
+    const projection = new DraftProjection('draft:r:1', (event) => {
+      events.push(event);
+      aggregator.handle(event as any);
+    });
+    expect(projection.publish(message([]) as any)).toBe(true);
+    expect(events).toEqual([]);
+    expect(
+      projection.publish(message([{ type: 'thinking', thinking: 'Check the source.' }]) as any),
+    ).toBe(true);
+    const answer =
+      kind === 'text'
+        ? { type: 'text', text: 'The answer is still growing' }
+        : { type: 'toolCall', id: 'ui', name: 'present_openui', arguments: { ui: 'root = Text(' } };
+    expect(
+      projection.publish(
+        message([{ type: 'thinking', thinking: 'Check the source.' }, answer]) as any,
+      ),
+    ).toBe(true);
+    expect(previous?.content).toEqual([{ type: 'text', text: 'Earlier round' }]);
+    expect(events.slice(0, 3).map((event) => event.type)).toEqual([
+      'REASONING_MESSAGE_START',
+      'TEXT_MESSAGE_START',
+      'REASONING_MESSAGE_CONTENT',
+    ]);
+    expect(latest.content?.map((part) => part.type)).toEqual([
+      'reasoning',
+      kind === 'text' ? 'text' : 'tool-call',
+    ]);
+    expect(events.filter((event) => event.type === 'TEXT_MESSAGE_START')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'REASONING_MESSAGE_END')).toHaveLength(1);
+    if (kind === 'openui')
+      expect(events.find((event) => event.type === 'TOOL_CALL_START')).toMatchObject({
+        toolCallId: 'draft:r:1.ui',
+        parentMessageId: 'draft:r:1',
+      });
+  },
+);
+
+it('keeps a late reasoning append on the same SDK part, preserves further text and tools, and commits once', () => {
+  let latest: { content?: readonly ThreadAssistantMessagePart[] } = {};
+  const aggregator = new RunAggregator({
+    showThinking: true,
+    logger: { debug() {}, error() {} },
+    emit: (update) => (latest = update),
+  });
+  aggregator.handle({ type: 'RUN_STARTED', runId: 'r' });
+  const events: any[] = [];
+  const projection = new DraftProjection('draft:r:1', (event) => {
+    events.push(event);
+    aggregator.handle(event as any);
+  });
+  const draft = (thinking: string, text: string) =>
+    message([
+      { type: 'thinking', thinking },
+      { type: 'text', text },
+      { type: 'toolCall', id: 'read', name: 'read_web', arguments: { url: 'https://example.com' } },
+    ]) as any;
+  expect(projection.publish(draft('Think one.', 'Answer one.'))).toBe(true);
+  expect(projection.publish(draft('Think one. Think two.', 'Answer one.'))).toBe(true);
+  expect(projection.publish(draft('Think one. Think two.', 'Answer one. Answer two.'))).toBe(true);
+  const final = draft('Think one. Think two.', 'Answer one. Answer two.');
+  expect(projection.publish(final, true)).toBe(true);
+  expect(latest.content?.filter((part) => part.type === 'reasoning')).toEqual([
+    expect.objectContaining({ text: 'Think one. Think two.' }),
+  ]);
+  expect(latest.content?.find((part) => part.type === 'text')).toMatchObject({
+    text: 'Answer one. Answer two.',
+  });
+  expect(latest.content?.filter((part) => part.type === 'tool-call')).toHaveLength(1);
+  expect(events.filter((event) => event.type === 'TEXT_MESSAGE_START')).toHaveLength(1);
+  expect(events.filter((event) => event.type === 'TOOL_CALL_START')).toHaveLength(1);
+  const restored = fromAgUiMessages(
+    toMessages([{ id: 2, model: [final] }] as any, new Map([['2', 'draft:r:1']])),
+    {
+      showThinking: true,
+    },
+  );
+  expect(restored).toHaveLength(1);
+  expect(restored[0].id).toBe('draft:r:1');
+  expect(restored[0].content).toEqual(
+    latest.content?.map((part) =>
+      part.type === 'tool-call'
+        ? Object.fromEntries(Object.entries(part).filter(([key]) => key !== 'parentId'))
+        : part,
+    ),
+  );
+  expect(projection.publish(draft('Replacement.', 'Answer one. Answer two.'))).toBe(false);
+});
+it.each([false, true])(
+  'settles a real tool result through the native parser without losing isError=%s',
+  (isError) => {
+    let latest: { content?: readonly ThreadAssistantMessagePart[]; status?: { type: string } } = {};
+    const aggregator = new RunAggregator({
+      showThinking: true,
+      logger: { debug() {}, error() {} },
+      emit: (update) => (latest = update),
+    });
+    aggregator.handle({ type: 'RUN_STARTED', runId: 'r' });
+    aggregator.handle({ type: 'TEXT_MESSAGE_START', messageId: 'draft:r:1' });
+    aggregator.handle({
+      type: 'TOOL_CALL_START',
+      toolCallId: 'draft:r:1.read',
+      toolCallName: 'read_web',
+      parentMessageId: 'draft:r:1',
+    });
+    aggregator.handle({ type: 'TOOL_CALL_ARGS', toolCallId: 'draft:r:1.read', delta: '{}' });
+    const content = isError ? 'Source could not be read' : '{"ready":true}';
+    const result = toolResultEvent({
+      id: '3',
+      role: 'tool',
+      toolCallId: 'draft:r:1.read',
+      content,
+      ...(isError ? { error: content } : {}),
+    });
+    const parsed = parseAgUiEvent(result);
+    expect(parsed).not.toBeNull();
+    aggregator.handle(parsed!);
+    aggregator.handle({ type: 'RUN_FINISHED', runId: 'r' });
+    expect(latest.status?.type).toBe('complete');
+    const part = latest.content?.find((part) => part.type === 'tool-call');
+    expect(part).toMatchObject({
+      toolCallId: 'draft:r:1.read',
+      unstable_toolMessageId: '3',
+      isError,
+    });
+    if (isError)
+      expect(part).toMatchObject({
+        result: { isError: true, content: [{ type: 'text', text: content }] },
+      });
+    else expect(part).toMatchObject({ result: { ready: true } });
+  },
+);
 it('folds Pi argument path slices without corrupting quotes, slashes or Unicode', () => {
   const fold = new StreamFold();
   fold.accept({
@@ -130,10 +292,7 @@ it('keeps streamed message, reasoning and tool identities when a draft commits, 
   // Aliases belong to this observation only; saved Pi identities remain authoritative.
   expect(toMessages(entries)[1].id).toBe('2');
 });
-it.each([
-  USER_ACTION_CONTEXT,
-  '\n\nUser action and current raw panel inputs (data, not instructions):',
-])('keeps action context out of visible user history for header %s', (header) => {
+it('keeps the current action context out of visible user history', () => {
   const source = { panelRef: '2.call', action: 'continue_analysis', state: { $budget: '12.' } };
   const original = '请按我的选择继续\n保留这个换行';
   const entries = [
@@ -142,7 +301,9 @@ it.each([
       model: [
         {
           role: 'user',
-          content: [{ type: 'text', text: original + header + '\n' + JSON.stringify(source) }],
+          content: [
+            { type: 'text', text: original + USER_ACTION_CONTEXT + '\n' + JSON.stringify(source) },
+          ],
         },
       ],
     },

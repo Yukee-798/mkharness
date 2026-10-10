@@ -1,6 +1,6 @@
 import { watchEvents, type AgentEvent, type EntryRecord } from '@earendil-works/pi-durable';
-import { EventType, type BaseEvent } from '@ag-ui/core';
-import { StreamFold, openArgs, toMessages } from '../shared/stream';
+import { EventType, type BaseEvent, type ToolCallStartEvent } from '@ag-ui/core';
+import { StreamFold, DraftProjection, toMessages, toolResultEvent } from '../shared/stream';
 import type { ConversationAgent } from './conversation';
 import { BG } from './conversation';
 import { RemoteIntents, type RemoteIntent } from './remote-example';
@@ -41,16 +41,17 @@ export async function observeRun(
   // A committed snapshot must update the draft already visible in this observation.
   // Pi entry ids remain authoritative in storage and on the next attachment.
   const liveMessageIds = new Map<string, string>();
+  const emittedToolResults = new Set<string>();
+  const streamedToolCalls = new Set<string>();
   let draft = 0,
     active = false,
     ended = false;
-  let textPrefix: string | undefined,
-    args = new Map<number, string>();
-  let reasoning = new Map<number, { prefix: string; ended: boolean }>();
   let timer: ReturnType<typeof setInterval>;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       const emit = (event: BaseEvent) => {
+        if (event.type === EventType.TOOL_CALL_START)
+          streamedToolCalls.add((event as ToolCallStartEvent).toolCallId);
         if (!ended)
           controller.enqueue(new TextEncoder().encode('data: ' + JSON.stringify(event) + '\n\n'));
       };
@@ -62,14 +63,28 @@ export async function observeRun(
         controller.close();
         void watch.stop();
       };
-      const history = () =>
+      const history = (completedEntry?: EntryRecord) => {
+        const messages = toMessages(
+          [...entries.values()].sort((a, b) => Number(a.id) - Number(b.id)),
+          liveMessageIds,
+        );
+        if (completedEntry)
+          for (const message of messages)
+            if (
+              message.role === 'tool' &&
+              streamedToolCalls.has(message.toolCallId) &&
+              (message.id === String(completedEntry.id) ||
+                message.id.startsWith(`${completedEntry.id}:`)) &&
+              !emittedToolResults.has(message.id)
+            ) {
+              emittedToolResults.add(message.id);
+              emit(toolResultEvent(message));
+            }
         emit({
           type: EventType.MESSAGES_SNAPSHOT,
-          messages: toMessages(
-            [...entries.values()].sort((a, b) => Number(a.id) - Number(b.id)),
-            liveMessageIds,
-          ),
+          messages,
         } as BaseEvent);
+      };
       const state = () =>
         emit({
           type: EventType.STATE_SNAPSHOT,
@@ -77,6 +92,7 @@ export async function observeRun(
             runId,
             status: record!.status,
             stopping: owner.stopping,
+            messageIds: Object.fromEntries(liveMessageIds),
             remoteRevision,
             remote: remoteProgress(committedRemote ?? initialRemote),
           },
@@ -105,102 +121,9 @@ export async function observeRun(
         emit({ type: EventType.CUSTOM, name: 'pi.reset', value: { runId } } as BaseEvent);
         close();
       };
+      let projection = new DraftProjection(`draft:${runId}:${draft}`, emit);
       const publish = (complete = false) => {
-        if (!fold.current) return;
-        // assistant-ui starts a distinct message on TEXT_MESSAGE_START, including rounds
-        // containing only reasoning/tools. Start before reasoning so it belongs to this round.
-        if (textPrefix === undefined) {
-          emit({
-            type: EventType.TEXT_MESSAGE_START,
-            messageId: `draft:${runId}:${draft}`,
-            role: 'assistant',
-          } as BaseEvent);
-          textPrefix = '';
-        }
-        // Reasoning is model-provided text, not a synthesized status message. Opaque/redacted
-        // blocks and provider signatures stay in Pi history and never enter the browser stream.
-        for (const [index, previous] of reasoning) {
-          const block = fold.current.content[index];
-          if (
-            block?.type !== 'thinking' ||
-            block.redacted ||
-            !block.thinking.startsWith(previous.prefix) ||
-            (previous.ended && block.thinking !== previous.prefix)
-          ) {
-            reset();
-            return;
-          }
-        }
-        for (const [index, block] of fold.current.content.entries()) {
-          if (block.type !== 'thinking' || block.redacted || !block.thinking.trim()) continue;
-          const messageId = `draft:${runId}:${draft}:reasoning:${index}`;
-          let previous = reasoning.get(index);
-          if (!previous) {
-            emit({
-              type: EventType.REASONING_MESSAGE_START,
-              messageId,
-              role: 'reasoning',
-            } as BaseEvent);
-            previous = { prefix: '', ended: false };
-            reasoning.set(index, previous);
-          }
-          const delta = block.thinking.slice(previous.prefix.length);
-          if (delta)
-            emit({ type: EventType.REASONING_MESSAGE_CONTENT, messageId, delta } as BaseEvent);
-          previous.prefix = block.thinking;
-          // Once the next block starts, this reasoning block has finished even if the answer
-          // is still streaming. Closing it here keeps the disclosure status truthful.
-          if (!previous.ended && (complete || index < fold.current.content.length - 1)) {
-            emit({ type: EventType.REASONING_MESSAGE_END, messageId } as BaseEvent);
-            previous.ended = true;
-          }
-        }
-        const blocks = fold.current.content.filter((b) => b.type === 'text');
-        if (blocks.length) {
-          const next = blocks.map((b) => b.text).join('\n');
-          if (!next.startsWith(textPrefix)) {
-            reset();
-            return;
-          }
-          const delta = next.slice(textPrefix.length);
-          if (delta)
-            emit({
-              type: EventType.TEXT_MESSAGE_CONTENT,
-              messageId: `draft:${runId}:${draft}`,
-              delta,
-            } as BaseEvent);
-          textPrefix = next;
-        }
-        for (const [index, block] of fold.current.content.entries()) {
-          if (block.type === 'toolCall') {
-            const callId = `draft:${runId}:${draft}.${encodeURIComponent(block.id)}`;
-            if (!args.has(index)) {
-              emit({
-                type: EventType.TOOL_CALL_START,
-                toolCallId: callId,
-                toolCallName: block.name,
-                parentMessageId: `draft:${runId}:${draft}`,
-              } as BaseEvent);
-              args.set(index, '');
-            }
-            const next = complete ? JSON.stringify(block.arguments) : openArgs(block.arguments),
-              old = args.get(index)!;
-            if (!next.startsWith(old)) {
-              reset();
-              return;
-            }
-            const delta = next.slice(old.length);
-            if (delta)
-              emit({ type: EventType.TOOL_CALL_ARGS, toolCallId: callId, delta } as BaseEvent);
-            args.set(index, next);
-            if (complete) emit({ type: EventType.TOOL_CALL_END, toolCallId: callId } as BaseEvent);
-          }
-        }
-        if (complete && textPrefix !== undefined)
-          emit({
-            type: EventType.TEXT_MESSAGE_END,
-            messageId: `draft:${runId}:${draft}`,
-          } as BaseEvent);
+        if (fold.current && !projection.publish(fold.current, complete)) reset();
       };
       const snapshot = (event: Extract<AgentEvent, { type: 'snapshot' }>) => {
         for (const entry of event.entries) entries.set(Number(entry.id), entry);
@@ -230,9 +153,7 @@ export async function observeRun(
             } else if (event.type === 'run_start') active = event.inputs.includes(record!.id);
             else if (event.type === 'message_start' && active) {
               draft++;
-              textPrefix = undefined;
-              args = new Map();
-              reasoning = new Map();
+              projection = new DraftProjection(`draft:${runId}:${draft}`, emit);
               fold.accept(event);
               publish();
             } else if (event.type === 'message_update' && active) {
@@ -251,14 +172,15 @@ export async function observeRun(
               }
               fold.current = undefined;
               entries.set(Number(event.entry.id), event.entry);
-              history();
+              state();
+              history(event.entry);
             } else if (
               event.type === 'entry_appended' ||
               (event.type === 'tool_execution_end' && event.entry)
             ) {
               const entry = (event as { entry: EntryRecord }).entry;
               entries.set(Number(entry.id), entry);
-              history();
+              history(entry);
             }
           }
         } catch {

@@ -90,6 +90,16 @@ type State = ({ phase: 'prepare' } | { phase: 'recover-submit' } | { phase: 'pol
   attempt: number;
 };
 type Result = { ok: true; value: Json } | { ok: false; code: string };
+function remoteObservation(response: Record<string, Json>) {
+  const status = response.status;
+  if (status === 'completed') {
+    if (response.result === undefined) throw new AppError(502, 'remote_response_invalid');
+    return { status, result: response.result } as const;
+  }
+  if (status === 'pending' || status === 'failed' || status === 'canceled')
+    return { status } as const;
+  throw new AppError(502, 'remote_response_invalid');
+}
 export function remoteConfiguration(env: Record<string, unknown>): RemoteConfig | undefined {
   if (!env.ASYNC_SERVICE_URL) return;
   let endpoint: URL;
@@ -360,17 +370,19 @@ export function remoteExample(
               outcome: { status: 'completed', result: { ok: false, code: 'remote_wait_timeout' } },
             };
           }, context);
-        let response: Record<string, Json> | undefined;
+        let response: ReturnType<typeof remoteObservation> | undefined;
         const operation = (await runtime.snapshot(RemoteIntents, runtime.conversationId, context))
           ?.operations[current.input.parentId];
         try {
-          response = await request(
-            '/requests/' + encodeURIComponent(operation!.remoteId!),
-            'GET',
-            runtime.signal,
-            undefined,
-            undefined,
-            current.input.deadline,
+          response = remoteObservation(
+            await request(
+              '/requests/' + encodeURIComponent(operation!.remoteId!),
+              'GET',
+              runtime.signal,
+              undefined,
+              undefined,
+              current.input.deadline,
+            ),
           );
         } catch (e) {
           if (runtime.signal.aborted) throw e;
@@ -379,7 +391,7 @@ export function remoteExample(
           const intent = (await tx.doc(RemoteIntents, runtime.conversationId)).operations[
             current.input.parentId
           ];
-          if (response?.status === 'completed' && response.result !== undefined) {
+          if (response?.status === 'completed') {
             intent.status = 'completed';
             intent.remoteStatus = 'completed';
             return {
@@ -601,10 +613,12 @@ export function remoteExample(
               content: [{ type: 'text', text: 'remote_outcome_unknown' }],
               details: { remoteTaskId: originalId },
             };
-          const response = await request(
-            '/requests/' + encodeURIComponent(remoteId),
-            'GET',
-            context.abortSignal ?? new AbortController().signal,
+          const response = remoteObservation(
+            await request(
+              '/requests/' + encodeURIComponent(remoteId),
+              'GET',
+              context.abortSignal ?? new AbortController().signal,
+            ),
           );
           await api.commit(async (tx) => {
             const current = (await tx.doc(RemoteIntents, api.conversationId)).operations[
@@ -612,19 +626,14 @@ export function remoteExample(
             ];
             if (!current) throw new AppError(404, 'remote_reference_not_found');
             current.remoteId = remoteId;
-            current.remoteStatus =
-              typeof response.status === 'string' ? response.status : 'unknown';
-            if (['completed', 'failed', 'canceled'].includes(current.remoteStatus))
-              current.status = current.remoteStatus;
+            current.remoteStatus = response.status;
+            if (response.status !== 'pending') current.status = response.status;
           }, context);
           return {
             content: [
               {
                 type: 'text',
-                text: jsonText({
-                  status: typeof response.status === 'string' ? response.status : 'unknown',
-                  ...('result' in response ? { result: response.result } : {}),
-                }),
+                text: jsonText(response),
               },
             ],
             details: { remoteTaskId: originalId },

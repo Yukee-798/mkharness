@@ -1,6 +1,7 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import { MCPClientManager } from 'agents/mcp/client';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
-import { buildMcp, mcpConfiguration } from '../../src/server/mcp';
+import { buildMcp, configureMcpStartup, mcpConfiguration } from '../../src/server/mcp';
 const configs = [
   { serverId: 'reference', endpoint: 'https://mcp.example.test/mcp', allowlist: ['lookup'] },
 ];
@@ -14,10 +15,18 @@ function manager(
   inputSchema: unknown = schema,
   result: unknown = { content: [{ type: 'text', text: 'found' }], structuredContent: { value: 2 } },
 ) {
+  const connection = { connectionState: 'connecting' };
   return {
+    mcpConnections: { reference: connection },
     registerServer: async () => 'reference',
-    connectToServer: async () => ({ state: 'connected' }),
-    discoverIfConnected: async () => ({ success: true }),
+    connectToServer: async () => {
+      connection.connectionState = 'connected';
+      return { state: 'connected' };
+    },
+    discoverIfConnected: async () => {
+      connection.connectionState = 'ready';
+      return { success: true };
+    },
     listTools: () => [
       { serverId: 'reference', name: 'lookup', description: 'Lookup', inputSchema },
     ],
@@ -55,6 +64,98 @@ it('registers the real schema and preserves JSON results and isError through Pi'
       {} as any,
     ),
   ).toMatchObject({ isError: true });
+});
+
+it('rechecks a recovered connection against the pinned definition instead of latching an outage', async () => {
+  const initial = await buildMcp(manager(), configs, {});
+  const live = manager();
+  const connect = live.connectToServer;
+  let offline = true;
+  live.connectToServer = async () => {
+    if (offline) throw new Error('offline');
+    return connect();
+  };
+  const built = await buildMcp(live, configs, {}, initial.bindings);
+  expect(
+    JSON.stringify(await built.extension.tools![0].execute({}, {} as any, {} as any)),
+  ).toContain('mcp_connection_failed');
+  offline = false;
+  const result = await built.extension.tools![0].execute({ query: 'hi' }, {} as any, {} as any);
+  expect(result.isError).toBe(false);
+  expect(JSON.stringify(result)).toContain('found');
+  expect(built.diagnostics).toEqual([]);
+  expect(built.bindings).toEqual(initial.bindings);
+});
+
+it('uses current deployment transports before native SDK restore and removes disabled servers', async () => {
+  type Row = ReturnType<MCPClientManager['listServers']>[number];
+  const rows = new Map<string, Row>();
+  const makeManager = () => {
+    const native = new MCPClientManager('fixture', '1');
+    const storage = native as unknown as {
+      getServersFromStorage(): Row[];
+      getStoredServerOptions(id: string): unknown;
+      saveServerToStorage(row: Row): void;
+      removeServerFromStorage(id: string): void;
+    };
+    // Store the SDK's own encoded rows, rather than reimplementing its transport codec.
+    vi.spyOn(storage, 'getServersFromStorage').mockImplementation(() => [...rows.values()]);
+    vi.spyOn(storage, 'getStoredServerOptions').mockImplementation((id) => {
+      const text = rows.get(id)?.server_options;
+      return text ? JSON.parse(text) : undefined;
+    });
+    vi.spyOn(storage, 'saveServerToStorage').mockImplementation((row) => {
+      rows.set(row.id, row as Row);
+    });
+    vi.spyOn(storage, 'removeServerFromStorage').mockImplementation((id) => {
+      rows.delete(id);
+    });
+    return native;
+  };
+  const original = makeManager();
+  for (const id of ['reference', 'removed'])
+    await original.registerServer(id, {
+      url: 'https://mcp.example.test/mcp',
+      name: id,
+      transport: {
+        type: 'streamable-http',
+        requestInit: { headers: { Authorization: 'Bearer fixture-old' } },
+        fetch: async () => new Response(),
+      },
+    });
+  expect(JSON.parse(rows.get('reference')!.server_options!).transport.fetch).toBeUndefined();
+  const restored = makeManager();
+  const connected = vi.spyOn(restored, 'connectToServer');
+  configureMcpStartup(restored, () => [{ ...configs[0], credential: 'FIXTURE_TOKEN' }], {
+    FIXTURE_TOKEN: 'fixture-current',
+  });
+  await restored.restoreConnectionsFromStorage('fixture');
+  expect(connected).not.toHaveBeenCalled();
+  expect(rows.has('removed')).toBe(false);
+  expect(restored.mcpConnections.removed).toBeUndefined();
+  const transport = restored.mcpConnections.reference.options.transport as {
+    requestInit?: RequestInit;
+    fetch?: typeof fetch;
+  };
+  expect(transport.requestInit?.headers).toEqual({ Authorization: 'Bearer fixture-current' });
+  expect(transport.fetch).toBeTypeOf('function');
+  const network = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(new Uint8Array(2 * 1024 * 1024 + 1)));
+  try {
+    const response = await transport.fetch!('https://mcp.example.test/mcp', transport.requestInit);
+    await expect(response.text()).rejects.toThrow('mcp_result_too_large');
+    expect(network).toHaveBeenCalledWith(
+      'https://mcp.example.test/mcp',
+      expect.objectContaining({
+        redirect: 'manual',
+        headers: { Authorization: 'Bearer fixture-current' },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  } finally {
+    network.mockRestore();
+  }
 });
 it('pins definitions and refuses silent schema replacement, redirection and unsupported blocks', async () => {
   const initial = await buildMcp(manager(), configs, {}, undefined);
