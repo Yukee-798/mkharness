@@ -76,6 +76,7 @@ test('a genuine streaming response renders an inert native preview before the to
 }) => {
   const { createServer } = await import('node:http');
   let finish = () => {},
+    reveal = () => {},
     committed = false;
   const ui =
     'root = Stack([Text("text","Streamed native preview"),Button("Analyze",Action([@ToAssistant("Analyze")]))])';
@@ -86,14 +87,52 @@ test('a genuine streaming response renders an inert native preview before the to
     emit({ type: 'RUN_STARTED', threadId: 'a', runId });
     emit({
       type: 'TOOL_CALL_START',
-      toolCallId: 'draft-call',
-      toolCallName: 'present_openui',
-      parentMessageId: 'draft',
+      toolCallId: 'prepare-call',
+      toolCallName: 'prepare_program',
+      parentMessageId: 'preparation',
+    });
+    emit({
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'prepare-call',
+      delta: '{"code":"internal computation"}',
+    });
+    emit({
+      type: 'TOOL_CALL_START',
+      toolCallId: 'prepare-second',
+      toolCallName: 'prepare_program',
+      parentMessageId: 'preparation',
+    });
+    emit({
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'prepare-second',
+      delta: '{"code":"second internal computation"}',
     });
     const prefix = JSON.stringify({
       ui: 'root = Stack([Text("text","Streamed native preview"),',
     }).slice(0, -2);
-    emit({ type: 'TOOL_CALL_ARGS', toolCallId: 'draft-call', delta: prefix });
+    reveal = () => {
+      emit({ type: 'TOOL_CALL_END', toolCallId: 'prepare-call' });
+      emit({ type: 'TOOL_CALL_END', toolCallId: 'prepare-second' });
+      emit({
+        type: 'TOOL_CALL_RESULT',
+        toolCallId: 'prepare-call',
+        messageId: 'prepared-result',
+        content: '{"programRef":"1.prepare","initial":{"total":10}}',
+      });
+      emit({
+        type: 'TOOL_CALL_RESULT',
+        toolCallId: 'prepare-second',
+        messageId: 'prepared-second-result',
+        content: '{"programRef":"1.prepare-second","initial":{"total":20}}',
+      });
+      emit({
+        type: 'TOOL_CALL_START',
+        toolCallId: 'draft-call',
+        toolCallName: 'present_openui',
+        parentMessageId: 'draft',
+      });
+      emit({ type: 'TOOL_CALL_ARGS', toolCallId: 'draft-call', delta: prefix });
+    };
     finish = () => {
       committed = true;
       const args = JSON.stringify({ ui });
@@ -153,12 +192,18 @@ test('a genuine streaming response renders an inert native preview before the to
       return route.fulfill({ status: 404 });
     });
     await page.goto('/tests/browser/chat.html');
+    await expect(page.getByText('正在生成交互界面…', { exact: true })).toBeVisible();
+    await expect(page.getByText('正在生成交互界面…', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('internal computation', { exact: false })).toHaveCount(0);
+    reveal();
     await expect(page.getByText('Streamed native preview', { exact: true })).toBeVisible();
     expect(committed).toBe(false);
     expect(await page.locator('.generated-panel > div').getAttribute('inert')).not.toBeNull();
     finish();
     await expect(page.getByRole('button', { name: 'Analyze', exact: true })).toBeVisible();
     await expect(page.locator('.generated-panel > div')).not.toHaveAttribute('inert');
+    await expect(page.getByText('正在生成交互界面…', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '复制回答', exact: true })).toHaveCount(0);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));

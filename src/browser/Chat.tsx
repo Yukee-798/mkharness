@@ -10,13 +10,13 @@ import {
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
-  ActionBarPrimitive,
   useAuiState,
   ThreadPrimitive,
   MessagePrimitive,
   fromThreadMessageLike,
   type ThreadHistoryAdapter,
   type ToolCallMessagePartProps,
+  type TextMessagePartProps,
 } from '@assistant-ui/react';
 import { useAgUiRuntime, fromAgUiMessages } from '@assistant-ui/react-ag-ui';
 import type { EntryRecord } from '@earendil-works/pi-durable';
@@ -40,7 +40,7 @@ import {
   ToolFallbackResult,
   ToolFallbackError,
 } from './tool-fallback';
-import { ArrowUp, ArrowDown, Check, Copy, MessageSquare, Square, LoaderCircle } from 'lucide-react';
+import { ArrowUp, ArrowDown, MessageSquare, Square, LoaderCircle } from 'lucide-react';
 export type Snapshot = {
   entries: EntryRecord[];
   cursor?: unknown;
@@ -387,6 +387,7 @@ const ChatContext = createContext<{
 } | null>(null);
 function Tool(part: ToolCallMessagePartProps) {
   const { id, submit } = useContext(ChatContext)!;
+  if (part.toolName === 'prepare_program') return null;
   if (part.toolName === 'present_openui') {
     const preview =
       typeof part.args?.ui === 'string' ? part.args.ui : partialUI(part.argsText ?? '');
@@ -401,27 +402,22 @@ function Tool(part: ToolCallMessagePartProps) {
     const reference =
       result && typeof result === 'object' && 'panelRef' in result ? result.panelRef : undefined;
     const panelRef = typeof reference === 'string' ? reference : undefined;
-    if (part.isError)
-      return (
-        <Alert variant="destructive" className="my-3">
-          <AlertDescription>
-            界面未发布：
-            {typeof part.result === 'string' ? part.result : JSON.stringify(part.result)}
-          </AlertDescription>
-        </Alert>
-      );
+    if (part.isError) return null;
     return (
-      <Panel
-        key={panelRef ?? part.toolCallId}
-        conversationId={id}
-        panelRef={panelRef}
-        preview={preview}
-        submit={submit}
-      />
+      <>
+        {(panelRef || preview) && (
+          <Panel
+            key={panelRef ?? part.toolCallId}
+            conversationId={id}
+            panelRef={panelRef}
+            preview={preview}
+            submit={submit}
+          />
+        )}
+      </>
     );
   }
   const names: Record<string, string> = {
-    prepare_program: '准备计算程序',
     read_webpage: '读取网页',
     search_web: '联网搜索',
   };
@@ -440,37 +436,46 @@ function Tool(part: ToolCallMessagePartProps) {
     </ToolFallbackRoot>
   );
 }
+function GenerationProgress() {
+  return (
+    <p role="status" className="my-3 flex items-center gap-2 text-sm text-muted-foreground">
+      <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" />
+      正在生成交互界面…
+    </p>
+  );
+}
+function AssistantText(part: TextMessagePartProps) {
+  const internal = useAuiState((s) =>
+    s.message.content.some(
+      (p) =>
+        p.type === 'tool-call' &&
+        (p.toolName === 'prepare_program' || p.toolName === 'present_openui'),
+    ),
+  );
+  if (internal) return null;
+  if (part.text.startsWith('Program/UI repair limit reached'))
+    return <p role="alert">交互界面暂时无法生成。你可以重新发送需求再试一次。</p>;
+  if (part.text.startsWith('Model round limit reached'))
+    return <p role="alert">本次任务未能完成。你可以重新发送需求继续。</p>;
+  return <MarkdownText />;
+}
 function Assistant() {
-  const canCopy = useAuiState(
+  const generating = useAuiState(
     (s) =>
-      s.message.content.some((part) => part.type === 'text' && part.text.trim().length > 0) &&
-      !s.message.content.some(
-        (part) => part.type === 'tool-call' && part.toolName === 'present_openui',
+      s.message.isLast &&
+      s.thread.isRunning &&
+      s.message.content.some(
+        (part) =>
+          part.type === 'tool-call' &&
+          (part.toolName === 'prepare_program' || part.toolName === 'present_openui') &&
+          (part.result === undefined || part.isError),
       ),
   );
   return (
-    <MessagePrimitive.Root className="group/message mb-8 min-w-0 text-sm leading-relaxed wrap-anywhere">
-      <MessagePrimitive.Parts components={{ Text: MarkdownText, tools: { Fallback: Tool } }} />
-      {canCopy && (
-        <ActionBarPrimitive.Root
-          hideWhenRunning
-          autohide="not-last"
-          className="mt-2 flex items-center"
-        >
-          <CopyMessage />
-        </ActionBarPrimitive.Root>
-      )}
+    <MessagePrimitive.Root className="group/message mb-8 min-w-0 text-sm leading-relaxed wrap-anywhere empty:hidden">
+      {generating && <GenerationProgress />}
+      <MessagePrimitive.Parts components={{ Text: AssistantText, tools: { Fallback: Tool } }} />
     </MessagePrimitive.Root>
-  );
-}
-function CopyMessage() {
-  const copied = useAuiState((s) => s.message.isCopied);
-  return (
-    <ActionBarPrimitive.Copy asChild>
-      <TooltipIconButton tooltip={copied ? '已复制' : '复制回答'}>
-        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-      </TooltipIconButton>
-    </ActionBarPrimitive.Copy>
   );
 }
 function User() {
