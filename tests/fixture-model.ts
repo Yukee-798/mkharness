@@ -45,7 +45,7 @@ export function fixtureModels() {
           type: 'toolCall',
           id: 'same-call',
           name: 'example_generate',
-          arguments: { prompt: 'hello' },
+          arguments: { prompt: text.includes('changed') ? 'changed parameters' : 'hello' },
         },
       ];
     if (text?.includes('retry_remote') && last?.role === 'user')

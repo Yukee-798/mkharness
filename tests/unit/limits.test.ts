@@ -18,3 +18,7 @@ it('allows the initial attempt and two repairs, then terminates; caps model roun
   expect(() => checkRunLimits(entries(20, 0))).toThrow('20');
   expect(() => checkRunLimits([...entries(20, 3), ...entries(0, 0)])).not.toThrow();
 });
+it('honors an explicitly configured tool budget without changing the model-round budget', () => {
+  expect(() => checkRunLimits(entries(1, 2), 2)).toThrow('2');
+  expect(() => checkRunLimits(entries(1, 2), 3)).not.toThrow();
+});

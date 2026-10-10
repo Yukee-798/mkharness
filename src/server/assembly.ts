@@ -1,7 +1,7 @@
 import type { Extension, EntryRecord } from '@earendil-works/pi-durable';
 import { panelTools } from './panel-tools';
 import { webTools } from './web';
-import { runLimits, uiInstructions } from './limits';
+import { runLimits, uiInstructions, toolBudget } from './limits';
 import { staticSkills, exampleSkillSource } from './skills';
 import { exampleExtension } from './extensions';
 
@@ -18,7 +18,7 @@ export async function applicationExtensions(
   };
   return [
     ...(config.ENABLE_EXAMPLE_SKILL === '1' ? [await staticSkills([exampleSkillSource()])] : []),
-    runLimits(entries),
+    runLimits(entries, toolBudget(env as unknown as Record<string, unknown>)),
     webTools(config.TAVILY_API_KEY),
     ...(config.ENABLE_GENERATIVE_UI === '0' ? [] : [panelTools(entries), uiInstructions(entries)]),
     ...(config.ENABLE_EXAMPLE_EXTENSION === '1' ? [exampleExtension()] : []),

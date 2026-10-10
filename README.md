@@ -1,6 +1,6 @@
 # Agent Generative UI
 
-可复制和修改的个人 Agent 应用。用户通过 Google 登录，提交文字任务；Agent 可以回答文字，也可以流式组织 OpenUI 界面、生成计算程序。参数调整在浏览器 QuickJS 中计算，点击“继续分析”才提交新的 Agent 任务。
+可复制和修改的远程 Agent 应用基础模板。应用入口采用 TanStack Start / Router / Query + Cloudflare Workers，推理、队列和完整历史仍由 PiHarness / Pi Durable 管理。用户通过 Google 登录；开发者可以静态装配 Extension、Skills、远程 MCP 与异步服务。已有 assistant-ui、OpenUI 与 QuickJS 交互继续保留。
 
 任务提交、观察和停止分开。关闭页面只断开观察，Durable Object 中的 PiHarness 继续执行；返回后从完整 Pi 历史恢复。程序、数据和界面使用成功工具历史，不建立第二套产物表。
 
@@ -50,6 +50,8 @@ https://YOUR_WORKER_DOMAIN/api/auth/callback/google
 
 ## Cloudflare 部署
 
+已有部署升级时，保持 Worker 名称、DB / CONVERSATIONS binding、D1 database_id、DO namespace、ConversationAgent 类名和 migrations 不变；仅更换构建入口不需要创建新存储。下面“创建新资源”的步骤仅适用于复制模板首次安装。发布前检查已运行任务所依赖的 Extension/task 定义仍存在，不支持运行中热换代码或无迁移地改变 task 语义。
+
 先登录 Wrangler，创建全新的 D1 数据库，将返回 ID 写入对应配置。首个 DO `v1` 迁移创建 SQLite-backed `ConversationAgent`；不要手工创建或迁移上游 Pi 表。
 
 ```sh
@@ -81,6 +83,71 @@ pnpm deploy:test
 ```
 
 当前测试环境允许先部署未配置的外壳：`secrets.required` 为空，认证仍拒绝服务并返回清楚错误。完成配置后可将它设为与根配置相同的四个 required secrets。此行为只为独立环境启动验证；不能据此声称完成 Google 登录、任务续跑或模型验收。用自己的隔离测试凭据完成 [云端验收清单](docs/validation/acceptance.md)。
+
+## TanStack 入口与私有缓存
+
+`src/server.ts` 将 `/api/*` 转交已有 Hono，其余请求交 Start，具名导出原 `ConversationAgent`。`src/router.tsx` 每次创建独立 QueryClient；文件路由验证 `/?chat=<id>`。聊天子树延迟加载到客户端，SSR 不读取 localStorage、启动浏览器 Worker 或建立 SSE。页面与 API 返回 private/no-store。
+
+Query 负责用户目录和快照读取（模型目录仍随快照返回）；缓存键包含 userId / chatId，退出或切换账号清理旧用户缓存。预加载、窗口聚焦及普通读取更新不提交任务，不重新导入消息或 attach。HTTP Composer、AG-UI attach 和 Stop 保持独立；Query 不替代流式消息 runtime。
+
+## 原生扩展与远端服务
+
+开发者装配入口是 `src/server/assembly.ts`，返回 `Extension[] | Promise<Extension[]>`；`ConversationAgent.extensions()` 在此基础上安装会话内的 MCP 和异步示例。工具、task kind、section 与 Extension 名称必须稳定且不重名；需要包装时使用原生 wraps。保留旧 kind/version 才能恢复 pending task，删除定义会产生明确恢复失败。
+
+可选配置：
+
+| 配置                       | 默认与含义                                                     |
+| -------------------------- | -------------------------------------------------------------- |
+| `ENABLE_GENERATIVE_UI`     | 默认开启；`0` 关闭 UI 工具及其提示词，基础 Agent 仍可用        |
+| `ENABLE_EXAMPLE_EXTENSION` | `1` 启用 `describe_text` 示例（tool / section / hook）         |
+| `ENABLE_EXAMPLE_SKILL`     | `1` 启用静态来源示例                                           |
+| `TOOL_CALL_LIMIT`          | 默认 40，每提交的正整数工具预算；模型仍最多 20 轮              |
+| `MCP_SERVERS`              | 默认 `[]`，开发者配置的 HTTPS Streamable HTTP 服务             |
+| `ASYNC_SERVICE_URL`        | 未设置则关闭具体异步服务示例                                   |
+| `ASYNC_SERVICE_TOKEN`      | 可选服务端 Bearer 凭据                                         |
+| `ASYNC_RECOVERY`           | `none` / `key` / `lookup`，默认 `none`；必须匹配真实供应商契约 |
+
+`src/server/extensions.ts` 提供最小原生示例；前端静态结果组件注册在 `src/browser/tool-results.tsx`，与 assistant-ui 工具详情分开显示。未知工具保留有界请求/结果详情。部署代码可信，终端用户不能安装代码；没有插件市场或第二套 SDK。
+
+Skills 使用 `src/server/skills.ts` 的预检与原生 `skills(sources)` 桥接。正文和资源在装配时从部署内的受信任来源读取，模型只先看到目录，激活后才得到正文。增加自己的 `SkillSource` 和静态 Markdown / 文本资源即可；不要通过浏览器或模型提供任意 URL / 路径。资源读取保留在 Pi 历史，脚本文本不会执行，也不会注册新工具。仅作类型使用的 `agents/skills` 必须 type-only 导入，避免把未启用的脚本执行依赖引入构建。
+
+MCP 配置示例（只包含凭据变量名）：
+
+```json
+[
+  {
+    "serverId": "reference",
+    "endpoint": "https://YOUR_MCP_HOST/mcp",
+    "allowlist": ["lookup"],
+    "credential": "REFERENCE_MCP_TOKEN"
+  }
+]
+```
+
+将 JSON 写入 `MCP_SERVERS`，凭据放入对应 Cloudflare Secret。连接/发现 15 秒，调用 30 秒；输入、结果及绑定定义各有 1 MiB 上限。仅接入支持的 JSON Schema、文本、structuredContent 和 isError；不支持的块明确失败，不执行 HTML、自动读取资源 URI 或启动 stdio。工具映射为 `mcp_<serverId>_<toolName>`，超过 64 字符或冲突时拒绝，不截断。首次接受的定义保存在 Pi conversation document；重建重新连接并验证原定义，schema、endpoint、描述或 replay 策略变化不能静默替换。可选服务离线时本地工具仍可用。
+
+默认 replay unsafe。仅当开发者已验证整个调用可安全恢复时，才在配置的 `safeTools` 中列出工具。供应商提示的 readOnly/idempotent annotations 不代替验收。Google 登录不表示用户已授权外部账号；本期使用应用服务凭据，每用户 MCP OAuth 延后。
+
+### 具体异步服务示例
+
+`src/server/remote-example.ts` 是一个具体接入示例，服务必须自行实现：
+
+| HTTP                          | 示例契约                                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `POST <base>/requests`        | `{prompt}` + `Idempotency-Key` → `{id}`                                                  |
+| `GET <base>/requests?key=…`   | 仅 `lookup` 模式：按原键查 `{id}`，不创建新任务                                          |
+| `GET <base>/requests/<id>`    | `{status:"pending"}` 或 `{status:"completed",result:…}`；失败/取消分别为 failed/canceled |
+| `DELETE <base>/requests/<id>` | `{status:"canceled"}`；不支持取消使用 405/409/501                                        |
+
+这不是所有供应商通用的 Job API；对接供应商时修改具体 Extension 的 submit/query/cancel，不新增调度器。`key` 模式要求同键、同参数的 POST 永远返回同一操作；`lookup` 模式要求稳定查询原键。无法证明时保持 `none`，不能以重试 HTTP 请求模拟幂等。
+
+父工具在一次 `api.commit` 中创建普通所有权子任务并保存 childTaskId。子任务先提交意图，再进行远端副作用；得到 ID 后保存引用，等待期间使用 Pi checkpoint / sleep / Lifecycle，不调用模型轮询。默认等待 10 分钟，间隔 1/2/5/10/15 秒封顶，单次请求最多 30 秒；deadline 和 nextPollAt 跨重启保留。引用绑定原服务地址，配置重指后不会向新服务发送旧 ID。
+
+已知 ID 只查询原任务；已接受但 ID 未保存时通过供应商契约调和，否则返回 `remote_outcome_unknown`。宿主 beforeTool 和执行入口均阻止新副作用调用，当前自动流程在模型边界结束；普通只读回答仍可用。显式“重新执行（可能重复执行）”引用原 Pi task，走已有 `/runs` 接口，以新 runId 一次性授权对应操作，宿主绑定原输入。复查只读取原操作；客户端不能提供任意 remoteId/serverId/toolName。重复接受请求使用同一个 runId。
+
+Stop 使用子任务的新 abort invocation 尝试有界取消；本地 idle 与远端 canceled 分开。取消不支持、失败、未知及等待到期都保留引用，用户可以复查。无沙箱时不能强杀不合作的宿主代码；stopping 必须等待实际收束。成功且结果已写入 Pi 历史的冗余意图，在下一次空闲准入时清理；未决引用保留。进度从已提交 documents 投影到现有快照/AG-UI，浏览器没有远端凭据或 ID。
+
+恢复元数据只有 MCP 定义绑定、远端调用意图/引用两类 Pi documents；未新增任务、插件或结果表。附件、R2、沙箱、媒体业务、支付订阅及人工审批留作后续扩展。
 
 ## 代码入口与扩展
 
@@ -162,6 +229,6 @@ pnpm build
 pnpm exec wrangler deploy --dry-run
 ```
 
-首次浏览器测试需 `pnpm exec playwright install chromium`。测试夹具替换模型 I/O，但 PiHarness / D1 / SQLite / workerd 真实运行；浏览器测试使用真实 QuickJS WASM、OpenUI 和 assistant-ui。夹具入口只在测试配置中，不进入生产构建。原有研究消融仅为基线，产品验证记录在 [implementation.md](docs/validation/implementation.md)，真实模型与云端结果另列，未完成不会用模拟结果填充。
+首次浏览器测试需 `pnpm exec playwright install chromium`。测试夹具替换模型 I/O，但 PiHarness / D1 / SQLite / workerd 真实运行；浏览器测试使用真实 QuickJS WASM、OpenUI 和 assistant-ui。夹具入口只在测试配置中，不进入生产构建。原有研究消融仅为基线，产品验证记录在 [implementation.md](docs/validation/implementation.md)，真实模型与云端结果另列，未完成不会用模拟结果填充。基础层迁移与故障矩阵见 [foundation.md](docs/validation/foundation.md)。浏览器验收使用独立端口 5174 和 `.wrangler/e2e` 本地存储，不改动产品开发端口 5173 或其 SQLite 数据。
 
 MIT；上游和借用组件归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

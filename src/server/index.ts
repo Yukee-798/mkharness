@@ -9,6 +9,10 @@ import {
   type RawState,
 } from '../shared/contracts';
 const app = new Hono<{ Bindings: Env; Variables: { userId: string; conversationId: string } }>();
+app.use('/api/*', async (c, next) => {
+  c.header('Cache-Control', 'private, no-store');
+  await next();
+});
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth(c.env).handler(c.req.raw));
 app.use('/api/*', async (c, next) => {
   const session = await auth(c.env).api.getSession({ headers: c.req.raw.headers });

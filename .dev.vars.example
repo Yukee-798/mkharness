@@ -11,3 +11,17 @@ MODEL_API_KEY=
 MODEL_IDS=
 MODEL_THINKING_LEVEL=low
 TAVILY_API_KEY=
+
+# Developer-installed native capabilities
+ENABLE_GENERATIVE_UI=1
+ENABLE_EXAMPLE_EXTENSION=0
+ENABLE_EXAMPLE_SKILL=0
+TOOL_CALL_LIMIT=40
+# JSON configuration, credentials referenced by env variable name only.
+MCP_SERVERS=[]
+# REFERENCE_MCP_TOKEN=
+# Concrete async example: disabled until URL is configured.
+ASYNC_SERVICE_URL=
+ASYNC_SERVICE_TOKEN=
+# none: never automatically repeat an uncertain submit; key/lookup require verified provider semantics.
+ASYNC_RECOVERY=none

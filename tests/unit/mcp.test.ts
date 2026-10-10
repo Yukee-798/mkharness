@@ -144,3 +144,28 @@ it('keeps pinned tools unavailable on disconnect and rejects oversized output', 
   expect(unsupported.extension.tools).toHaveLength(0);
   expect(unsupported.diagnostics[0].code).toBe('mcp_schema_unsupported');
 });
+it('disables malformed schemas and overlong mapped names instead of weakening the tool', async () => {
+  for (const inputSchema of [
+    { ...schema, required: 'query' },
+    { ...schema, additionalProperties: 'yes' },
+    { ...schema, properties: { query: { type: 'string', minLength: '1' } } },
+  ]) {
+    const built = await buildMcp(manager(inputSchema), configs, {});
+    expect(built.extension.tools).toHaveLength(0);
+    expect(built.diagnostics[0].code).toBe('mcp_schema_unsupported');
+  }
+  const built = await buildMcp(manager(), [{ ...configs[0], serverId: 'a'.repeat(32) }], {});
+  // Long remote names must not be truncated into an ambiguous mapping.
+  const longManager = {
+    ...manager(),
+    listTools: () => [{ name: 't'.repeat(64), inputSchema: schema }],
+  };
+  const long = await buildMcp(
+    longManager as any,
+    [{ ...configs[0], serverId: 'a'.repeat(32), allowlist: ['t'.repeat(64)] }],
+    {},
+  );
+  expect(built.extension.tools![0].name.length).toBeLessThanOrEqual(64);
+  expect(long.extension.tools).toHaveLength(0);
+  expect(long.diagnostics[0].code).toBe('mcp_name_invalid');
+});

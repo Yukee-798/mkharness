@@ -25,7 +25,7 @@ import {
   type RemoteConfig,
 } from './remote-example';
 import { validateExtensions } from './extensions';
-import { withRunLimits } from './limits';
+import { withRunLimits, toolBudget } from './limits';
 import { validateUI } from './panel-tools';
 import { successfulTool } from '../shared/references';
 import { observeRun } from './observe';
@@ -114,6 +114,7 @@ export class ConversationAgent extends Agent<Env> {
               this.models(),
               () => this.allEntries(),
               () => this.modelDispatch(),
+              toolBudget(this.env as unknown as Record<string, unknown>),
             ),
             registry,
             settings: {
@@ -137,7 +138,17 @@ export class ConversationAgent extends Agent<Env> {
         // Native Pi leaves incompatible definitions blocked. Settle them explicitly on deployment
         // recovery so unsupported work cannot hold the conversation in a permanent running state.
         for (const task of (await pi.inspect(context)).tasks)
-          if (task.state.kind === 'blocked') await pi.abortTask(task.record.id, context);
+          if (task.state.kind === 'blocked') {
+            await pi.abortTask(task.record.id, context);
+            if (await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, context))
+              await pi.commit(async (tx) => {
+                for (const operation of Object.values(
+                  (await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID)).operations,
+                ))
+                  if (operation.childTaskId === Number(task.record.id))
+                    operation.status = 'unknown';
+              }, context);
+          }
         return pi;
       },
     });
@@ -304,6 +315,14 @@ export class ConversationAgent extends Agent<Env> {
             ).snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
             const original = doc?.operations[command.source.taskId];
             if (!original) throw new AppError(404, 'remote_reference_not_found');
+            if (!this.remoteConfiguration())
+              throw new AppError(503, 'remote_disabled', '远端能力当前不可用，请联系应用维护者。');
+            if (original.service !== this.remoteConfiguration()?.endpoint)
+              throw new AppError(
+                409,
+                'remote_configuration_changed',
+                '远端服务配置已更改，请联系应用维护者。',
+              );
             if (command.source.action === 'retry_remote' && !remoteBlocked(original))
               throw new AppError(409, 'remote_retry_unnecessary');
           }

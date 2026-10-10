@@ -15,7 +15,10 @@ export class ConversationAgent extends Base {
     const sql = this.ctx.storage.sql;
     if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_remote'").toArray().length)
       return {
-        endpoint: 'https://async.example.test',
+        endpoint: String(
+          sql.exec('SELECT * FROM test_remote').toArray()[0].endpoint ??
+            'https://async.example.test',
+        ),
         recovery: sql.exec('SELECT mode FROM test_remote').toArray()[0].mode as
           'key' | 'none' | 'lookup',
         waitMs: Number(sql.exec('SELECT * FROM test_remote').toArray()[0].wait_ms ?? 5000),
@@ -35,7 +38,7 @@ export class ConversationAgent extends Base {
     return fixtureModels();
   }
   protected override async extensions() {
-    return [
+    const extensions = [
       ...(await super.extensions()),
       exampleExtension(),
       await staticSkills([exampleSkillSource()]),
@@ -83,6 +86,38 @@ export class ConversationAgent extends Base {
         ],
       },
     ];
+    // Deliberately broken host for a negative control; never part of the production entry.
+    if (
+      this.ctx.storage.sql
+        .exec("SELECT name FROM sqlite_master WHERE name='test_guardless'")
+        .toArray().length
+    )
+      return extensions.map((extension) =>
+        extension.name === 'remote-example'
+          ? {
+              ...extension,
+              hooks: [],
+              tools: extension.tools!.map((tool) =>
+                tool.name === 'example_generate'
+                  ? {
+                      ...tool,
+                      replay: 'unsafe' as const,
+                      execute: async (args: Record<string, unknown>) => {
+                        await fetch('https://async.example.test/requests', {
+                          method: 'POST',
+                          body: JSON.stringify(args),
+                        });
+                        return {
+                          content: [{ type: 'text' as const, text: 'guardless negative control' }],
+                        };
+                      },
+                    }
+                  : tool,
+              ),
+            }
+          : extension,
+      );
+    return extensions;
   }
 }
 export default { fetch: () => new Response('test fixture') };

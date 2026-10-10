@@ -66,6 +66,7 @@ export type Snapshot = {
   modelCatalog?: ModelCatalog;
   selection?: ModelSelection;
   remote?: RemoteProgress[];
+  runtimeIssues?: { taskId: number; code: string }[];
 };
 export async function loadSnapshot(id: string, signal?: AbortSignal) {
   const first = await request<Snapshot>(`/conversations/${id}/snapshot`, { signal });
@@ -100,6 +101,7 @@ export function Chat({
   });
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
+    [restoration, setRestoration] = useState(0),
     [error, setError] = useState(''),
     [text, setText] = useState(''),
     [accepted, setAccepted] = useState<string[]>([]),
@@ -132,6 +134,7 @@ export function Chat({
       if (!active || !s) return;
       restoredRevision.current = revision;
       setSnapshot(s);
+      setRestoration(revision);
       setRemote(s.remote ?? []);
       setAccepted([]);
       if (!s.pending.length)
@@ -206,6 +209,11 @@ export function Chat({
   const ComposerRoot = snapshot ? ComposerPrimitive.Root : 'form';
   const footer = (
     <div className="space-y-3">
+      {!!snapshot?.runtimeIssues?.length && (
+        <Alert>
+          <AlertDescription>部分任务无法恢复，请联系应用维护者。</AlertDescription>
+        </Alert>
+      )}
       {remote
         .filter((o) =>
           [
@@ -420,6 +428,7 @@ export function Chat({
           <Runtime
             id={id}
             snapshot={snapshot}
+            restoration={restoration}
             submit={submit}
             done={refresh}
             reconnect={reconnect}
@@ -440,6 +449,7 @@ export function Chat({
 function Runtime({
   id,
   snapshot,
+  restoration,
   submit,
   done,
   reconnect,
@@ -449,6 +459,7 @@ function Runtime({
 }: {
   id: string;
   snapshot: Snapshot;
+  restoration: number;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
   done: () => void;
   reconnect: (replacement?: boolean) => void;
@@ -503,7 +514,7 @@ function Runtime({
       });
     // AttachAgent cancellation closes observation only; durable work continues on the server.
     return () => runtime.thread.cancelRun();
-  }, [runtime, history, snapshot]);
+  }, [runtime, history, snapshot, restoration]);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ChatContext value={{ id, submit }}>

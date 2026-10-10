@@ -87,7 +87,7 @@ async function setup(mode: string, waitMs = 5000) {
   });
   return stub;
 }
-it.each(['key', 'none'] as const)(
+it.each(['key', 'lookup', 'none'] as const)(
   'accepted-without-ID gap survives eviction (%s recovery)',
   async (mode) => {
     let submits = 0;
@@ -112,6 +112,8 @@ it.each(['key', 'none'] as const)(
         }
         return Response.json({ id: 'same-operation' });
       }
+      if (new URL(request.url).searchParams.has('key'))
+        return Response.json({ id: 'same-operation' });
       return Response.json({ status: 'completed', result: { recovered: true } });
     });
     let stub = await setup(mode);
@@ -124,7 +126,7 @@ it.each(['key', 'none'] as const)(
       await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
       const op = Object.values(await operations(stub))[0];
       expect(op.deadline).toBe(deadline);
-      expect(op.status).toBe(mode === 'key' ? 'completed' : 'unknown');
+      expect(op.status).toBe(mode === 'none' ? 'unknown' : 'completed');
       expect(new Set(keys).size).toBe(1);
       expect(submits).toBe(mode === 'key' ? 2 : 1);
       if (mode === 'none') {
@@ -297,3 +299,189 @@ it('committed progress reaches AG-UI state snapshots and restoration without lea
     network.mockRestore();
   }
 });
+
+it('service reconfiguration never sends an old reference to a new endpoint', async () => {
+  let redirected = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.url.startsWith('https://other.example.test')) redirected++;
+    return Response.json(
+      request.method === 'POST' ? { id: 'old-service-id' } : { status: 'pending' },
+    );
+  });
+  let stub = await setup('key');
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !!Object.values(await operations(stub))[0]?.remoteId);
+    await runInDurableObject(stub, (_, state) => {
+      state.storage.sql.exec('ALTER TABLE test_remote ADD COLUMN endpoint TEXT');
+      state.storage.sql.exec("UPDATE test_remote SET endpoint='https://other.example.test'");
+    });
+    await abortAllDurableObjects();
+    stub = env.CONVERSATIONS.get(stub.id);
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    const original = Object.values(await operations(stub))[0];
+    expect(original).toMatchObject({
+      status: 'unknown',
+      remoteId: 'old-service-id',
+      service: 'https://async.example.test',
+    });
+    expect(redirected).toBe(0);
+    expect(
+      await stub.submitRun({
+        runId: crypto.randomUUID(),
+        text: 'recheck',
+        source: { action: 'recheck_remote', taskId: original.taskId },
+      }),
+    ).toMatchObject({ error: { code: 'remote_configuration_changed' } });
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});
+
+it('ablation: removing the durable parent reference exposes duplicate submissions after reconstruction', async () => {
+  let submits = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === 'POST') {
+      submits++;
+      return Response.json({ id: 'operation-' + submits });
+    }
+    return Response.json({ status: 'pending' });
+  });
+  let stub = await setup('key', 400);
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !!Object.values(await operations(stub))[0]?.remoteId);
+    await runInDurableObject(stub, async (instance) => {
+      const pi = await instance.harness.pi(),
+        root = await instance.root();
+      await pi.commit(async (tx) => {
+        (await tx.doc(RemoteIntents, root.id)).operations = {};
+      }, BG);
+    });
+    await abortAllDurableObjects();
+    stub = env.CONVERSATIONS.get(stub.id);
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(submits).toBeGreaterThan(1);
+    // Positive control in the first test retains the same reference and submits exactly once.
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});
+
+it('ablation: unsafe replay alone cannot stop a fresh model call when both host guards are removed', async () => {
+  let submits = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    submits++;
+    if (submits === 1) throw new Error('accepted without acknowledgement');
+    return Response.json({ id: 'duplicate-side-effect' });
+  });
+  let stub = await setup('none');
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(Object.values(await operations(stub))[0].status).toBe('unknown');
+    await runInDurableObject(stub, (_, state) =>
+      state.storage.sql.exec('CREATE TABLE test_guardless (key TEXT)').toArray(),
+    );
+    await abortAllDurableObjects();
+    stub = env.CONVERSATIONS.get(stub.id);
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example changed arguments' });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(submits).toBe(2);
+    // Positive control above keeps the host checks and remains at one submit for the same new call.
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});
+
+it.each(['before-submit', 'completed-before-result', 'stop-marker'] as const)(
+  'fault recovery at %s retains one remote operation',
+  async (fault) => {
+    let submits = 0,
+      queries = 0,
+      completed = false,
+      cancels = 0;
+    const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method === 'POST') {
+        submits++;
+        return Response.json({ id: 'original' });
+      }
+      if (request.method === 'DELETE') {
+        cancels++;
+        return Response.json({ status: 'canceled' });
+      }
+      queries++;
+      if (fault === 'completed-before-result' && queries === 1) {
+        completed = true;
+        await new Promise<void>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error('lost result')), 2000);
+          request.signal.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              reject(new Error('evicted'));
+            },
+            { once: true },
+          );
+        });
+      }
+      return Response.json(
+        fault === 'stop-marker'
+          ? { status: 'pending' }
+          : { status: 'completed', result: { originalResult: 7 } },
+      );
+    });
+    let stub = await setup('key');
+    try {
+      await stub.submitRun({
+        runId: crypto.randomUUID(),
+        text: fault === 'before-submit' ? 'slow remote example' : 'remote example',
+      });
+      if (fault === 'before-submit') expect(submits).toBe(0);
+      if (fault === 'completed-before-result') await waitUntil(async () => completed);
+      if (fault === 'stop-marker') {
+        await waitUntil(async () => !!Object.values(await operations(stub))[0]?.remoteId);
+        await stub.submitRun({ runId: crypto.randomUUID(), text: 'queued must withdraw' });
+        await runInDurableObject(stub, (_, state) =>
+          state.storage.sql
+            .exec(
+              "INSERT INTO app_meta VALUES('stopping','1') ON CONFLICT(key) DO UPDATE SET value='1'",
+            )
+            .toArray(),
+        );
+      }
+      await abortAllDurableObjects();
+      stub = env.CONVERSATIONS.get(stub.id);
+      await waitUntil(async () => {
+        const s = JSON.parse(await stub.snapshot());
+        return !s.pending.length && !s.stopping;
+      });
+      expect(submits).toBe(1);
+      const snapshot = JSON.parse(await stub.snapshot());
+      if (fault === 'stop-marker') {
+        expect(cancels).toBe(1);
+        expect(Object.values(await operations(stub))[0]).toMatchObject({
+          status: 'canceled',
+          remoteStatus: 'canceled',
+        });
+        expect(JSON.stringify(snapshot.entries)).not.toContain('queued must withdraw');
+      } else {
+        expect(
+          snapshot.entries
+            .flatMap((e: any) => e.model ?? [])
+            .filter((m: any) => m.role === 'toolResult' && m.toolName === 'example_generate'),
+        ).toHaveLength(1);
+        expect(JSON.stringify(snapshot.entries)).toContain('originalResult');
+      }
+    } finally {
+      await abortAllDurableObjects();
+      network.mockRestore();
+    }
+  },
+);

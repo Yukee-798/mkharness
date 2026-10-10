@@ -107,6 +107,50 @@ function schemaAccepted(schema: unknown, depth = 0): schema is MCPBinding['schem
   ]);
   if (Object.keys(s).some((key) => !keys.has(key))) return false;
   if (
+    'required' in s &&
+    (!Array.isArray(s.required) || !s.required.every((v) => typeof v === 'string'))
+  )
+    return false;
+  if (
+    'additionalProperties' in s &&
+    typeof s.additionalProperties !== 'boolean' &&
+    (typeof s.additionalProperties !== 'object' || s.additionalProperties === null)
+  )
+    return false;
+  if (
+    'properties' in s &&
+    (s.properties === null || typeof s.properties !== 'object' || Array.isArray(s.properties))
+  )
+    return false;
+  for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf'])
+    if (
+      key in s &&
+      (typeof s[key] !== 'number' ||
+        !Number.isFinite(s[key]) ||
+        (key === 'multipleOf' && (s[key] as number) <= 0))
+    )
+      return false;
+  for (const key of [
+    'minLength',
+    'maxLength',
+    'minItems',
+    'maxItems',
+    'minProperties',
+    'maxProperties',
+  ])
+    if (key in s && (!Number.isSafeInteger(s[key]) || (s[key] as number) < 0)) return false;
+  if ('pattern' in s) {
+    if (typeof s.pattern !== 'string' || s.pattern.length > 4096) return false;
+    try {
+      new RegExp(s.pattern);
+    } catch {
+      return false;
+    }
+  }
+  for (const key of ['title', 'description'])
+    if (key in s && typeof s[key] !== 'string') return false;
+  if ('enum' in s && (!Array.isArray(s.enum) || !s.enum.length)) return false;
+  if (
     s.type !== undefined &&
     !['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'].includes(
       s.type as string,
@@ -262,6 +306,15 @@ export async function buildMcp(
     if (!previous.length) {
       for (const tool of discovered) {
         if (!config.allowlist.includes(tool.name)) continue;
+        const name = `mcp_${config.serverId.replaceAll('-', '_')}_${tool.name}`;
+        if (!validTool.test(name)) {
+          diagnostics.push({
+            serverId: config.serverId,
+            toolName: tool.name,
+            code: 'mcp_name_invalid',
+          });
+          continue;
+        }
         if (
           !validTool.test(tool.name) ||
           !schemaAccepted(tool.inputSchema) ||
@@ -278,13 +331,23 @@ export async function buildMcp(
           serverId: config.serverId,
           endpoint: config.endpoint,
           remoteName: tool.name,
-          name: `mcp_${config.serverId.replaceAll('-', '_')}_${tool.name}`,
+          name,
           schema: tool.inputSchema as MCPBinding['schema'],
           description: (tool.description ?? tool.name).slice(0, 4096),
           replay: config.safeTools?.includes(tool.name) ? 'safe' : 'unsafe',
         };
         if (bindings.some((b) => b.name === binding.name))
           throw new AppError(503, 'mcp_name_collision');
+        try {
+          jsonText([...bindings, binding]);
+        } catch {
+          diagnostics.push({
+            serverId: config.serverId,
+            toolName: tool.name,
+            code: 'mcp_definition_too_large',
+          });
+          continue;
+        }
         bindings.push(binding);
       }
     } else

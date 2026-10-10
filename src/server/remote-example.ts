@@ -8,6 +8,7 @@ import {
   type Extension,
   type TaskId,
   type EntryRecord,
+  type TaskRuntime,
 } from '@earendil-works/pi-durable';
 import { AppError, type RunCommand } from '../shared/contracts';
 import { canonicalJson, jsonText, finiteJson, type Json } from '../shared/compute';
@@ -121,8 +122,42 @@ export function remoteExample(
   host: { identity: string; command: () => Promise<RunCommand> },
 ): Extension {
   const intervals = config.pollMs ?? [1000, 2000, 5000, 10000, 15000];
-  if (!intervals.length || intervals.some((ms) => !Number.isFinite(ms) || ms <= 0))
+  remoteConfiguration({ ASYNC_SERVICE_URL: config.endpoint, ASYNC_RECOVERY: config.recovery });
+  if (
+    !intervals.length ||
+    intervals.some((ms) => !Number.isSafeInteger(ms) || ms <= 0) ||
+    [config.waitMs ?? 600000, config.requestMs ?? 30000].some(
+      (ms) => !Number.isSafeInteger(ms) || ms <= 0,
+    )
+  )
     throw new AppError(503, 'remote_configuration_invalid');
+  async function incompatible(
+    input: Input,
+    runtime: TaskRuntime<Input, State, Result, Record<string, never>>,
+    context: Parameters<typeof runtime.commit>[1],
+  ) {
+    const operation = (await runtime.snapshot(RemoteIntents, runtime.conversationId, context))
+      ?.operations[input.parentId];
+    if (operation?.childTaskId === Number(runtime.taskId) && operation.service === config.endpoint)
+      return false;
+    await runtime.commit(async (tx) => {
+      const intent = (await tx.doc(RemoteIntents, runtime.conversationId)).operations[
+        input.parentId
+      ];
+      if (intent?.childTaskId === Number(runtime.taskId)) intent.status = 'unknown';
+      return {
+        status: 'terminal',
+        outcome: {
+          status: 'completed',
+          result: {
+            ok: false,
+            code: operation ? 'remote_configuration_changed' : 'remote_reference_missing',
+          },
+        },
+      };
+    }, context);
+    return true;
+  }
   async function request(
     path: string,
     method: string,
@@ -176,6 +211,7 @@ export function remoteExample(
     initial: (input) => ({ phase: 'prepare', deadline: input.deadline, nextPollAt: 0, attempt: 0 }),
     phases: {
       prepare: async (current, runtime, context) => {
+        if (await incompatible(current.input, runtime, context)) return;
         if (runtime.now() >= current.input.deadline) {
           await runtime.commit(async (tx) => {
             (await tx.doc(RemoteIntents, runtime.conversationId)).operations[
@@ -239,6 +275,7 @@ export function remoteExample(
         }
       },
       'recover-submit': async (current, runtime, context) => {
+        if (await incompatible(current.input, runtime, context)) return;
         const done = async (code: string) =>
           runtime.commit(async (tx) => {
             (await tx.doc(RemoteIntents, runtime.conversationId)).operations[
@@ -310,6 +347,7 @@ export function remoteExample(
         }
       },
       poll: async (current, runtime, context) => {
+        if (await incompatible(current.input, runtime, context)) return;
         const state = current.state.checkpoint;
         if (runtime.now() < state.nextPollAt) await runtime.sleep(state.nextPollAt, context);
         if (runtime.now() >= state.deadline)
@@ -382,7 +420,11 @@ export function remoteExample(
         ?.operations[current.input.parentId];
       let status = operation?.status === 'prepared' ? 'canceled' : 'cancel_unknown';
       let remoteStatus = operation?.remoteStatus ?? 'unknown';
-      if (operation?.remoteId) {
+      if (
+        operation?.remoteId &&
+        operation.childTaskId === Number(runtime.taskId) &&
+        operation.service === config.endpoint
+      ) {
         try {
           const result = await request(
             '/requests/' + encodeURIComponent(operation.remoteId),
@@ -408,8 +450,10 @@ export function remoteExample(
         const intent = (await tx.doc(RemoteIntents, runtime.conversationId)).operations[
           current.input.parentId
         ];
-        intent.status = status;
-        intent.remoteStatus = remoteStatus;
+        if (intent?.childTaskId === Number(runtime.taskId)) {
+          intent.status = status;
+          intent.remoteStatus = remoteStatus;
+        }
         return {
           status: 'terminal',
           outcome: { status: 'aborted', result: { ok: false, code: 'remote_' + status } },
@@ -501,7 +545,7 @@ export function remoteExample(
               childTaskId: Number(child),
               runId,
               callId: api.callId,
-              service: 'example',
+              service: config.endpoint,
               toolName: 'example_generate',
               fingerprint,
               key,
@@ -540,6 +584,8 @@ export function remoteExample(
           const original = (await api.snapshot(RemoteIntents, api.conversationId, context))
             ?.operations[originalId];
           if (!original) throw new AppError(404, 'remote_reference_not_found');
+          if (original.service !== config.endpoint)
+            throw new AppError(409, 'remote_configuration_changed');
           let remoteId = original.remoteId;
           if (!remoteId && config.recovery === 'lookup') {
             const found = await request(
