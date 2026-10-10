@@ -11,6 +11,18 @@ import {
   type ToolExecutionApi,
 } from '@earendil-works/pi-durable';
 export class ConversationAgent extends Base {
+  protected override remoteConfiguration() {
+    const sql = this.ctx.storage.sql;
+    if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_remote'").toArray().length)
+      return {
+        endpoint: 'https://async.example.test',
+        recovery: sql.exec('SELECT mode FROM test_remote').toArray()[0].mode as
+          'key' | 'none' | 'lookup',
+        waitMs: Number(sql.exec('SELECT * FROM test_remote').toArray()[0].wait_ms ?? 5000),
+        pollMs: [100, 200, 500],
+      };
+    return super.remoteConfiguration();
+  }
   protected override mcpConfiguration() {
     const sql = this.ctx.storage.sql;
     if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_mcp'").toArray().length)

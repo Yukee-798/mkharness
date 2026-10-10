@@ -39,6 +39,15 @@ export function fixtureModels() {
     const last = context.messages.at(-1);
     const tool = text?.includes('ignores_cancel') && last?.role === 'user';
     let content: AssistantMessage['content'] | undefined;
+    if (text?.includes('remote example') && last?.role === 'user')
+      content = [
+        {
+          type: 'toolCall',
+          id: 'same-call',
+          name: 'example_generate',
+          arguments: { prompt: 'hello' },
+        },
+      ];
     if (text?.includes('reordered_case') && last?.role === 'user')
       content = [
         {

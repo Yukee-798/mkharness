@@ -15,6 +15,13 @@ import { AppError, commandSchema, USER_ACTION_CONTEXT, type RunCommand } from '.
 import { jsonText, canonicalJson } from '../shared/compute';
 import { applicationExtensions } from './assembly';
 import { MCPBindings, buildMcp, mcpConfiguration, type MCPConfig } from './mcp';
+import {
+  RemoteIntents,
+  remoteBlocked,
+  remoteExample,
+  remoteConfiguration,
+  type RemoteConfig,
+} from './remote-example';
 import { validateExtensions } from './extensions';
 import { withRunLimits } from './limits';
 import { validateUI } from './panel-tools';
@@ -153,7 +160,7 @@ export class ConversationAgent extends Agent<Env> {
       config,
     );
   }
-  private async modelDispatch() {
+  private async runningCommand() {
     // Pi owns the queue. Resolve the currently running operation, never the newest queued request.
     const running = (await this.harness.pending({ session: '1' })).find(
       (p) => p.status === 'running',
@@ -167,6 +174,13 @@ export class ConversationAgent extends Agent<Env> {
     const stored = row
       ? (JSON.parse(row.payload) as RunCommand & { execution?: ModelSelection })
       : undefined;
+    return stored;
+  }
+  private async modelDispatch() {
+    const stored = await this.runningCommand();
+    const doc = await (await this.harness.pi()).snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
+    if (Object.values(doc?.operations ?? {}).some(remoteBlocked))
+      throw new AppError(409, 'remote_outcome_unknown');
     const selection = stored?.execution ?? stored?.config ?? this.selection();
     const model = this.models().getModel(this.env.MODEL_PROVIDER, selection.modelId);
     if (!model)
@@ -180,10 +194,26 @@ export class ConversationAgent extends Agent<Env> {
   protected mcpConfiguration(): MCPConfig[] {
     return mcpConfiguration(this.env as unknown as Record<string, unknown>);
   }
+  protected remoteConfiguration(): RemoteConfig | undefined {
+    return remoteConfiguration(this.env as unknown as Record<string, unknown>);
+  }
   protected async extensions(): Promise<Extension[]> {
+    const remote = this.remoteConfiguration();
     return [
       ...(await applicationExtensions(this.env, () => this.allEntries())),
       ...(this.mcpPrepared ? [this.mcpPrepared.extension] : []),
+      ...(remote
+        ? [
+            remoteExample(remote, {
+              identity: this.ctx.id.toString(),
+              runId: async () => {
+                const command = await this.runningCommand();
+                if (!command) throw new AppError(409, 'run_context_missing');
+                return command.runId;
+              },
+            }),
+          ]
+        : []),
     ];
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
