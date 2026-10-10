@@ -618,7 +618,15 @@ export function remoteExample(
               current.status = current.remoteStatus;
           }, context);
           return {
-            content: [{ type: 'text', text: jsonText(response) }],
+            content: [
+              {
+                type: 'text',
+                text: jsonText({
+                  status: typeof response.status === 'string' ? response.status : 'unknown',
+                  ...('result' in response ? { result: response.result } : {}),
+                }),
+              },
+            ],
             details: { remoteTaskId: originalId },
           };
         },

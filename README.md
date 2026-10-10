@@ -124,7 +124,7 @@ MCP 配置示例（只包含凭据变量名）：
 ]
 ```
 
-将 JSON 写入 `MCP_SERVERS`，凭据放入对应 Cloudflare Secret。连接/发现 15 秒，调用 30 秒；输入、结果及绑定定义各有 1 MiB 上限。仅接入支持的 JSON Schema、文本、structuredContent 和 isError；不支持的块明确失败，不执行 HTML、自动读取资源 URI 或启动 stdio。工具映射为 `mcp_<serverId>_<toolName>`，超过 64 字符或冲突时拒绝，不截断。首次接受的定义保存在 Pi conversation document；重建重新连接并验证原定义，schema、endpoint、描述或 replay 策略变化不能静默替换。可选服务离线时本地工具仍可用。
+将 JSON 写入 `MCP_SERVERS`，凭据放入对应 Cloudflare Secret。连接/发现 15 秒，调用 30 秒；输入、结果及绑定定义各有 1 MiB 上限。仅接入支持的 JSON Schema、文本、structuredContent 和 isError；不支持的块明确失败，不执行 HTML、自动读取资源 URI 或启动 stdio。工具映射为 `mcp_<serverId>_<toolName>`，超过 64 字符或冲突时拒绝，不截断。首次接受的定义保存在 Pi conversation document；重建重新连接并验证原定义，schema、endpoint、描述或 replay 策略变化不能静默替换。调用前也核对 SDK 已缓存的在线目录，已知变更会禁用对应绑定，不新增网络轮询。可选服务离线时本地工具仍可用。
 
 默认 replay unsafe。仅当开发者已验证整个调用可安全恢复时，才在配置的 `safeTools` 中列出工具。供应商提示的 readOnly/idempotent annotations 不代替验收。Google 登录不表示用户已授权外部账号；本期使用应用服务凭据，每用户 MCP OAuth 延后。
 

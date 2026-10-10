@@ -54,6 +54,19 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
     expect(JSON.stringify(before.entries)).toContain('found');
     expect(calls).toBe(1);
     changed = true;
+    await runInDurableObject(stub, async (instance) => {
+      // Refresh the actual SDK catalog in this test; production calls use its existing cache.
+      expect((await instance.mcp.discoverIfConnected('reference'))?.success).toBe(true);
+    });
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'mcp lookup live change' });
+    for (let i = 0; i < 100; i++) {
+      if (!JSON.parse(await stub.snapshot()).pending.length) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(JSON.parse(await stub.snapshot()).capabilityIssues).toContainEqual(
+      expect.objectContaining({ code: 'mcp_definition_changed' }),
+    );
+    expect(calls).toBe(1);
     await abortAllDurableObjects();
     stub = env.CONVERSATIONS.get(stub.id);
     await stub.submitRun({ runId: crypto.randomUUID(), text: 'mcp lookup again' });

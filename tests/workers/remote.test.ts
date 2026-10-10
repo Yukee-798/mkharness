@@ -259,6 +259,51 @@ it('only explicit retry authorizes one new operation with original inputs; reado
   }
 });
 
+it('readonly recheck exposes only status and result, not supplier references or response metadata', async () => {
+  let completed = false;
+  let submits = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === 'POST') {
+      submits++;
+      return Response.json({ id: 'server-private-job-id' });
+    }
+    if (request.method === 'DELETE') return new Response(null, { status: 405 });
+    return Response.json({
+      id: 'server-private-job-id',
+      providerMetadata: 'internal-supplier-metadata',
+      status: completed ? 'completed' : 'pending',
+      ...(completed ? { result: { answer: 9 } } : {}),
+    });
+  });
+  const stub = await setup('none');
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !!Object.values(await operations(stub))[0]?.remoteId);
+    await stub.stopConversation();
+    await waitUntil(async () => {
+      const state = JSON.parse(await stub.snapshot());
+      return !state.pending.length && !state.stopping;
+    });
+    completed = true;
+    const original = Object.values(await operations(stub))[0];
+    await stub.submitRun({
+      runId: crypto.randomUUID(),
+      text: 'recheck',
+      source: { action: 'recheck_remote', taskId: original.taskId },
+    });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    const history = JSON.stringify(JSON.parse(await stub.snapshot()).entries);
+    expect(history).toContain('answer');
+    expect(history).not.toContain('server-private-job-id');
+    expect(history).not.toContain('internal-supplier-metadata');
+    expect(submits).toBe(1);
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});
+
 it('committed progress reaches AG-UI state snapshots and restoration without leaking remote references', async () => {
   let submits = 0,
     queries = 0;

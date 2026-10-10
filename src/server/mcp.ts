@@ -192,6 +192,24 @@ const failure = (code: string) => ({
   isError: true,
   content: [{ type: 'text' as const, text: JSON.stringify({ error: { code } }) }],
 });
+function sameDefinition(
+  binding: MCPBinding,
+  tool: ReturnType<MCPClientManager['listTools']>[number] | undefined,
+  config: MCPConfig | undefined,
+) {
+  if (!tool || !config) return false;
+  try {
+    return (
+      config.endpoint === binding.endpoint &&
+      config.allowlist.includes(binding.remoteName) &&
+      canonicalJson(tool.inputSchema) === canonicalJson(binding.schema) &&
+      (tool.description ?? tool.name).slice(0, 4096) === binding.description &&
+      (config.safeTools?.includes(binding.remoteName) ? 'safe' : 'unsafe') === binding.replay
+    );
+  } catch {
+    return false;
+  }
+}
 function convertResult(raw: unknown) {
   finiteJson(raw);
   const value = raw as Record<string, Json>;
@@ -332,7 +350,7 @@ export async function buildMcp(
           endpoint: config.endpoint,
           remoteName: tool.name,
           name,
-          schema: tool.inputSchema as MCPBinding['schema'],
+          schema: structuredClone(tool.inputSchema) as MCPBinding['schema'],
           description: (tool.description ?? tool.name).slice(0, 4096),
           replay: config.safeTools?.includes(tool.name) ? 'safe' : 'unsafe',
         };
@@ -353,13 +371,7 @@ export async function buildMcp(
     } else
       for (const binding of previous) {
         const tool = discovered.find((t) => t.name === binding.remoteName);
-        if (
-          !config.allowlist.includes(binding.remoteName) ||
-          !tool ||
-          canonicalJson(tool.inputSchema) !== canonicalJson(binding.schema) ||
-          (tool.description ?? tool.name).slice(0, 4096) !== binding.description ||
-          (config.safeTools?.includes(binding.remoteName) ? 'safe' : 'unsafe') !== binding.replay
-        ) {
+        if (!sameDefinition(binding, tool, config)) {
           availability.set(binding.name, 'mcp_definition_changed');
           diagnostics.push({
             serverId: config.serverId,
@@ -385,6 +397,26 @@ export async function buildMcp(
           if (availability.has(binding.name)) return failure(availability.get(binding.name)!);
           try {
             jsonText(args);
+            // SDK list_changed notifications update this in-memory catalog. Check it without
+            // network rediscovery and never dispatch a known changed definition under the old name.
+            const tool = manager
+              .listTools({ serverId: binding.serverId })
+              .find((current) => current.name === binding.remoteName);
+            if (
+              !sameDefinition(
+                binding,
+                tool,
+                configs.find((config) => config.serverId === binding.serverId),
+              )
+            ) {
+              availability.set(binding.name, 'mcp_definition_changed');
+              diagnostics.push({
+                serverId: binding.serverId,
+                toolName: binding.remoteName,
+                code: 'mcp_definition_changed',
+              });
+              return failure('mcp_definition_changed');
+            }
             const result = await bounded(
               manager.callTool(
                 { serverId: binding.serverId, name: binding.remoteName, arguments: args },

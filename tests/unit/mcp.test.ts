@@ -169,3 +169,32 @@ it('disables malformed schemas and overlong mapped names instead of weakening th
   expect(long.extension.tools).toHaveLength(0);
   expect(long.diagnostics[0].code).toBe('mcp_name_invalid');
 });
+
+it('refuses live catalog changes before calling and keeps an independent accepted definition', async () => {
+  for (const change of ['schema', 'description', 'removed', 'in-place'] as const) {
+    let tools = [{ name: 'lookup', description: 'Lookup', inputSchema: structuredClone(schema) }];
+    let calls = 0;
+    const live = {
+      ...manager(),
+      listTools: () => tools,
+      callTool: async () => {
+        calls++;
+        return { content: [{ type: 'text', text: 'must not call changed definition' }] };
+      },
+    };
+    const built = await buildMcp(live as any, configs, {});
+    if (change === 'schema') tools = [{ ...tools[0], inputSchema: { ...schema, required: [] } }];
+    if (change === 'description') tools = [{ ...tools[0], description: 'Changed meaning' }];
+    if (change === 'removed') tools = [];
+    if (change === 'in-place') tools[0].inputSchema.required.length = 0;
+    expect(built.bindings[0].schema, change).toEqual(schema);
+    for (let i = 0; i < 2; i++) {
+      const result = await built.extension.tools![0].execute({ query: 'hi' }, {} as any, {} as any);
+      expect(JSON.stringify(result), change).toContain('mcp_definition_changed');
+    }
+    expect(calls, change).toBe(0);
+    expect(built.diagnostics).toEqual([
+      { serverId: 'reference', toolName: 'lookup', code: 'mcp_definition_changed' },
+    ]);
+  }
+});

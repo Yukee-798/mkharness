@@ -120,13 +120,20 @@ export function Chat({
     return () => clearTimeout(timer);
   }, [connection]);
   const { refetch: refetchSnapshot } = query;
-  const restoredRevision = useRef(-1);
+  const restoredRevision = useRef(0);
   useEffect(() => {
-    if (revision !== 0 || !query.data || restoredRevision.current === 0) return;
-    restoredRevision.current = 0;
+    // Idle chats must adopt fresh reads after focus or a cached revisit. Active observation and
+    // explicit restoration own their history; background reads must not interrupt either one.
+    if (
+      restoredRevision.current !== revision ||
+      !query.data ||
+      snapshot?.pending.length ||
+      snapshot === query.data
+    )
+      return;
     setSnapshot(query.data);
     setRemote(query.data.remote ?? []);
-  }, [revision, query.data]);
+  }, [revision, query.data, snapshot]);
   useEffect(() => {
     if (revision === 0) return;
     let active = true;
@@ -502,19 +509,20 @@ function Runtime({
     autoCancelPendingToolCalls: false,
     onError: (e) => callbacks.current.reconnect(e instanceof StreamReplaced),
   });
+  const activeRunId = (snapshot.pending.find((p) => p.status === 'running') ?? snapshot.pending[0])
+    ?.operationId;
   useEffect(() => {
     // Refresh the authoritative Pi entries in place. Their IDs preserve existing message/panel
     // instances; resetting the React runtime here would also reset focus and viewport scrolling.
     runtime.thread.import(history);
-    const pending = snapshot.pending.find((p) => p.status === 'running') ?? snapshot.pending[0];
-    if (pending)
+    if (activeRunId)
       void runtime.thread.resumeRun({
         parentId: history.headId,
-        runConfig: { custom: { mode: 'attach', runId: pending.operationId } },
+        runConfig: { custom: { mode: 'attach', runId: activeRunId } },
       });
     // AttachAgent cancellation closes observation only; durable work continues on the server.
     return () => runtime.thread.cancelRun();
-  }, [runtime, history, snapshot, restoration]);
+  }, [runtime, history, activeRunId, restoration]);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ChatContext value={{ id, submit }}>
