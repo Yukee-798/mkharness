@@ -1,5 +1,50 @@
 import { test, expect } from '@playwright/test';
 
+test('a returned tool error is shown as a failure rather than a completed tool', async ({
+  page,
+}) => {
+  const entries = [
+    {
+      id: 1,
+      model: [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'prepare', name: 'prepare_program', arguments: {} }],
+        },
+      ],
+    },
+    {
+      id: 2,
+      model: [
+        {
+          role: 'toolResult',
+          toolCallId: 'prepare',
+          toolName: 'prepare_program',
+          isError: true,
+          content: [{ type: 'text', text: 'Test case output differs from expected' }],
+        },
+      ],
+    },
+  ];
+  await page.route('**/api/conversations/**', (route) =>
+    route.fulfill({ json: { entries, pending: [], stopping: false } }),
+  );
+  await page.goto('/tests/browser/chat.html');
+  await expect(
+    page.getByRole('button', { name: '执行失败: 准备计算程序', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: '已完成: 准备计算程序', exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByText('Test case output differs from expected', { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: '执行失败: 准备计算程序', exact: true }),
+  ).toBeVisible();
+});
+
 test('assistant markdown renders semantically and keyboard composition submits once over HTTP', async ({
   page,
 }) => {

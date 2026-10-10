@@ -10,9 +10,54 @@ import { createParser } from '@openuidev/lang-core';
 let catalog: Promise<typeof import('../shared/catalog')> | undefined;
 const getLibrary = async () => (await (catalog ??= import('../shared/catalog'))).library;
 import { toolRef, successfulTool } from '../shared/references';
-import { jsonText, jsonEqual, finiteJson, type Program } from '../shared/compute';
+import { jsonText, jsonEqual, finiteJson, type Program, type Json } from '../shared/compute';
 import { computeProgram } from './compute';
 import { validateSlider } from '../shared/slider';
+function difference(
+  expected: Json | undefined,
+  actual: Json | undefined,
+  path = '',
+): { path: string; expected: Json | undefined; actual: Json | undefined } | undefined {
+  if (expected === actual) return;
+  if (Array.isArray(expected) && Array.isArray(actual)) {
+    for (let i = 0; i < Math.max(expected.length, actual.length); i++) {
+      const found = difference(expected[i], actual[i], `${path}/${i}`);
+      if (found) return found;
+    }
+    return;
+  }
+  if (
+    expected &&
+    actual &&
+    typeof expected === 'object' &&
+    typeof actual === 'object' &&
+    !Array.isArray(expected) &&
+    !Array.isArray(actual)
+  ) {
+    for (const key of [...new Set([...Object.keys(expected), ...Object.keys(actual)])].sort()) {
+      const token = key.replaceAll('~', '~0').replaceAll('/', '~1');
+      const found = difference(
+        Object.hasOwn(expected, key) ? expected[key] : undefined,
+        Object.hasOwn(actual, key) ? actual[key] : undefined,
+        `${path}/${token}`,
+      );
+      if (found) return found;
+    }
+    return;
+  }
+  return { path, expected, actual };
+}
+function preview(value: Json | undefined, limit: number): Json {
+  if (value === undefined) return { missing: true };
+  const text = JSON.stringify(value);
+  const bytes = new TextEncoder().encode(text);
+  return bytes.length <= limit
+    ? value
+    : {
+        preview: new TextDecoder().decode(bytes.slice(0, limit)),
+        truncated: true,
+      };
+}
 async function ref(api: ToolExecutionApi, context: Parameters<Harness['close']>[0]) {
   const task = await api.getTask(api.taskId, context);
   const input = task?.input;
@@ -54,6 +99,8 @@ export async function validateUI(ui: string, hasProgram: boolean) {
     for (const child of Object.values(v))
       if (child && typeof child === 'object') pending.push(child);
   }
+  if (hasProgram && !parsed.queryStatements.length)
+    throw new Error('Program-backed UI requires a bound run_program Query for live results');
   return parsed;
 }
 export function panelTools(
@@ -62,7 +109,7 @@ export function panelTools(
   const prepare = defineTool({
     name: 'prepare_program',
     description:
-      'Validate a generated synchronous ES module compute(inputs,data), initial inputs and finite JSON test cases. No imports, host APIs, clock or randomness. Returns programRef and initial result.',
+      'Validate a generated synchronous ES module compute(inputs,data), initial inputs and finite JSON test cases. No imports, host APIs, clock or randomness. Each expected value is the entire output, not a partial subset. Returns programRef and initial result only on success; on mismatch returns the case index, first difference and a bounded actual output for diagnosis.',
     parameters: Type.Object({
       code: Type.String({ maxLength: 65536 }),
       initialInputs: Type.Unknown(),
@@ -81,13 +128,27 @@ export function panelTools(
         const program: Program = { code: args.code, data: args.data };
         const initial = await computeProgram(program, args.initialInputs);
         if (!initial.ok) throw new Error(initial.error.kind + ': ' + initial.error.message);
-        for (const example of args.cases) {
+        for (const [caseIndex, example] of args.cases.entries()) {
           finiteJson(example.inputs);
           finiteJson(example.expected);
           const computed = await computeProgram(program, example.inputs);
           if (!computed.ok) throw new Error(computed.error.message);
-          if (!jsonEqual(computed.value, example.expected))
-            throw new Error('Test case output differs from expected');
+          if (!jsonEqual(computed.value, example.expected)) {
+            const mismatch = difference(example.expected, computed.value)!;
+            const diagnostic = {
+              code: 'test_case_mismatch',
+              message:
+                'Test case output differs from expected. Check the intended rule before changing code or expected values.',
+              caseIndex,
+              difference: {
+                path: mismatch.path.slice(0, 256),
+                expected: preview(mismatch.expected, 512),
+                actual: preview(mismatch.actual, 512),
+              },
+              actualOutput: preview(computed.value, 2048),
+            };
+            return { isError: true, content: [{ type: 'text', text: jsonText(diagnostic, 8192) }] };
+          }
         }
         const programRef = await ref(api, context);
         return {
@@ -139,8 +200,17 @@ export function panelTools(
         key: 'ui',
         render: async () =>
           (await getLibrary()).prompt({
+            preamble:
+              'This catalog describes only the ui argument of present_openui. Keep normal conversation and tool calls outside that string. The ui string must be valid OpenUI Lang, without markdown fences.',
+            toolCalls: true,
+            bindings: true,
+            tools: ['run_program'],
             additionalRules: [
-              'Produce ordinary text when no interface helps. For complex computation, first prepare_program and wait for success, then present_openui referencing its programRef. UI defaults must reflect initialInputs and any submitted source.state. Parameter edits use run_program locally. Use Action([@ToAssistant("Analyze with these inputs")]) for another agent request. Prefer text inputs for numeric parameters when preserving unfinished decimal edits matters. Never invent a tool or business function. Show assumptions, units and source descriptions. StateSync(value,next,enabled,{result:theFullQueryResult,inputs:theSameCurrentQueryArguments}) is optional for automatic parameter normalization, not required for derived display values. For StateSync with a program, return an object from compute and pass its complete Query result and current inputs so the host can reject stale or mismatched writeback.',
+              'Produce ordinary text when no interface helps. For complex computation, first prepare_program and wait for success, then present_openui referencing its programRef. Publishing does not wait for a browser.',
+              'A program-backed panel MUST declare a Query("run_program",inputs,fallback). Declare editable inputs as $variables seeded from initialInputs or submitted source.state; bind controls to those variables using the catalog signatures, and include them in Query arguments. Display computed values from the Query result, not copied constants from the initial result. The fallback must match the output shape. Query result variables are ordinary identifiers, not $bindings.',
+              'Use native @Set($variable,value) and @Reset($variable,...) on declared bindings. @Reset takes variables, never a Form name or string. Prefer text inputs for numeric parameters when preserving unfinished decimal edits matters. Keep @Each templates inline so their row variable remains in scope.',
+              'Only the bound run_program Query is available, and only on panels with a programRef. Its arguments are compute(inputs,data) inputs, with data supplied by the bound program. This is browser-local computation, not an Agent tool or a network request. Mutation and other tools are unavailable. Never invent a tool, business function, script or action handler. Use Action([@ToAssistant("Analyze with these inputs")]) for another agent request; parameter edits calculate locally without model requests.',
+              'Show assumptions, units and source descriptions. StateSync(value,next,enabled,{result:theFullQueryResult,inputs:theSameCurrentQueryArguments}) is optional for automatic parameter normalization, not required for derived display values. For StateSync with a program, return an object from compute and pass its complete Query result and current inputs so the host can reject stale or mismatched writeback.',
             ],
           }),
       },

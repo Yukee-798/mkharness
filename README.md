@@ -93,6 +93,8 @@ pnpm deploy:test
 
 生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
 
+程序验证用例的 `expected` 必须是完整输出，对象字段顺序无关，数组顺序与值仍严格比较。不匹配时返回用例编号、首个差异的 JSON Pointer、预期/实际值及有界结果预览（诊断最多 8 KiB）；不会发放 `programRef`。Agent 应根据意图和可独立核算的小用例修正，不应直接照抄实际输出来通过验证。工具执行结束但返回 `isError` 时，聊天显示“执行失败”，不显示成功勾选。
+
 原生 `Query("run_program", args, fallback)` 在绑定面板内计算，`Set` / `Reset` 管理输入；`ToAssistant` 将点击时的原始输入快照作为新请求提交。派生值通常直接显示。仅需自动写回输入时使用：
 
 ```text
@@ -100,6 +102,8 @@ StateSync($target,result.next,result.ready,{result:result,inputs:currentArgs})
 ```
 
 `result` 须为完整 Query 对象，`currentArgs` 须与当前 Query 参数一致，用于拒绝旧结果和错误来源。自动回写每个用户编辑链最多三次。动态 UI 最终渲染为原生组件，没有任意前端 eval 或生成 React 执行。
+
+组件目录提示显式启用 OpenUI 的 `toolCalls` 和 `bindings`，声明本地 `run_program` 工具，并仅约束 `present_openui.ui` 字符串。带程序的面板必须含计算 Query；输入绑定 `$variables`，派生内容读取 Query 结果。`@Reset` 接受已声明的变量，不接受表单名称。发布时仍拒绝 Mutation 和其他 Query 工具。
 
 原生 Slider 要求有限的 min < max、正步长，离散模式最多 256 个选项；超过时应增加步长或改用 continuous。这是一项通用渲染资源限制，不预置业务算法。发布和动态渲染均检查；错误局限在面板中，聊天仍可继续。
 

@@ -34,7 +34,7 @@ export function finiteJson(value: unknown): asserts value is Json {
   }
   visit(value);
 }
-export function jsonText(value: unknown, limit = LIMITS.json): string {
+export function jsonText(value: unknown, limit: number = LIMITS.json): string {
   finiteJson(value);
   const text = JSON.stringify(value);
   if (encoder.encode(text).length > limit) throw new Error('JSON size limit exceeded');

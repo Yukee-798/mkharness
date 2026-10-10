@@ -425,12 +425,17 @@ function Tool(part: ToolCallMessagePartProps) {
     read_webpage: '读取网页',
     search_web: '联网搜索',
   };
+  // A completed tool call may still have returned an application error.
+  const status: ToolCallMessagePartProps['status'] =
+    part.isError && part.status?.type !== 'incomplete'
+      ? { type: 'incomplete', reason: 'error', error: part.result }
+      : part.status;
   return (
     <ToolFallbackRoot defaultOpen={part.isError} className="my-3">
-      <ToolFallbackTrigger toolName={names[part.toolName] ?? part.toolName} status={part.status} />
+      <ToolFallbackTrigger toolName={names[part.toolName] ?? part.toolName} status={status} />
       <ToolFallbackContent>
-        <ToolFallbackResult result={part.result} />
-        <ToolFallbackError status={part.status} />
+        {!part.isError && <ToolFallbackResult result={part.result} />}
+        <ToolFallbackError status={status} />
       </ToolFallbackContent>
     </ToolFallbackRoot>
   );
