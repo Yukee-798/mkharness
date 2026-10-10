@@ -45,3 +45,64 @@ it('starts each streamed assistant message once when Pi has multiple text blocks
       .join(''),
   ).toBe('First section\nSecond section');
 });
+
+it('streams reasoning before completion and restores it from committed history without signatures', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const runId = crypto.randomUUID();
+  await stub.submitRun({ runId, text: 'slow reasoning_trace' });
+  const reader = (await stub.observeRun(runId)).body!.getReader();
+  const decoder = new TextDecoder();
+  let body = '';
+  while (!body.includes('REASONING_MESSAGE_CONTENT')) {
+    const chunk = await reader.read();
+    expect(chunk.done).toBe(false);
+    body += decoder.decode(chunk.value, { stream: true });
+  }
+  expect(JSON.parse(await stub.snapshot()).pending).toHaveLength(1);
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    body += decoder.decode(chunk.value, { stream: true });
+  }
+  const events = body
+    .split('\n')
+    .filter((l) => l.startsWith('data: '))
+    .map((l) => JSON.parse(l.slice(6)));
+  expect(events.filter((e) => e.type === 'REASONING_MESSAGE_START')).toHaveLength(1);
+  expect(events.filter((e) => e.type === 'REASONING_MESSAGE_END')).toHaveLength(1);
+  expect(
+    events
+      .filter((e) => e.type === 'REASONING_MESSAGE_CONTENT')
+      .map((e) => e.delta)
+      .join(''),
+  ).toBe('核对来源，再比较结果。');
+  const reasoningEnd = events.findIndex((e) => e.type === 'REASONING_MESSAGE_END');
+  expect(reasoningEnd).toBeLessThan(events.findIndex((e) => e.type === 'TEXT_MESSAGE_CONTENT'));
+  expect(events.at(-1).type).toBe('RUN_FINISHED');
+  expect(await stub.snapshot()).not.toContain('fixture-private-signature');
+  const { runInDurableObject } = await import('cloudflare:test');
+  expect(
+    await runInDurableObject(stub, async (instance) => JSON.stringify(await instance.allEntries())),
+  ).toContain('fixture-private-signature');
+  const reattached = await (await stub.observeRun(runId)).text();
+  expect(reattached).toContain('"role":"reasoning"');
+  expect(reattached).toContain('核对来源，再比较结果。');
+  expect(body + reattached).not.toContain('fixture-private-signature');
+});
+
+it('replaces revised reasoning through a fresh prefix rather than concatenating incompatible text', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const runId = crypto.randomUUID();
+  await stub.submitRun({ runId, text: 'slow reasoning_trace reasoning_replacement' });
+  const initial = await (await stub.observeRun(runId)).text();
+  expect(initial).toContain('pi.reset');
+  expect(initial).not.toContain('RUN_FINISHED');
+  for (let i = 0; i < 150; i++) {
+    if (!JSON.parse(await stub.snapshot()).pending.length) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const restored = await (await stub.observeRun(runId)).text();
+  expect(restored).toContain('重新核对来源。');
+  expect(restored).not.toContain('核对来源，再比较结果。');
+  expect(restored).toContain('RUN_FINISHED');
+});

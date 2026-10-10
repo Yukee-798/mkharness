@@ -1,7 +1,8 @@
 import { it, expect } from 'vitest';
-import { StreamFold, openArgs, toMessages } from '../../src/shared/stream';
+import { StreamFold, openArgs, toMessages, browserEntries } from '../../src/shared/stream';
 import { usage } from '../fixture-model';
 import { USER_ACTION_CONTEXT } from '../../src/shared/contracts';
+import { fromAgUiMessages } from '@assistant-ui/react-ag-ui';
 const message = (content: any[]) => ({
   role: 'assistant' as const,
   content,
@@ -108,4 +109,60 @@ it.each([
     },
   ] as any;
   expect(toMessages(entries)).toEqual([{ id: '9', role: 'user', content: original }]);
+});
+
+it('restores model reasoning into the same stable assistant entry without exposing opaque metadata', () => {
+  const entries = [
+    {
+      id: 12,
+      model: [
+        message([
+          {
+            type: 'thinking',
+            thinking: 'Compare the available sources.',
+            thinkingSignature: 'provider-private',
+          },
+          {
+            type: 'thinking',
+            thinking: 'encrypted-private',
+            redacted: true,
+            thinkingSignature: 'encrypted-signature',
+          },
+          { type: 'thinking', thinking: '' },
+          { type: 'thinking', thinking: 'Second reasoning block.' },
+          { type: 'text', text: 'Here is the comparison.' },
+          {
+            type: 'toolCall',
+            id: 'read',
+            name: 'read_web',
+            arguments: { url: 'https://example.com' },
+          },
+        ]),
+      ],
+    },
+  ] as any;
+  const history = toMessages(entries);
+  expect(history[0]).toEqual({
+    id: '12:reasoning:0',
+    role: 'reasoning',
+    content: 'Compare the available sources.',
+  });
+  expect(JSON.stringify(history)).not.toMatch(
+    /provider-private|encrypted-private|encrypted-signature/,
+  );
+  entries[0].edits = [{ action: 'replace', target: 11, messages: entries[0].model }];
+  const projection = browserEntries(entries);
+  expect(JSON.stringify(projection)).not.toMatch(
+    /provider-private|encrypted-private|encrypted-signature/,
+  );
+  expect(JSON.stringify(entries)).toContain('encrypted-signature');
+  expect(toMessages(projection)).toEqual(history);
+  const restored = fromAgUiMessages(history, { showThinking: true });
+  expect(restored).toHaveLength(1);
+  expect(restored[0].id).toBe('12');
+  expect(restored[0].content[0]).toMatchObject({
+    type: 'reasoning',
+    text: 'Compare the available sources.',
+  });
+  expect(restored[0].content.at(-1)).toMatchObject({ type: 'tool-call', toolCallId: '12.read' });
 });

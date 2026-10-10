@@ -8,6 +8,7 @@ import { AppShell } from './AppShell';
 import { MessageSquare, Plus, LogIn, LogOut, ArrowRight, ChevronsUpDown } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
+import { ChatLoading } from './chat-loading';
 import { cn } from './ui/utils';
 import {
   DropdownMenu,
@@ -321,13 +322,7 @@ function Workspace({ name }: { name: string }) {
           </Alert>
         )}
         {id ? (
-          <Suspense
-            fallback={
-              <p role="status" className="p-8 text-sm text-muted-foreground">
-                正在打开聊天…
-              </p>
-            }
-          >
+          <Suspense fallback={<ChatLoading />}>
             <Chat
               key={id}
               id={id}

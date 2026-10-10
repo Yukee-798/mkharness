@@ -16,7 +16,8 @@ import { runLimits, withRunLimits } from './limits';
 import { panelTools, validateUI } from './panel-tools';
 import { successfulTool } from '../shared/references';
 import { observeRun } from './observe';
-import { applicationModels } from './models';
+import { browserEntries } from '../shared/stream';
+import { applicationModels, applicationThinkingLevel } from './models';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
   value: () => undefined,
@@ -91,6 +92,9 @@ export class ConversationAgent extends Agent<Env> {
   protected models(): Models {
     return applicationModels(this.env);
   }
+  private thinkingLevel() {
+    return applicationThinkingLevel(this.env as Env & { MODEL_THINKING_LEVEL?: string });
+  }
   protected extensions(): Extension[] {
     return [
       panelTools(() => this.allEntries()),
@@ -134,7 +138,10 @@ export class ConversationAgent extends Agent<Env> {
     const pi = await this.harness.pi();
     if (this.deleting) throw new AppError(404, 'not_found');
     return pi.root(BG, {
-      agent: { model: { provider: this.env.MODEL_PROVIDER, modelId: this.env.MODEL_ID } },
+      agent: {
+        model: { provider: this.env.MODEL_PROVIDER, modelId: this.env.MODEL_ID },
+        thinkingLevel: this.thinkingLevel(),
+      },
     });
   }
   async submission(runId: string) {
@@ -173,6 +180,7 @@ export class ConversationAgent extends Agent<Env> {
             throw new AppError(404, 'panel_not_found');
         }
         this.models(); // Fail before admitting a request with missing model configuration.
+        this.thinkingLevel();
         const pending = await this.harness.pending({ session: '1' });
         if (pending.filter((p) => p.status === 'queued').length >= 10)
           throw new AppError(429, 'queue_full');
@@ -190,6 +198,12 @@ export class ConversationAgent extends Agent<Env> {
     });
   }
   private async enqueue(command: RunCommand) {
+    // Apply the host's choice through Pi's public settings before a new submission. This also
+    // enables future reasoning in existing chats without rewriting their earlier history.
+    const root = await this.root();
+    const thinkingLevel = this.thinkingLevel();
+    if ((await root.agent(BG)).thinkingLevel !== thinkingLevel)
+      await root.configure({ thinkingLevel }, BG);
     let text = command.text;
     if (command.source) text += USER_ACTION_CONTEXT + '\n' + JSON.stringify(command.source);
     await this.harness.submit(text, {
@@ -358,7 +372,7 @@ export class ConversationAgent extends Agent<Env> {
     const pending = await this.harness.pending({ session: '1' });
     const history = await this.history(cursor);
     return JSON.stringify({
-      entries: history.items,
+      entries: browserEntries(history.items),
       cursor: history.next,
       pending,
       stopping: this.stopping,

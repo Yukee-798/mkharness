@@ -23,6 +23,7 @@ export async function observeRun(
     ended = false;
   let textPrefix: string | undefined,
     args = new Map<number, string>();
+  let reasoning = new Map<number, { prefix: string; ended: boolean }>();
   let timer: ReturnType<typeof setInterval>;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -70,6 +71,44 @@ export async function observeRun(
       };
       const publish = (complete = false) => {
         if (!fold.current) return;
+        // Reasoning is model-provided text, not a synthesized status message. Opaque/redacted
+        // blocks and provider signatures stay in Pi history and never enter the browser stream.
+        for (const [index, previous] of reasoning) {
+          const block = fold.current.content[index];
+          if (
+            block?.type !== 'thinking' ||
+            block.redacted ||
+            !block.thinking.startsWith(previous.prefix) ||
+            (previous.ended && block.thinking !== previous.prefix)
+          ) {
+            reset();
+            return;
+          }
+        }
+        for (const [index, block] of fold.current.content.entries()) {
+          if (block.type !== 'thinking' || block.redacted || !block.thinking.trim()) continue;
+          const messageId = `draft:${runId}:${draft}:reasoning:${index}`;
+          let previous = reasoning.get(index);
+          if (!previous) {
+            emit({
+              type: EventType.REASONING_MESSAGE_START,
+              messageId,
+              role: 'reasoning',
+            } as BaseEvent);
+            previous = { prefix: '', ended: false };
+            reasoning.set(index, previous);
+          }
+          const delta = block.thinking.slice(previous.prefix.length);
+          if (delta)
+            emit({ type: EventType.REASONING_MESSAGE_CONTENT, messageId, delta } as BaseEvent);
+          previous.prefix = block.thinking;
+          // Once the next block starts, this reasoning block has finished even if the answer
+          // is still streaming. Closing it here keeps the disclosure status truthful.
+          if (!previous.ended && (complete || index < fold.current.content.length - 1)) {
+            emit({ type: EventType.REASONING_MESSAGE_END, messageId } as BaseEvent);
+            previous.ended = true;
+          }
+        }
         const blocks = fold.current.content.filter((b) => b.type === 'text');
         if (blocks.length) {
           if (textPrefix === undefined) {
@@ -155,6 +194,7 @@ export async function observeRun(
               draft++;
               textPrefix = undefined;
               args = new Map();
+              reasoning = new Map();
               fold.accept(event);
               publish();
             } else if (event.type === 'message_update' && active) {

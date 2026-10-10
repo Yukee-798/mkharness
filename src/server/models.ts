@@ -3,6 +3,15 @@ import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { AppError } from '../shared/contracts';
+import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
+export function applicationThinkingLevel(env: {
+  MODEL_THINKING_LEVEL?: string;
+}): ModelThinkingLevel {
+  const level = env.MODEL_THINKING_LEVEL ?? 'low';
+  if (!['off', 'minimal', 'low', 'medium', 'high', 'max'].includes(level))
+    throw new AppError(503, 'invalid_thinking_level', 'Invalid MODEL_THINKING_LEVEL');
+  return level as ModelThinkingLevel;
+}
 export function applicationModels(env: {
   MODEL_PROVIDER: string;
   MODEL_ID: string;

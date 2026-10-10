@@ -13,11 +13,12 @@ export class AttachAgent extends AbstractAgent {
     private conversationId: string,
     private finished: () => void,
     private replaced: () => void,
+    private connected: () => void = () => {},
   ) {
     super({ threadId: conversationId });
   }
   override clone() {
-    return new AttachAgent(this.conversationId, this.finished, this.replaced);
+    return new AttachAgent(this.conversationId, this.finished, this.replaced, this.connected);
   }
   run(input: RunAgentInput) {
     return new Observable<BaseEvent>((subscriber) => {
@@ -41,7 +42,8 @@ export class AttachAgent extends AbstractAgent {
           ),
         ),
       ).subscribe({
-        next(event) {
+        next: (event) => {
+          if (event.type === EventType.RUN_STARTED) this.connected();
           if (event.type === EventType.CUSTOM && (event as CustomEvent).name === 'pi.reset') {
             controller.abort();
             subscriber.error(new StreamReplaced('Stream replaced; restoring current prefix'));

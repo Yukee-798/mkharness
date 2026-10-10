@@ -94,6 +94,17 @@ export function fixtureModels() {
         { type: 'text', text: 'First section' },
         { type: 'text', text: 'Second section' },
       ];
+    if (text?.includes('reasoning_trace'))
+      content = [
+        {
+          type: 'thinking',
+          thinking: text.includes('reasoning_replacement')
+            ? '重新核对来源。'
+            : '核对来源，再比较结果。',
+          thinkingSignature: 'fixture-private-signature',
+        },
+        { type: 'text', text: 'Comparison complete.' },
+      ];
     if (
       context.messages.some(
         (m) =>
@@ -127,6 +138,55 @@ export function fixtureModels() {
       timestamp: Date.now(),
     };
     events.push({ type: 'start', partial: { ...message, content: [] } });
+    if (text?.includes('reasoning_trace')) {
+      const partial = (thinking: string, answer?: string): AssistantMessage => ({
+        ...message,
+        content: [
+          { type: 'thinking', thinking, thinkingSignature: 'fixture-private-signature' },
+          ...(answer === undefined ? [] : [{ type: 'text' as const, text: answer }]),
+        ],
+      });
+      setTimeout(() => {
+        events.push({ type: 'thinking_start', contentIndex: 0, partial: partial('') });
+        events.push({
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: '核对来源',
+          partial: partial('核对来源'),
+        });
+      }, 50);
+      setTimeout(
+        () => {
+          if (text.includes('reasoning_replacement')) {
+            events.push({
+              type: 'thinking_end',
+              contentIndex: 0,
+              content: '重新核对来源。',
+              partial: partial('重新核对来源。'),
+            });
+            return;
+          }
+          events.push({
+            type: 'thinking_delta',
+            contentIndex: 0,
+            delta: '，再比较结果。',
+            partial: partial('核对来源，再比较结果。'),
+          });
+          events.push({
+            type: 'thinking_end',
+            contentIndex: 0,
+            content: '核对来源，再比较结果。',
+            partial: partial('核对来源，再比较结果。'),
+          });
+          events.push({
+            type: 'text_start',
+            contentIndex: 1,
+            partial: partial('核对来源，再比较结果。', ''),
+          });
+        },
+        text.includes('reasoning_replacement') ? 500 : 100,
+      );
+    }
     setTimeout(
       () => {
         events.push({
@@ -136,7 +196,7 @@ export function fixtureModels() {
         });
         events.end(message);
       },
-      text?.includes('slow') ? 1000 : 30,
+      text?.includes('slow') ? 1000 : text?.includes('reasoning_trace') ? 200 : 30,
     );
     return events;
   };

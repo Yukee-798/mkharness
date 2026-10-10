@@ -14,6 +14,7 @@ import {
   ThreadPrimitive,
   MessagePrimitive,
   fromThreadMessageLike,
+  groupPartByType,
   type ToolCallMessagePartProps,
   type TextMessagePartProps,
 } from '@assistant-ui/react';
@@ -28,9 +29,10 @@ import { request, ApiError } from './api';
 import { createSubmitter } from './submission';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { Badge } from './ui/badge';
+import { ChatLoading } from './chat-loading';
 import { Alert, AlertDescription } from './ui/alert';
 import { MarkdownText } from './markdown-text';
+import { Reasoning } from './reasoning';
 import { TooltipIconButton } from './tooltip-icon-button';
 import {
   ToolFallbackRoot,
@@ -39,7 +41,7 @@ import {
   ToolFallbackResult,
   ToolFallbackError,
 } from './tool-fallback';
-import { ArrowUp, ArrowDown, MessageSquare, Square, LoaderCircle } from 'lucide-react';
+import { ArrowUp, ArrowDown, Check, MessageSquare, Square, LoaderCircle } from 'lucide-react';
 export type Snapshot = {
   entries: EntryRecord[];
   cursor?: unknown;
@@ -76,16 +78,27 @@ export function Chat({
     [text, setText] = useState(''),
     [accepted, setAccepted] = useState<string[]>([]),
     [sending, setSending] = useState(false);
-  const [retries, setRetries] = useState(0);
+  const retries = useRef(0);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [connection, setConnection] = useState<'reconnecting' | 'recovered'>();
+  useEffect(() => () => clearTimeout(reconnectTimer.current), []);
+  useEffect(() => {
+    if (connection !== 'recovered') return;
+    const timer = setTimeout(() => setConnection(undefined), 3000);
+    return () => clearTimeout(timer);
+  }, [connection]);
   useEffect(() => {
     const controller = new AbortController();
     void loadSnapshot(id, controller.signal)
       .then((s) => {
         setSnapshot(s);
         setAccepted([]);
+        if (!s.pending.length)
+          setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : previous));
       })
       .catch((e) => {
         if (!controller.signal.aborted) {
+          setConnection(undefined);
           if (e instanceof ApiError && e.status === 404 && unavailable.current)
             unavailable.current();
           else setError(e.message);
@@ -104,25 +117,28 @@ export function Chat({
     await send(message, source);
     onDirectoryChange?.();
     setAccepted((a) => [...a, message]);
-    setRetries(0);
+    retries.current = 0;
     setError('');
     if (!snapshot?.pending.length) setRevision((r) => r + 1);
   };
   const refresh = () => {
-    setRetries(0);
+    retries.current = 0;
     setRevision((r) => r + 1);
     onDirectoryChange?.();
   };
   const reconnect = (replacement = false) => {
-    if (!replacement && retries >= 4) {
-      setError('恢复观察失败。任务仍在后端运行，可以重新连接。');
+    if (!replacement && retries.current >= 4) {
+      setConnection(undefined);
+      setError('连接已中断。重新连接后可以继续查看回复。');
       return;
     }
-    if (!replacement) setRetries((n) => n + 1);
-    setTimeout(
-      () => setRevision((r) => r + 1),
-      replacement ? 0 : Math.min(500 * 2 ** retries, 4000),
-    );
+    setConnection('reconnecting');
+    const delay = replacement ? 0 : Math.min(500 * 2 ** retries.current++, 4000);
+    clearTimeout(reconnectTimer.current);
+    reconnectTimer.current = setTimeout(() => setRevision((r) => r + 1), delay);
+  };
+  const connected = () => {
+    setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : undefined));
   };
   useEffect(() => {
     if (!snapshot?.stopping) return;
@@ -149,13 +165,35 @@ export function Chat({
           </div>
         </aside>
       )}
-      {!!snapshot?.pending.length && (
-        <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant="secondary">
-            <LoaderCircle className="size-3 motion-safe:animate-spin" />
-            {snapshot.stopping ? '正在停止…' : '任务运行中'}
-          </Badge>
-          <span>{snapshot.pending.filter((p) => p.status === 'queued').length} 项排队</span>
+      {(!!snapshot?.pending.length || connection) && (
+        <div
+          role="status"
+          data-slot="connection-status"
+          data-state={snapshot?.stopping ? 'stopping' : (connection ?? 'running')}
+          className="flex min-h-8 items-center gap-2 rounded-lg border border-border/60 px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          {connection === 'recovered' && !snapshot?.stopping ? (
+            <Check className="size-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
+          ) : (
+            <LoaderCircle
+              className="size-3.5 shrink-0 motion-safe:animate-spin"
+              aria-hidden="true"
+            />
+          )}
+          <span className="flex-1">
+            {snapshot?.stopping
+              ? '正在停止…'
+              : connection === 'reconnecting'
+                ? '正在重新连接…'
+                : connection === 'recovered'
+                  ? '已恢复连接'
+                  : '任务运行中'}
+          </span>
+          {!!snapshot?.pending.some((p) => p.status === 'queued') && (
+            <span className="tabular-nums">
+              {snapshot.pending.filter((p) => p.status === 'queued').length} 项排队
+            </span>
+          )}
         </div>
       )}
       {error && (
@@ -166,7 +204,8 @@ export function Chat({
               variant="outline"
               size="sm"
               onClick={() => {
-                setRetries(0);
+                retries.current = 0;
+                setConnection('reconnecting');
                 setError('');
                 setRevision((r) => r + 1);
               }}
@@ -261,13 +300,12 @@ export function Chat({
             submit={submit}
             done={refresh}
             reconnect={reconnect}
+            connected={connected}
             footer={footer}
           />
         ) : (
           <>
-            <p role="status" className="flex-1 p-8 text-sm text-muted-foreground">
-              正在恢复聊天…
-            </p>
+            <ChatLoading />
             <div className="mx-auto w-full max-w-3xl px-4 pb-4">{footer}</div>
           </>
         )}
@@ -281,6 +319,7 @@ function Runtime({
   submit,
   done,
   reconnect,
+  connected,
   footer,
 }: {
   id: string;
@@ -288,11 +327,12 @@ function Runtime({
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
   done: () => void;
   reconnect: (replacement?: boolean) => void;
+  connected: () => void;
   footer: ReactNode;
 }) {
   const history = useMemo(() => {
     const messages = fromAgUiMessages(toMessages(snapshot.entries), {
-      showThinking: false,
+      showThinking: true,
     }).map((m) => fromThreadMessageLike(m, m.id!, { type: 'complete', reason: 'stop' }));
     return {
       messages: messages.map((message, i) => ({
@@ -302,20 +342,21 @@ function Runtime({
       headId: messages.at(-1)?.id ?? null,
     };
   }, [snapshot.entries]);
-  const callbacks = useRef({ done, reconnect });
-  callbacks.current = { done, reconnect };
+  const callbacks = useRef({ done, reconnect, connected });
+  callbacks.current = { done, reconnect, connected };
   const agent = useMemo(
     () =>
       new AttachAgent(
         id,
         () => callbacks.current.done(),
         () => callbacks.current.reconnect(),
+        () => callbacks.current.connected(),
       ),
     [id],
   );
   const runtime = useAgUiRuntime({
     agent,
-    showThinking: false,
+    showThinking: true,
     autoCancelPendingToolCalls: false,
     onError: (e) => callbacks.current.reconnect(e instanceof StreamReplaced),
   });
@@ -413,17 +454,31 @@ function Tool(part: ToolCallMessagePartProps) {
     );
   }
   const names: Record<string, string> = {
+    read_web: '读取网页',
     read_webpage: '读取网页',
-    search_web: '联网搜索',
+    search_web: '搜索网页',
   };
+  const target = part.args?.query ?? part.args?.url;
+  let label = typeof target === 'string' ? target : undefined;
+  if (part.toolName === 'read_web' || part.toolName === 'read_webpage') {
+    try {
+      label = new URL(label ?? '').hostname;
+    } catch {
+      label = undefined; // Show the source once its streaming URL can be parsed.
+    }
+  }
   // A completed tool call may still have returned an application error.
   const status: ToolCallMessagePartProps['status'] =
     part.isError && part.status?.type !== 'incomplete'
       ? { type: 'incomplete', reason: 'error', error: part.result }
       : part.status;
   return (
-    <ToolFallbackRoot defaultOpen={part.isError} className="my-3">
-      <ToolFallbackTrigger toolName={names[part.toolName] ?? part.toolName} status={status} />
+    <ToolFallbackRoot>
+      <ToolFallbackTrigger
+        toolName={names[part.toolName] ?? part.toolName}
+        target={label}
+        status={status}
+      />
       <ToolFallbackContent>
         {!part.isError && <ToolFallbackResult result={part.result} />}
         <ToolFallbackError status={status} />
@@ -433,7 +488,7 @@ function Tool(part: ToolCallMessagePartProps) {
 }
 function GenerationProgress() {
   return (
-    <p role="status" className="my-3 flex items-center gap-2 text-sm text-muted-foreground">
+    <p role="status" className="flex items-center gap-2 py-1.5 text-sm text-muted-foreground">
       <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" />
       正在生成交互界面…
     </p>
@@ -454,7 +509,21 @@ function AssistantText(part: TextMessagePartProps) {
     return <p role="alert">本次任务未能完成。你可以重新发送需求继续。</p>;
   return <MarkdownText />;
 }
+const groupReasoning = groupPartByType({ reasoning: ['group-reasoning'] });
 function Assistant() {
+  const toolTail = useAuiState((s) => {
+    const last = s.message.content.findLast(
+      (part) =>
+        part.type !== 'tool-call' ||
+        (part.toolName !== 'prepare_program' &&
+          (part.toolName !== 'present_openui' || !part.isError)),
+    );
+    return (
+      last?.type === 'tool-call' &&
+      last.toolName !== 'prepare_program' &&
+      last.toolName !== 'present_openui'
+    );
+  });
   const generating = useAuiState(
     (s) =>
       s.message.isLast &&
@@ -467,9 +536,28 @@ function Assistant() {
       ),
   );
   return (
-    <MessagePrimitive.Root className="group/message mb-8 min-w-0 text-sm leading-relaxed wrap-anywhere empty:hidden">
+    <MessagePrimitive.Root
+      data-slot="assistant-message"
+      data-tool-tail={toolTail}
+      className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[tool-tail=true]:mb-2"
+    >
       {generating && <GenerationProgress />}
-      <MessagePrimitive.Parts components={{ Text: AssistantText, tools: { Fallback: Tool } }} />
+      <MessagePrimitive.GroupedParts groupBy={groupReasoning} indicator="never">
+        {({ part, children }) => {
+          switch (part.type) {
+            case 'group-reasoning':
+              return <Reasoning active={part.status.type === 'running'}>{children}</Reasoning>;
+            case 'reasoning':
+              return <MarkdownText />;
+            case 'text':
+              return <AssistantText {...part} />;
+            case 'tool-call':
+              return <Tool {...part} />;
+            default:
+              return null;
+          }
+        }}
+      </MessagePrimitive.GroupedParts>
     </MessagePrimitive.Root>
   );
 }

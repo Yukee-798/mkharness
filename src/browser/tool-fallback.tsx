@@ -90,7 +90,7 @@ function ToolFallbackDuration({ className, ...props }: React.ComponentProps<'spa
     <span
       data-slot="tool-fallback-duration"
       className={cn(
-        'aui-tool-fallback-duration text-muted-foreground text-xs tabular-nums',
+        'aui-tool-fallback-duration shrink-0 text-muted-foreground text-xs whitespace-nowrap tabular-nums',
         className,
       )}
       {...props}
@@ -102,11 +102,13 @@ function ToolFallbackDuration({ className, ...props }: React.ComponentProps<'spa
 
 function ToolFallbackTrigger({
   toolName,
+  target,
   status,
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
   toolName: string;
+  target?: string;
   status?: ToolCallMessagePartStatus;
 }) {
   const statusType = status?.type ?? 'complete';
@@ -126,38 +128,42 @@ function ToolFallbackTrigger({
   return (
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
+      aria-label={`${label}：${toolName}${target ? ` · ${target}` : ''}`}
       className={cn(
-        'aui-tool-fallback-trigger group/trigger text-muted-foreground hover:text-foreground flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]',
+        'aui-tool-fallback-trigger group/trigger text-muted-foreground hover:text-foreground flex w-fit max-w-full origin-left items-center gap-2 rounded-sm py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
         className,
       )}
       {...props}
     >
-      <Icon
-        data-slot="tool-fallback-trigger-icon"
-        className={cn(
-          'aui-tool-fallback-trigger-icon size-4 shrink-0',
-          isCancelled && 'text-muted-foreground',
-          isRunning && 'animate-spin [animation-duration:0.6s]',
-        )}
+      <ChevronDownIcon
+        aria-hidden="true"
+        data-slot="tool-fallback-trigger-chevron"
+        className="aui-tool-fallback-trigger-chevron size-3.5 shrink-0 -rotate-90 transition-transform duration-200 group-data-[state=open]/trigger:rotate-0 motion-reduce:transition-none"
       />
       <span
         data-slot="tool-fallback-trigger-label"
         className={cn(
-          'aui-tool-fallback-trigger-label-wrapper inline-block min-w-0 text-start leading-none wrap-anywhere',
+          'aui-tool-fallback-trigger-label-wrapper shrink-0 text-start leading-5',
           isCancelled && 'text-muted-foreground line-through',
           isRunning && 'shimmer motion-reduce:animate-none',
         )}
       >
-        {label}: <b>{toolName}</b>
+        {toolName}
       </span>
+      {target && (
+        <span className="min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 text-xs" title={target}>
+          {target}
+        </span>
+      )}
       <ToolFallbackDuration />
-      <ChevronDownIcon
-        data-slot="tool-fallback-trigger-chevron"
+      <Icon
+        aria-hidden="true"
+        data-slot="tool-fallback-trigger-icon"
         className={cn(
-          'aui-tool-fallback-trigger-chevron size-4 shrink-0',
-          'transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
-          '-rotate-90',
-          'group-data-[state=open]/trigger:rotate-0',
+          'aui-tool-fallback-trigger-icon size-3.5 shrink-0',
+          statusType === 'complete' && 'text-emerald-600 dark:text-emerald-400',
+          statusType === 'incomplete' && !isCancelled && 'text-destructive',
+          isRunning && 'motion-safe:animate-spin',
         )}
       />
     </CollapsibleTrigger>

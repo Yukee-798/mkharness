@@ -18,16 +18,19 @@ pnpm dev
 
 打开 `http://localhost:5173`。默认 D1 ID 为本地占位值，仅本地使用；部署前必须替换。`APP_URL` 在 `wrangler.jsonc` 中配置，须等于实际访问的同源地址。不要混用 localhost 和 127.0.0.1。
 
-| 配置                                        | 用途                                                |
-| ------------------------------------------- | --------------------------------------------------- |
-| `BETTER_AUTH_SECRET`                        | 至少 32 字符的随机 secret，每个环境独立             |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用                               |
-| `MODEL_PROVIDER`                            | 当前提供 `openai`、`anthropic` 或 `deepseek`        |
-| `MODEL_ID`                                  | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出 |
-| `MODEL_API_KEY`                             | 仅服务端使用的供应商密钥                            |
-| `TAVILY_API_KEY`                            | 可选；缺少时搜索工具明确报告未配置                  |
+| 配置                                        | 用途                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------ |
+| `BETTER_AUTH_SECRET`                        | 至少 32 字符的随机 secret，每个环境独立                                        |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用                                                          |
+| `MODEL_PROVIDER`                            | 当前提供 `openai`、`anthropic` 或 `deepseek`                                   |
+| `MODEL_ID`                                  | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出                            |
+| `MODEL_API_KEY`                             | 仅服务端使用的供应商密钥                                                       |
+| `MODEL_THINKING_LEVEL`                      | 默认 `low`；`off` 可关闭，也可配置 minimal/medium/high/max，实际能力由模型决定 |
+| `TAVILY_API_KEY`                            | 可选；缺少时搜索工具明确报告未配置                                             |
 
 生产 `MODEL_PROVIDER` / `MODEL_ID` 使用 Wrangler `vars`；密钥使用 Cloudflare Secrets。没有默认模型、用户 API key 输入或浏览器密钥。缺少认证配置返回 503；缺少模型配置在接受任务前返回 503。
+
+聊天展示模型实际返回的推理文本或摘要，生成时可展开查看，完成后默认收起。历史恢复保留已有推理；没有提供推理的模型和旧记录不补造思考过程。推理配置应用于后续任务，不会重写历史。加密推理、redacted blocks 和供应商签名不会传到前端。
 
 Google 控制台选择 Web 应用，添加授权 JavaScript 来源 `http://localhost:5173`，授权重定向 URI：
 

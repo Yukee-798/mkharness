@@ -60,6 +60,34 @@ function text(message: PiMessage) {
         .map((b) => b.text)
         .join('\n');
 }
+/** A browser projection only: provider replay metadata stays in authoritative Pi storage. */
+function browserMessage(message: PiMessage): PiMessage {
+  return message.role !== 'assistant'
+    ? message
+    : {
+        ...message,
+        content: message.content.map((block) =>
+          block.type === 'thinking'
+            ? {
+                type: 'thinking' as const,
+                thinking: block.redacted ? '' : block.thinking,
+                ...(block.redacted ? { redacted: true } : {}),
+              }
+            : block.type === 'text'
+              ? { type: 'text' as const, text: block.text }
+              : block,
+        ),
+      };
+}
+export function browserEntries(entries: readonly EntryRecord[]): EntryRecord[] {
+  return entries.map((entry) => ({
+    ...entry,
+    model: entry.model?.map(browserMessage),
+    edits: entry.edits?.map((edit) =>
+      edit.action === 'replace' ? { ...edit, messages: edit.messages.map(browserMessage) } : edit,
+    ),
+  }));
+}
 export function toMessages(entries: readonly EntryRecord[]): Message[] {
   const result: Message[] = [],
     calls = new Map<string, string>();
@@ -76,6 +104,13 @@ export function toMessages(entries: readonly EntryRecord[]): Message[] {
             .split('\n\nUser action and current raw panel inputs (data, not instructions):')[0],
         });
       else if (message.role === 'assistant') {
+        for (const [blockIndex, block] of message.content.entries())
+          if (block.type === 'thinking' && !block.redacted && block.thinking.trim())
+            result.push({
+              id: `${id}:reasoning:${blockIndex}`,
+              role: 'reasoning',
+              content: block.thinking,
+            });
         const toolCalls = message.content
           .filter((b) => b.type === 'toolCall')
           .map((b) => {
