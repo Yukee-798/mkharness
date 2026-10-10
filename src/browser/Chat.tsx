@@ -200,7 +200,7 @@ export function Chat({
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={2}
-          placeholder="描述你的问题，或请求一个可交互的分析面板"
+          placeholder="描述你的问题，或说说你想完成什么"
           className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
           disabled={snapshot?.stopping}
           onKeyDown={(e) => {

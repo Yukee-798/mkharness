@@ -340,7 +340,7 @@ function Workspace({ name }: { name: string }) {
             <MessageSquare className="mx-auto mb-5 size-8 text-muted-foreground" />
             <h1 className="text-2xl font-semibold tracking-tight">从一个问题开始。</h1>
             <p className="mt-3 mb-6 text-sm leading-relaxed text-muted-foreground">
-              需要解释时，直接对话。需要比较和模拟时，让 Agent 生成可交互的面板。
+              提出问题、比较方案，或一起探索数据与想法。
             </p>
             <Button disabled={creating} onClick={() => void create()}>
               开始新聊天

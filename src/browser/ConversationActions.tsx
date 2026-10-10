@@ -176,7 +176,7 @@ export function ConversationActions({
           <AlertDialogHeader>
             <AlertDialogTitle>删除聊天？</AlertDialogTitle>
             <AlertDialogDescription className="break-words">
-              “{title}”的历史和面板输入将被删除，当前任务会停止，排队任务会撤回。此操作无法撤销。
+              “{title}”的历史和填写内容将被删除，当前任务会停止，排队任务会撤回。此操作无法撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (

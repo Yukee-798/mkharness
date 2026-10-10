@@ -246,11 +246,11 @@ export function Panel({
 class RenderBoundary extends Component<{ children: ReactNode }, { error: string }> {
   state = { error: '' };
   static getDerivedStateFromError(error: unknown) {
-    return { error: error instanceof Error ? error.message : '面板无法渲染' };
+    return { error: error instanceof Error ? error.message : '内容暂时无法显示' };
   }
   render() {
     return this.state.error ? (
-      <p role="alert">面板无法渲染：{this.state.error}。可继续发送消息，输入草稿仍保留。</p>
+      <p role="alert">内容暂时无法显示：{this.state.error}。可继续发送消息，填写内容仍保留。</p>
     ) : (
       this.props.children
     );
