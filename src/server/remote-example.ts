@@ -7,8 +7,9 @@ import {
   ToolTask,
   type Extension,
   type TaskId,
+  type EntryRecord,
 } from '@earendil-works/pi-durable';
-import { AppError } from '../shared/contracts';
+import { AppError, type RunCommand } from '../shared/contracts';
 import { canonicalJson, jsonText, finiteJson, type Json } from '../shared/compute';
 import { boundedText } from './web';
 
@@ -41,6 +42,38 @@ export const remoteBlocked = (operation: RemoteIntent) =>
   ['unknown', 'timeout', 'cancel_unknown', 'cancel_failed', 'cancel_unsupported'].includes(
     operation.status,
   );
+export function remoteModelAllowed(operations: Record<string, RemoteIntent>, command?: RunCommand) {
+  if (command?.source?.action === 'recheck_remote') return !!operations[command.source.taskId];
+  if (command?.source?.action === 'retry_remote') {
+    const original = operations[command.source.taskId];
+    return (
+      !!original &&
+      (remoteBlocked(original) || original.retryRunId === command.runId) &&
+      !Object.values(operations).some((o) => o.runId === command.runId && remoteBlocked(o))
+    );
+  }
+  return !Object.values(operations).some(
+    (o) => remoteBlocked(o) && (!command || o.runId === command.runId),
+  );
+}
+function remoteSideEffectAllowed(operations: Record<string, RemoteIntent>, command: RunCommand) {
+  return command.source?.action === 'retry_remote'
+    ? remoteModelAllowed(operations, command)
+    : command.source?.action !== 'recheck_remote' && !Object.values(operations).some(remoteBlocked);
+}
+export function remoteRunBlocked(entries: readonly EntryRecord[]) {
+  return entries
+    .slice(entries.findLastIndex((e) => e.kind === 'pi.user'))
+    .some((e) =>
+      e.model?.some(
+        (m) =>
+          m.role === 'toolResult' &&
+          m.toolName === 'example_generate' &&
+          m.isError &&
+          m.content.some((c) => c.type === 'text' && c.text.includes('remote_outcome_unknown')),
+      ),
+    );
+}
 export type RemoteConfig = {
   endpoint: string;
   token?: string;
@@ -85,7 +118,7 @@ export function remoteConfiguration(env: Record<string, unknown>): RemoteConfig 
 /** Concrete example service, not a generic job scheduler or SDK. Pi owns its durable state. */
 export function remoteExample(
   config: RemoteConfig,
-  host: { identity: string; runId: () => Promise<string> },
+  host: { identity: string; command: () => Promise<RunCommand> },
 ): Extension {
   const intervals = config.pollMs ?? [1000, 2000, 5000, 10000, 15000];
   if (!intervals.length || intervals.some((ms) => !Number.isFinite(ms) || ms <= 0))
@@ -391,9 +424,15 @@ export function remoteExample(
       hook(ToolTask, {
         beforeTool: async (call, api, context) => {
           if (call.name !== 'example_generate') return;
+          const command = await host.command();
           const operations =
             (await api.snapshot(RemoteIntents, api.conversationId, context))?.operations ?? {};
-          if (Object.values(operations).some(remoteBlocked))
+          if (
+            command.source?.action === 'recheck_remote' ||
+            !remoteSideEffectAllowed(operations, command) ||
+            (command.source?.action === 'retry_remote' &&
+              operations[command.source.taskId]?.retryRunId === command.runId)
+          )
             return { block: 'remote_outcome_unknown: use an explicit retry or recheck action' };
         },
       }),
@@ -405,8 +444,24 @@ export function remoteExample(
           'Run the configured asynchronous example service and wait for its final JSON result.',
         parameters: Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 32000 }) }),
         replay: 'safe',
-        execute: async ({ prompt }, api, context) => {
-          const runId = await host.runId();
+        execute: async ({ prompt: requestedPrompt }, api, context) => {
+          const command = await host.command(),
+            runId = command.runId;
+          let prompt = requestedPrompt;
+          const originalId =
+            command.source?.action === 'retry_remote' ? command.source.taskId : undefined;
+          if (originalId !== undefined) {
+            const original = (await api.snapshot(RemoteIntents, api.conversationId, context))
+              ?.operations[originalId];
+            const child = original && (await api.getTask(original.childTaskId as TaskId, context));
+            if (
+              !child ||
+              child.kind !== task.definition.name ||
+              typeof (child.input as Input).prompt !== 'string'
+            )
+              throw new AppError(404, 'remote_reference_not_found');
+            prompt = (child.input as Input).prompt;
+          }
           const fingerprint = Array.from(
             new Uint8Array(
               await crypto.subtle.digest(
@@ -421,8 +476,19 @@ export function remoteExample(
             const doc = await tx.doc(RemoteIntents, api.conversationId);
             const existing = doc.operations[api.taskId];
             if (existing) return existing.childTaskId as TaskId<Result>;
-            if (Object.values(doc.operations).some(remoteBlocked))
+            if (
+              command.source?.action === 'recheck_remote' ||
+              !remoteSideEffectAllowed(doc.operations, command) ||
+              (originalId !== undefined && doc.operations[originalId]?.retryRunId === runId)
+            )
               throw new AppError(409, 'remote_outcome_unknown');
+            if (originalId !== undefined) {
+              const original = doc.operations[originalId];
+              if (!original || !remoteBlocked(original))
+                throw new AppError(409, 'remote_retry_unnecessary');
+              original.retryRunId = runId;
+              original.retryTaskId = Number(api.taskId);
+            }
             const deadline = Date.now() + (config.waitMs ?? 600000),
               key = host.identity + ':' + api.taskId;
             const child = await tx.createTask(
@@ -460,6 +526,64 @@ export function remoteExample(
           };
         },
       }),
+      defineTool({
+        name: 'example_recheck',
+        description:
+          'Read the original remote operation only when the user explicitly requests rechecking it. Never submits a new operation.',
+        parameters: Type.Object({}),
+        replay: 'safe',
+        execute: async (_, api, context) => {
+          const command = await host.command();
+          if (command.source?.action !== 'recheck_remote')
+            throw new AppError(409, 'remote_action_required');
+          const originalId = command.source.taskId;
+          const original = (await api.snapshot(RemoteIntents, api.conversationId, context))
+            ?.operations[originalId];
+          if (!original) throw new AppError(404, 'remote_reference_not_found');
+          let remoteId = original.remoteId;
+          if (!remoteId && config.recovery === 'lookup') {
+            const found = await request(
+              '/requests?key=' + encodeURIComponent(original.key),
+              'GET',
+              context.abortSignal ?? new AbortController().signal,
+            );
+            if (typeof found.id === 'string' && found.id.length <= 512) remoteId = found.id;
+          }
+          if (!remoteId)
+            return {
+              isError: true,
+              content: [{ type: 'text', text: 'remote_outcome_unknown' }],
+              details: { remoteTaskId: originalId },
+            };
+          const response = await request(
+            '/requests/' + encodeURIComponent(remoteId),
+            'GET',
+            context.abortSignal ?? new AbortController().signal,
+          );
+          await api.commit(async (tx) => {
+            const current = (await tx.doc(RemoteIntents, api.conversationId)).operations[
+              originalId
+            ];
+            if (!current) throw new AppError(404, 'remote_reference_not_found');
+            current.remoteId = remoteId;
+            current.remoteStatus =
+              typeof response.status === 'string' ? response.status : 'unknown';
+            if (['completed', 'failed', 'canceled'].includes(current.remoteStatus))
+              current.status = current.remoteStatus;
+          }, context);
+          return {
+            content: [{ type: 'text', text: jsonText(response) }],
+            details: { remoteTaskId: originalId },
+          };
+        },
+      }),
+    ],
+    sections: [
+      {
+        key: 'remote-contract',
+        render: () =>
+          'Use example_generate for the configured asynchronous service. Wait for its final result; do not poll through model calls. If a trusted user action requests retry_remote, call example_generate once; the host binds it to the original inputs. If the action requests recheck_remote, call example_recheck only. Unknown outcomes require an explicit user action; never invent cancellation or success.',
+      },
     ],
   };
 }

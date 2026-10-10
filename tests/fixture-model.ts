@@ -48,6 +48,17 @@ export function fixtureModels() {
           arguments: { prompt: 'hello' },
         },
       ];
+    if (text?.includes('retry_remote') && last?.role === 'user')
+      content = [
+        {
+          type: 'toolCall',
+          id: 'same-call',
+          name: 'example_generate',
+          arguments: { prompt: 'model tries to replace the original prompt' },
+        },
+      ];
+    if (text?.includes('recheck_remote') && last?.role === 'user')
+      content = [{ type: 'toolCall', id: 'same-call', name: 'example_recheck', arguments: {} }];
     if (text?.includes('reordered_case') && last?.role === 'user')
       content = [
         {

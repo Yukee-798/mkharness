@@ -190,3 +190,110 @@ it('absolute deadline survives restart; unsupported cancellation retains the ref
     network.mockRestore();
   }
 });
+
+it('only explicit retry authorizes one new operation with original inputs; readonly recheck never submits', async () => {
+  let submits = 0;
+  const prompts: string[] = [];
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === 'POST') {
+      submits++;
+      prompts.push(((await request.json()) as any).prompt);
+      if (submits === 1) throw new Error('accepted response lost');
+      return Response.json({ id: 'explicit-new-operation' });
+    }
+    return Response.json({ status: 'completed', result: { value: 9 } });
+  });
+  const stub = await setup('none');
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    const original = Object.values(await operations(stub))[0];
+    const alien = await setup('none');
+    expect(
+      await alien.submitRun({
+        runId: crypto.randomUUID(),
+        text: 'retry',
+        source: { action: 'retry_remote', taskId: original.taskId },
+      }),
+    ).toMatchObject({ error: { code: 'remote_reference_not_found', status: 404 } });
+    await stub.submitRun({
+      runId: crypto.randomUUID(),
+      text: 'recheck',
+      source: { action: 'recheck_remote', taskId: original.taskId },
+    });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(submits).toBe(1);
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'ordinary read-only answer' });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(JSON.stringify(JSON.parse(await stub.snapshot()).entries)).toContain(
+      'ordinary read-only answer',
+    );
+    expect(JSON.parse(await stub.snapshot()).entries.at(-1).model[0].stopReason).not.toBe('error');
+    const retry = {
+      runId: crypto.randomUUID(),
+      text: 'retry',
+      source: { action: 'retry_remote' as const, taskId: original.taskId },
+    };
+    await Promise.all([stub.submitRun(retry), stub.submitRun(retry)]);
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(submits).toBe(2);
+    expect(prompts).toEqual(['hello', 'hello']);
+    expect(Object.values(await operations(stub))).toHaveLength(2);
+    const snapshot = JSON.parse(await stub.snapshot());
+    expect(snapshot.remote).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ taskId: original.taskId, status: 'unknown' }),
+      ]),
+    );
+    expect(JSON.stringify(snapshot.remote)).not.toContain('explicit-new-operation');
+    expect(JSON.stringify(snapshot.remote)).not.toContain('fingerprint');
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example bypass' });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(submits).toBe(2);
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});
+
+it('committed progress reaches AG-UI state snapshots and restoration without leaking remote references', async () => {
+  let submits = 0,
+    queries = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === 'POST') {
+      submits++;
+      return Response.json({ id: 'server-private-job-id' });
+    }
+    queries++;
+    return Response.json(
+      queries < 2 ? { status: 'pending' } : { status: 'completed', result: { answer: 5 } },
+    );
+  });
+  const stub = await setup('key');
+  try {
+    const runId = crypto.randomUUID();
+    await stub.submitRun({ runId, text: 'slow remote example' });
+    const text = await (await stub.observeRun(runId)).text();
+    const events = text
+      .split('\n')
+      .filter((l) => l.startsWith('data: '))
+      .map((l) => JSON.parse(l.slice(6)));
+    const states = events.filter((e) => e.type === 'STATE_SNAPSHOT');
+    expect(states.some((e) => e.snapshot.remote.some((o: any) => o.status === 'waiting'))).toBe(
+      true,
+    );
+    expect(states.some((e) => e.snapshot.remote.some((o: any) => o.status === 'completed'))).toBe(
+      true,
+    );
+    expect(states.every((e) => e.snapshot.runId === runId)).toBe(true);
+    expect(JSON.stringify(states)).not.toContain('server-private-job-id');
+    expect(JSON.stringify(states)).not.toContain('fingerprint');
+    expect(await (await stub.observeRun(runId)).text()).toContain('RUN_FINISHED');
+    expect(submits).toBe(1);
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});

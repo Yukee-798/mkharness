@@ -37,6 +37,7 @@ import { MarkdownText } from './markdown-text';
 import { Reasoning, ReasoningRoot, ReasoningContent, ReasoningText } from './reasoning.aui';
 import { ModelPicker } from './model-picker';
 import type { ModelCatalog, ModelSelection } from '../shared/model-selection';
+import type { RemoteProgress } from '../shared/remote-progress';
 import { TooltipIconButton } from './tooltip-icon-button';
 import { ToolCall } from './tool-call';
 import { toolResults } from './tool-results';
@@ -64,6 +65,7 @@ export type Snapshot = {
   stopping: boolean;
   modelCatalog?: ModelCatalog;
   selection?: ModelSelection;
+  remote?: RemoteProgress[];
 };
 export async function loadSnapshot(id: string, signal?: AbortSignal) {
   const first = await request<Snapshot>(`/conversations/${id}/snapshot`, { signal });
@@ -104,6 +106,8 @@ export function Chat({
     [sending, setSending] = useState(false);
   const retries = useRef(0);
   const [selection, setSelection] = useState<ModelSelection>();
+  const [remote, setRemote] = useState<RemoteProgress[]>([]);
+  const [remoteSending, setRemoteSending] = useState(false);
   const selected = selection ?? snapshot?.selection ?? snapshot?.modelCatalog?.defaultSelection;
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [connection, setConnection] = useState<'reconnecting' | 'recovered'>();
@@ -119,6 +123,7 @@ export function Chat({
     if (revision !== 0 || !query.data || restoredRevision.current === 0) return;
     restoredRevision.current = 0;
     setSnapshot(query.data);
+    setRemote(query.data.remote ?? []);
   }, [revision, query.data]);
   useEffect(() => {
     if (revision === 0) return;
@@ -127,6 +132,7 @@ export function Chat({
       if (!active || !s) return;
       restoredRevision.current = revision;
       setSnapshot(s);
+      setRemote(s.remote ?? []);
       setAccepted([]);
       if (!s.pending.length)
         setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : previous));
@@ -176,6 +182,20 @@ export function Chat({
   const connected = () => {
     setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : undefined));
   };
+  const remoteAction = async (action: 'retry_remote' | 'recheck_remote', taskId: number) => {
+    if (remoteSending) return;
+    setRemoteSending(true);
+    try {
+      await submit(action === 'retry_remote' ? '重新执行原任务（可能重复执行）' : '复查原任务', {
+        action,
+        taskId,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRemoteSending(false);
+    }
+  };
   useEffect(() => {
     if (!snapshot?.stopping) return;
     const timer = setTimeout(() => setRevision((r) => r + 1), 1000);
@@ -186,6 +206,62 @@ export function Chat({
   const ComposerRoot = snapshot ? ComposerPrimitive.Root : 'form';
   const footer = (
     <div className="space-y-3">
+      {remote
+        .filter((o) =>
+          [
+            'prepared',
+            'submitting',
+            'waiting',
+            'unknown',
+            'timeout',
+            'cancel_unknown',
+            'cancel_failed',
+            'cancel_unsupported',
+          ].includes(o.status),
+        )
+        .map((operation) => {
+          const blocked = !['prepared', 'submitting', 'waiting'].includes(operation.status);
+          const labels: Record<string, string> = {
+            prepared: '正在准备执行…',
+            submitting: '正在提交请求…',
+            waiting: '正在等待结果…',
+            unknown: '结果暂时无法确认',
+            timeout: '等待已到期，远端可能仍在运行',
+            cancel_unknown: '已停止本地任务，远端状态尚未确认',
+            cancel_failed: '已停止本地任务，远端取消未成功',
+            cancel_unsupported: '已停止本地任务，远端不支持取消',
+          };
+          return (
+            <div
+              key={operation.taskId}
+              role="status"
+              data-slot="remote-progress"
+              className="rounded-lg border px-3 py-2 text-xs text-muted-foreground"
+            >
+              <p>{labels[operation.status]}</p>
+              {blocked && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={remoteSending || !!snapshot?.pending.length || snapshot?.stopping}
+                    onClick={() => void remoteAction('recheck_remote', operation.taskId)}
+                  >
+                    复查原任务
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={remoteSending || !!snapshot?.pending.length || snapshot?.stopping}
+                    onClick={() => void remoteAction('retry_remote', operation.taskId)}
+                  >
+                    重新执行（可能重复执行）
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       {accepted.length > 0 && (
         <aside
           aria-label="已接受的任务"
@@ -348,6 +424,7 @@ export function Chat({
             done={refresh}
             reconnect={reconnect}
             connected={connected}
+            progress={setRemote}
             footer={footer}
           />
         ) : (
@@ -367,6 +444,7 @@ function Runtime({
   done,
   reconnect,
   connected,
+  progress,
   footer,
 }: {
   id: string;
@@ -375,6 +453,7 @@ function Runtime({
   done: () => void;
   reconnect: (replacement?: boolean) => void;
   connected: () => void;
+  progress: (value: RemoteProgress[]) => void;
   footer: ReactNode;
 }) {
   const history = useMemo(() => {
@@ -389,8 +468,8 @@ function Runtime({
       headId: messages.at(-1)?.id ?? null,
     };
   }, [snapshot.entries]);
-  const callbacks = useRef({ done, reconnect, connected });
-  callbacks.current = { done, reconnect, connected };
+  const callbacks = useRef({ done, reconnect, connected, progress, snapshot });
+  callbacks.current = { done, reconnect, connected, progress, snapshot };
   const agent = useMemo(
     () =>
       new AttachAgent(
@@ -398,6 +477,11 @@ function Runtime({
         () => callbacks.current.done(),
         () => callbacks.current.reconnect(),
         () => callbacks.current.connected(),
+        (runId, value) => {
+          const pending = callbacks.current.snapshot.pending;
+          const active = pending.find((p) => p.status === 'running') ?? pending[0];
+          if (active?.operationId === runId) callbacks.current.progress(value);
+        },
       ),
     [id],
   );
@@ -501,7 +585,12 @@ function Tool(part: ToolCallMessagePartProps) {
     );
   }
   const Result = toolResults[part.toolName];
-  return Result ? <Result {...part} /> : <ToolActivity part={part} />;
+  return (
+    <>
+      <ToolActivity part={part} />
+      {Result && <Result {...part} />}
+    </>
+  );
 }
 function ToolActivity({ part }: { part: ToolCallMessagePartProps }) {
   const [open, setOpen] = useState(false);
@@ -509,6 +598,16 @@ function ToolActivity({ part }: { part: ToolCallMessagePartProps }) {
     read_web: { active: '正在读取网页', complete: '已读取网页', failed: '网页读取失败' },
     read_webpage: { active: '正在读取网页', complete: '已读取网页', failed: '网页读取失败' },
     search_web: { active: '正在搜索网页', complete: '已搜索网页', failed: '网页搜索失败' },
+    example_generate: {
+      active: '正在等待结果',
+      complete: '已获取结果',
+      failed: '暂时无法获取结果',
+    },
+    example_recheck: {
+      active: '正在复查原任务',
+      complete: '已复查原任务',
+      failed: '暂时无法确认结果',
+    },
   };
   const name = names[part.toolName] ?? {
     active: `正在执行：${part.toolName}`,
@@ -585,6 +684,8 @@ function AssistantText(part: TextMessagePartProps) {
     return <p role="alert">交互界面暂时无法生成。你可以重新发送需求再试一次。</p>;
   if (part.text.startsWith('Model round limit reached'))
     return <p role="alert">本次任务未能完成。你可以重新发送需求继续。</p>;
+  if (part.text.startsWith('remote_outcome_unknown'))
+    return <p role="alert">结果暂时无法确认。可以复查原任务，或明确选择重新执行。</p>;
   return <MarkdownText />;
 }
 const groupAssistantParts = groupPartByType({

@@ -37,3 +37,41 @@ it('extracts partial UI across quotes, backslashes and Unicode escape boundaries
   }
   expect(partialUI(encoded)).toBe(expected);
 });
+it('committed progress rejects foreign-run and older projections; no execution is initiated', async () => {
+  const progress = vi.fn();
+  const remote = [
+    { taskId: 3, runId: 'r', status: 'waiting', remoteStatus: 'pending', deadline: 100 },
+  ];
+  const events = [
+    { type: 'RUN_STARTED', threadId: 'c', runId: 'r' },
+    { type: 'STATE_SNAPSHOT', snapshot: { runId: 'foreign', remoteRevision: 99, remote } },
+    { type: 'STATE_SNAPSHOT', snapshot: { runId: 'r', remoteRevision: 8, remote } },
+    { type: 'STATE_SNAPSHOT', snapshot: { runId: 'r', remoteRevision: 7, remote: [] } },
+    { type: 'RUN_FINISHED', threadId: 'c', runId: 'r' },
+  ];
+  const network = vi.fn(
+    async () =>
+      new Response(events.map((e) => 'data: ' + JSON.stringify(e) + '\n\n').join(''), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+  );
+  vi.stubGlobal('fetch', network);
+  try {
+    const agent = new AttachAgent(
+      'c',
+      () => {},
+      () => {},
+      () => {},
+      progress,
+    );
+    await new Promise<void>((resolve, reject) =>
+      agent
+        .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
+        .subscribe({ complete: resolve, error: reject }),
+    );
+    expect(progress).toHaveBeenCalledExactlyOnceWith('r', remote);
+    expect(network).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

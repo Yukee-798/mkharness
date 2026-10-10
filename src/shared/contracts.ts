@@ -10,11 +10,19 @@ export const commandSchema = z.object({
     .object({ modelId: z.string().min(1).max(200), thinkingLevel: z.enum(thinkingLevels) })
     .optional(),
   source: z
-    .object({
-      panelRef: z.string().max(512),
-      action: z.string().max(200),
-      state: z.record(z.string(), z.unknown()),
-    })
+    .discriminatedUnion('action', [
+      z
+        .object({
+          panelRef: z.string().max(512),
+          action: z.literal('continue_analysis'),
+          state: z.record(z.string(), z.unknown()),
+        })
+        .strict(),
+      z.object({ action: z.literal('retry_remote'), taskId: z.number().int().positive() }).strict(),
+      z
+        .object({ action: z.literal('recheck_remote'), taskId: z.number().int().positive() })
+        .strict(),
+    ])
     .optional(),
 });
 export type RunCommand = z.infer<typeof commandSchema>;

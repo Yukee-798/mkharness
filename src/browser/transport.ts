@@ -2,6 +2,7 @@ import { AbstractAgent, runHttpRequest, transformHttpEventStream } from '@ag-ui/
 import { EventType, type RunAgentInput, type BaseEvent, type CustomEvent } from '@ag-ui/core';
 import { Observable } from 'rxjs';
 import { parsePartialJsonObject } from 'assistant-stream/utils';
+import type { RemoteProgress } from '../shared/remote-progress';
 export class StreamReplaced extends Error {}
 export function partialUI(argsText: string) {
   const value = parsePartialJsonObject(argsText);
@@ -14,11 +15,18 @@ export class AttachAgent extends AbstractAgent {
     private finished: () => void,
     private replaced: () => void,
     private connected: () => void = () => {},
+    private progress: (runId: string, value: RemoteProgress[]) => void = () => {},
   ) {
     super({ threadId: conversationId });
   }
   override clone() {
-    return new AttachAgent(this.conversationId, this.finished, this.replaced, this.connected);
+    return new AttachAgent(
+      this.conversationId,
+      this.finished,
+      this.replaced,
+      this.connected,
+      this.progress,
+    );
   }
   run(input: RunAgentInput) {
     return new Observable<BaseEvent>((subscriber) => {
@@ -31,6 +39,7 @@ export class AttachAgent extends AbstractAgent {
       }
       const controller = new AbortController();
       let terminal = false;
+      let lastRevision = -1;
       input.runId = config.runId;
       const runId = config.runId;
       input.threadId = this.conversationId;
@@ -43,6 +52,22 @@ export class AttachAgent extends AbstractAgent {
         ),
       ).subscribe({
         next: (event) => {
+          if (event.type === EventType.STATE_SNAPSHOT) {
+            const state = (
+              event as BaseEvent & {
+                snapshot?: { runId?: string; remoteRevision?: number; remote?: RemoteProgress[] };
+              }
+            ).snapshot;
+            if (
+              state?.runId === runId &&
+              Array.isArray(state.remote) &&
+              typeof state.remoteRevision === 'number' &&
+              state.remoteRevision >= lastRevision
+            ) {
+              lastRevision = state.remoteRevision;
+              this.progress(runId, state.remote);
+            }
+          }
           if (event.type === EventType.RUN_STARTED) this.connected();
           if (event.type === EventType.CUSTOM && (event as CustomEvent).name === 'pi.reset') {
             controller.abort();

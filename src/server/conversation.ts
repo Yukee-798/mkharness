@@ -18,6 +18,8 @@ import { MCPBindings, buildMcp, mcpConfiguration, type MCPConfig } from './mcp';
 import {
   RemoteIntents,
   remoteBlocked,
+  remoteModelAllowed,
+  remoteRunBlocked,
   remoteExample,
   remoteConfiguration,
   type RemoteConfig,
@@ -35,6 +37,7 @@ import {
   validateModelSelection,
 } from './models';
 import type { ModelSelection } from '../shared/model-selection';
+import { remoteProgress } from '../shared/remote-progress';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
   value: () => undefined,
@@ -179,7 +182,10 @@ export class ConversationAgent extends Agent<Env> {
   private async modelDispatch() {
     const stored = await this.runningCommand();
     const doc = await (await this.harness.pi()).snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
-    if (Object.values(doc?.operations ?? {}).some(remoteBlocked))
+    if (
+      !remoteModelAllowed(doc?.operations ?? {}, stored) ||
+      remoteRunBlocked(await this.allEntries())
+    )
       throw new AppError(409, 'remote_outcome_unknown');
     const selection = stored?.execution ?? stored?.config ?? this.selection();
     const model = this.models().getModel(this.env.MODEL_PROVIDER, selection.modelId);
@@ -206,10 +212,10 @@ export class ConversationAgent extends Agent<Env> {
         ? [
             remoteExample(remote, {
               identity: this.ctx.id.toString(),
-              runId: async () => {
+              command: async () => {
                 const command = await this.runningCommand();
                 if (!command) throw new AppError(409, 'run_context_missing');
-                return command.runId;
+                return command;
               },
             }),
           ]
@@ -289,13 +295,22 @@ export class ConversationAgent extends Agent<Env> {
       if (!record) {
         await this.root();
         if (command.source) {
-          if (command.source.action !== 'continue_analysis')
-            throw new AppError(400, 'invalid_action');
-          if (!successfulTool(await this.allEntries(), command.source.panelRef, 'present_openui'))
-            throw new AppError(404, 'panel_not_found');
+          if (command.source.action === 'continue_analysis') {
+            if (!successfulTool(await this.allEntries(), command.source.panelRef, 'present_openui'))
+              throw new AppError(404, 'panel_not_found');
+          } else {
+            const doc = await (
+              await this.harness.pi()
+            ).snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
+            const original = doc?.operations[command.source.taskId];
+            if (!original) throw new AppError(404, 'remote_reference_not_found');
+            if (command.source.action === 'retry_remote' && !remoteBlocked(original))
+              throw new AppError(409, 'remote_retry_unnecessary');
+          }
         }
         const execution = this.selection(command.config); // Validate and freeze settings before admission.
         const pending = await this.harness.pending({ session: '1' });
+        if (!pending.length) await this.pruneCompletedRemote(command);
         if (pending.filter((p) => p.status === 'queued').length >= 10)
           throw new AppError(429, 'queue_full');
         this.ctx.storage.sql.exec(
@@ -310,6 +325,38 @@ export class ConversationAgent extends Agent<Env> {
       }
       return { runId: command.runId, accepted: true as const };
     });
+  }
+  private async pruneCompletedRemote(command: RunCommand) {
+    const pi = await this.harness.pi();
+    const saved = await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
+    if (!saved) return;
+    const referenced =
+      command.source && command.source.action !== 'continue_analysis'
+        ? command.source.taskId
+        : undefined;
+    const published = new Set(
+      (await this.allEntries())
+        .flatMap((entry) => entry.model ?? [])
+        .flatMap((message) =>
+          message.role === 'toolResult' &&
+          !message.isError &&
+          message.details &&
+          typeof message.details === 'object' &&
+          'remoteTaskId' in message.details
+            ? [message.details.remoteTaskId]
+            : [],
+        ),
+    );
+    const completed = Object.values(saved.operations).filter(
+      (o) => o.status === 'completed' && published.has(o.taskId) && o.taskId !== referenced,
+    );
+    if (completed.length)
+      await pi.commit(async (tx) => {
+        const doc = await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID);
+        for (const operation of completed)
+          if (doc.operations[operation.taskId]?.status === 'completed')
+            delete doc.operations[operation.taskId];
+      }, BG);
   }
   private async enqueue(command: RunCommand) {
     let text = command.text;
@@ -508,6 +555,9 @@ export class ConversationAgent extends Agent<Env> {
       stopping: this.stopping,
       modelCatalog,
       selection,
+      remote: remoteProgress(
+        (await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG))?.operations ?? {},
+      ),
       capabilityIssues: this.mcpPrepared?.diagnostics ?? [],
       runtimeIssues: terminalTasks.items
         .filter((t) => t.state.status === 'terminal' && t.state.outcome.status === 'orphaned')

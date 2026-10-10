@@ -3,6 +3,8 @@ import { EventType, type BaseEvent } from '@ag-ui/core';
 import { StreamFold, openArgs, toMessages } from '../shared/stream';
 import type { ConversationAgent } from './conversation';
 import { BG } from './conversation';
+import { RemoteIntents, type RemoteIntent } from './remote-example';
+import { remoteProgress } from '../shared/remote-progress';
 export async function observeRun(
   owner: ConversationAgent,
   runId: string,
@@ -17,6 +19,24 @@ export async function observeRun(
     return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
   }
   const entries = new Map((await owner.allEntries()).map((e) => [Number(e.id), e]));
+  let committedRemote: Record<string, RemoteIntent> | undefined;
+  let remoteRevision = 0;
+  let sendState: (() => void) | undefined;
+  const unsubscribe = pi.subscribeCommits((publication) => {
+    for (const change of publication.changes) {
+      if (
+        change.type === 'document' &&
+        change.conversationId === root.id &&
+        change.record.kind === 'app.remote-intents'
+      ) {
+        committedRemote =
+          (change.value as { operations: Record<string, RemoteIntent> } | null)?.operations ?? {};
+        remoteRevision = Number(publication.seq);
+        sendState?.();
+      }
+    }
+  });
+  const initialRemote = (await pi.snapshot(RemoteIntents, root.id, BG))?.operations ?? {};
   const fold = new StreamFold();
   let draft = 0,
     active = false,
@@ -35,6 +55,7 @@ export async function observeRun(
         if (ended) return;
         ended = true;
         clearInterval(timer);
+        unsubscribe();
         controller.close();
         void watch.stop();
       };
@@ -46,8 +67,17 @@ export async function observeRun(
       const state = () =>
         emit({
           type: EventType.STATE_SNAPSHOT,
-          snapshot: { runId, status: record!.status, stopping: owner.stopping },
+          snapshot: {
+            runId,
+            status: record!.status,
+            stopping: owner.stopping,
+            remoteRevision,
+            remote: remoteProgress(committedRemote ?? initialRemote),
+          },
         } as BaseEvent);
+      sendState = () => {
+        if (!ended) state();
+      };
       const terminal = () => {
         if (record!.status === 'done') {
           emit({ type: EventType.RUN_FINISHED, threadId, runId } as BaseEvent);
@@ -241,6 +271,7 @@ export async function observeRun(
     cancel() {
       ended = true;
       clearInterval(timer);
+      unsubscribe();
       return watch.stop().then(() => {});
     },
   });
