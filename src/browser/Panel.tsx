@@ -231,23 +231,11 @@ export function Panel({
           </RenderBoundary>
         </PanelContext>
       </div>
-      {panelRef && !bundle && !error && <p role="status">正在恢复面板…</p>}
-      {bundle?.program && (
-        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-          参数调整在本地重算；计算出错时，图表可能保留上次结果。单位、数据与假设以面板说明为准。
-        </p>
-      )}
-      {bundle && (
+      {bundle && (status === 'error' || status === 'conflict') && (
         <p className="save-status mt-3 text-xs leading-relaxed text-muted-foreground" role="status">
-          {
-            {
-              saved: '已保存',
-              saving: '保存中…',
-              unsaved: '等待保存…',
-              error: '保存失败，当前改动仍保留',
-              conflict: '另一页面已更新；当前草稿已保留，整页刷新前请先复制改动',
-            }[status]
-          }
+          {status === 'conflict'
+            ? '另一页面已更新；当前草稿已保留，整页刷新前请先复制改动'
+            : '保存失败，当前改动仍保留'}
         </p>
       )}
       {status === 'error' && <Button onClick={() => saver?.retry()}>重试保存</Button>}
