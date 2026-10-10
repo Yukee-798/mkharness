@@ -436,16 +436,25 @@ function Tool(part: ToolCallMessagePartProps) {
   );
 }
 function Assistant() {
+  const canCopy = useAuiState(
+    (s) =>
+      s.message.content.some((part) => part.type === 'text' && part.text.trim().length > 0) &&
+      !s.message.content.some(
+        (part) => part.type === 'tool-call' && part.toolName === 'present_openui',
+      ),
+  );
   return (
     <MessagePrimitive.Root className="group/message mb-8 min-w-0 text-sm leading-relaxed wrap-anywhere">
       <MessagePrimitive.Parts components={{ Text: MarkdownText, tools: { Fallback: Tool } }} />
-      <ActionBarPrimitive.Root
-        hideWhenRunning
-        autohide="not-last"
-        className="mt-2 flex items-center"
-      >
-        <CopyMessage />
-      </ActionBarPrimitive.Root>
+      {canCopy && (
+        <ActionBarPrimitive.Root
+          hideWhenRunning
+          autohide="not-last"
+          className="mt-2 flex items-center"
+        >
+          <CopyMessage />
+        </ActionBarPrimitive.Root>
+      )}
     </MessagePrimitive.Root>
   );
 }
