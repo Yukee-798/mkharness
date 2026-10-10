@@ -35,14 +35,21 @@ export function TraceLine({
   label,
   detail,
   meta,
+  icon,
 }: {
   live: boolean;
   label: string;
   detail?: string;
   meta?: string;
+  icon?: ReactNode;
 }): ReactNode {
   return (
     <div className={cn('font-mono text-[12px] [font-variant-ligatures:none]', traceRowClass)}>
+      {icon && (
+        <span aria-hidden="true" className="shrink-0 text-muted-foreground [&>svg]:size-4">
+          {icon}
+        </span>
+      )}
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
         {live ? (
           <ShimmerLabel>
@@ -66,12 +73,14 @@ export function DisclosureTrigger({
   live,
   label,
   detail,
+  icon,
   className,
   ...props
 }: {
   live: boolean;
   label: string;
   detail?: string;
+  icon?: ReactNode;
 } & ComponentProps<typeof CollapsibleTrigger>): ReactNode {
   return (
     <CollapsibleTrigger
@@ -83,6 +92,11 @@ export function DisclosureTrigger({
       )}
       {...props}
     >
+      {icon && (
+        <span aria-hidden="true" className="shrink-0 text-muted-foreground [&>svg]:size-4">
+          {icon}
+        </span>
+      )}
       <span className="text-muted-foreground group-hover/trigger:text-foreground min-w-0 truncate transition-colors">
         {live ? (
           <ShimmerLabel>

@@ -52,6 +52,7 @@ import {
   Globe,
   Search,
   Wrench,
+  Brain,
 } from 'lucide-react';
 export type Snapshot = {
   entries: EntryRecord[];
@@ -558,7 +559,7 @@ function AssistantText(part: TextMessagePartProps) {
   );
   if (internal) return null;
   if (part.text === '' && part.status.type === 'running')
-    return <TraceLine live label="正在思考…" />;
+    return <TraceLine live label="正在思考…" icon={<Brain />} />;
   if (part.text.startsWith('Program/UI repair limit reached'))
     return <p role="alert">交互界面暂时无法生成。你可以重新发送需求再试一次。</p>;
   if (part.text.startsWith('Model round limit reached'))
@@ -619,6 +620,7 @@ function Assistant() {
               return (
                 <ToolGroupRoot variant="ghost" defaultOpen>
                   <DisclosureTrigger
+                    icon={<Wrench />}
                     live={part.status.type === 'running'}
                     label={part.status.type === 'running' ? '正在调用' : '已调用'}
                     detail={`${part.indices.length} 个工具`}
@@ -637,6 +639,7 @@ function Assistant() {
                   className="mb-0"
                 >
                   <DisclosureTrigger
+                    icon={<Brain />}
                     live={part.status.type === 'running'}
                     label={part.status.type === 'running' ? '正在思考…' : '思考过程'}
                   />
@@ -655,7 +658,7 @@ function Assistant() {
             case 'tool-call':
               return <Tool {...part} />;
             case 'indicator':
-              return generating ? null : <TraceLine live label="正在思考…" />;
+              return generating ? null : <TraceLine live label="正在思考…" icon={<Brain />} />;
             default:
               return null;
           }
