@@ -609,7 +609,7 @@ function Assistant() {
     <MessagePrimitive.Root
       data-slot="assistant-message"
       data-trace-tail={traceTail || generating}
-      className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[trace-tail=true]:mb-2"
+      className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[trace-tail=true]:mb-2 has-[+[data-slot=assistant-message]]:mb-2"
     >
       {generating && <GenerationProgress />}
       <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
