@@ -14,7 +14,6 @@ import {
   ThreadPrimitive,
   MessagePrimitive,
   fromThreadMessageLike,
-  type ThreadHistoryAdapter,
   type ToolCallMessagePartProps,
   type TextMessagePartProps,
 } from '@assistant-ui/react';
@@ -79,7 +78,6 @@ export function Chat({
     [sending, setSending] = useState(false);
   const [retries, setRetries] = useState(0);
   useEffect(() => {
-    setSnapshot(undefined);
     const controller = new AbortController();
     void loadSnapshot(id, controller.signal)
       .then((s) => {
@@ -258,7 +256,6 @@ export function Chat({
       <div className="chat flex min-h-0 flex-1 flex-col">
         {snapshot ? (
           <Runtime
-            key={revision}
             id={id}
             snapshot={snapshot}
             submit={submit}
@@ -293,24 +290,18 @@ function Runtime({
   reconnect: (replacement?: boolean) => void;
   footer: ReactNode;
 }) {
-  const history = useMemo<ThreadHistoryAdapter>(
-    () => ({
-      append: async () => {},
-      load: async () => {
-        const messages = fromAgUiMessages(toMessages(snapshot.entries), {
-          showThinking: false,
-        }).map((m) => fromThreadMessageLike(m, m.id!, { type: 'complete', reason: 'stop' }));
-        return {
-          messages: messages.map((message, i) => ({
-            parentId: i ? messages[i - 1].id : null,
-            message,
-          })),
-          headId: messages.at(-1)?.id ?? null,
-        };
-      },
-    }),
-    [snapshot],
-  );
+  const history = useMemo(() => {
+    const messages = fromAgUiMessages(toMessages(snapshot.entries), {
+      showThinking: false,
+    }).map((m) => fromThreadMessageLike(m, m.id!, { type: 'complete', reason: 'stop' }));
+    return {
+      messages: messages.map((message, i) => ({
+        parentId: i ? messages[i - 1].id : null,
+        message,
+      })),
+      headId: messages.at(-1)?.id ?? null,
+    };
+  }, [snapshot.entries]);
   const callbacks = useRef({ done, reconnect });
   callbacks.current = { done, reconnect };
   const agent = useMemo(
@@ -324,26 +315,30 @@ function Runtime({
   );
   const runtime = useAgUiRuntime({
     agent,
-    adapters: { history },
     showThinking: false,
     autoCancelPendingToolCalls: false,
     onError: (e) => callbacks.current.reconnect(e instanceof StreamReplaced),
   });
   useEffect(() => {
+    // Refresh the authoritative Pi entries in place. Their IDs preserve existing message/panel
+    // instances; resetting the React runtime here would also reset focus and viewport scrolling.
+    runtime.thread.import(history);
     const pending = snapshot.pending.find((p) => p.status === 'running') ?? snapshot.pending[0];
-    if (!pending) return;
-    void runtime.thread.resumeRun({
-      parentId: runtime.thread.getState().messages.at(-1)?.id ?? null,
-      runConfig: { custom: { mode: 'attach', runId: pending.operationId } },
-    });
-    return () => agent.abortRun();
-  }, [runtime, agent, snapshot]);
+    if (pending)
+      void runtime.thread.resumeRun({
+        parentId: history.headId,
+        runConfig: { custom: { mode: 'attach', runId: pending.operationId } },
+      });
+    // AttachAgent cancellation closes observation only; durable work continues on the server.
+    return () => runtime.thread.cancelRun();
+  }, [runtime, history, snapshot]);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ChatContext value={{ id, submit }}>
         <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
           <ThreadPrimitive.Viewport
             data-slot="chat-viewport"
+            scrollToBottomOnRunStart={false}
             className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
           >
             <ThreadPrimitive.Empty>
