@@ -407,10 +407,10 @@ function Runtime({
           <ThreadPrimitive.Viewport
             data-slot="chat-viewport"
             scrollToBottomOnRunStart={false}
-            className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+            className="group/viewport relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain has-[[data-slot=chat-welcome]]:justify-center-safe has-[[data-slot=chat-welcome]]:py-8"
           >
             <ThreadPrimitive.Empty>
-              <div className="mx-auto mt-[12vh] max-w-md px-6 text-center">
+              <div data-slot="chat-welcome" className="mx-auto max-w-md shrink-0 px-6 text-center">
                 <MessageSquare className="mx-auto mb-4 size-6 text-muted-foreground" />
                 <p className="text-xl font-medium tracking-tight">今天想解决什么问题？</p>
                 <p className="mt-2 text-sm text-muted-foreground">
@@ -420,17 +420,17 @@ function Runtime({
             </ThreadPrimitive.Empty>
             <div
               data-slot="chat-messages"
-              className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-8 pb-6 sm:px-6"
+              className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-8 pb-6 empty:hidden sm:px-6"
             >
               <ThreadPrimitive.Messages
                 components={{ UserMessage: User, AssistantMessage: Assistant }}
               />
             </div>
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl bg-background px-4 pt-3 pb-4 sm:px-6">
+            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl shrink-0 bg-background px-4 pt-3 pb-4 group-has-[[data-slot=chat-welcome]]/viewport:static group-has-[[data-slot=chat-welcome]]/viewport:mt-0 group-has-[[data-slot=chat-welcome]]/viewport:pt-6 group-has-[[data-slot=chat-welcome]]/viewport:pb-0 sm:px-6">
               <ThreadPrimitive.ScrollToBottom asChild>
                 <TooltipIconButton
                   tooltip="回到最新消息"
-                  className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm"
+                  className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm group-has-[[data-slot=chat-welcome]]/viewport:hidden"
                 >
                   <ArrowDown className="size-4" />
                 </TooltipIconButton>
