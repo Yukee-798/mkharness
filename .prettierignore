@@ -6,6 +6,8 @@ playwright-report/
 test-results/
 worker-configuration.d.ts
 pnpm-lock.yaml
+.tanstack/
+src/routeTree.gen.ts
 .env
 .env.*
 .dev.vars

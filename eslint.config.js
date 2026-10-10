@@ -12,6 +12,8 @@ export default defineConfig([
     'dist/',
     '.wrangler/',
     '.superpowers/',
+    '.tanstack/',
+    'src/routeTree.gen.ts',
     'playwright-report/',
     'test-results/',
     'worker-configuration.d.ts',
@@ -38,6 +40,7 @@ export default defineConfig([
   {
     files: [
       'src/browser/**/*.{ts,tsx}',
+      'src/routes/**/*.tsx',
       'src/shared/**/*.tsx',
       'tests/browser/**/*.{ts,tsx}',
       'tests/unit/**/*.tsx',
@@ -52,6 +55,7 @@ export default defineConfig([
   {
     files: [
       'src/server/**/*.ts',
+      'src/server.ts',
       'src/browser/*.worker.ts',
       'tests/browser/*.worker.ts',
       'tests/workers/**/*.ts',
