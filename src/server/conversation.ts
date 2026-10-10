@@ -17,7 +17,13 @@ import { panelTools, validateUI } from './panel-tools';
 import { successfulTool } from '../shared/references';
 import { observeRun } from './observe';
 import { browserEntries } from '../shared/stream';
-import { applicationModels, applicationThinkingLevel } from './models';
+import {
+  applicationModels,
+  applicationThinkingLevel,
+  applicationModelCatalog,
+  validateModelSelection,
+} from './models';
+import type { ModelSelection } from '../shared/model-selection';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
   value: () => undefined,
@@ -73,7 +79,11 @@ export class ConversationAgent extends Agent<Env> {
         return Harness.open(
           storage,
           {
-            models: withRunLimits(this.models(), () => this.allEntries()),
+            models: withRunLimits(
+              this.models(),
+              () => this.allEntries(),
+              () => this.modelDispatch(),
+            ),
             registry,
             settings: {
               followUpMode: 'one-at-a-time',
@@ -94,6 +104,43 @@ export class ConversationAgent extends Agent<Env> {
   }
   private thinkingLevel() {
     return applicationThinkingLevel(this.env as Env & { MODEL_THINKING_LEVEL?: string });
+  }
+  private modelCatalog() {
+    return applicationModelCatalog(
+      this.env as Env & { MODEL_IDS?: string; MODEL_THINKING_LEVEL?: string },
+      this.models(),
+    );
+  }
+  private selection(config?: ModelSelection) {
+    return validateModelSelection(
+      this.env as Env & { MODEL_IDS?: string; MODEL_THINKING_LEVEL?: string },
+      this.models(),
+      config,
+    );
+  }
+  private async modelDispatch() {
+    // Pi owns the queue. Resolve the currently running operation, never the newest queued request.
+    const running = (await this.harness.pending({ session: '1' })).find(
+      (p) => p.status === 'running',
+    );
+    const row =
+      running &&
+      this.rows<{ payload: string }>(
+        'SELECT payload FROM app_requests WHERE id=?',
+        running.operationId,
+      )[0];
+    const stored = row
+      ? (JSON.parse(row.payload) as RunCommand & { execution?: ModelSelection })
+      : undefined;
+    const selection = stored?.execution ?? stored?.config ?? this.selection();
+    const model = this.models().getModel(this.env.MODEL_PROVIDER, selection.modelId);
+    if (!model)
+      throw new AppError(
+        503,
+        'unknown_model',
+        'Submitted model is absent from the installed Pi catalog',
+      );
+    return { model, thinkingLevel: selection.thinkingLevel };
   }
   protected extensions(): Extension[] {
     return [
@@ -169,7 +216,7 @@ export class ConversationAgent extends Agent<Env> {
         'SELECT payload,accepted FROM app_requests WHERE id=?',
         command.runId,
       )[0];
-      if (record && canonicalJson(JSON.parse(record.payload)) !== payload)
+      if (record && canonicalJson(commandSchema.parse(JSON.parse(record.payload))) !== payload)
         throw new AppError(409, 'request_conflict');
       if (record?.accepted === -1) throw new AppError(409, 'request_withdrawn');
       if (!record) {
@@ -179,15 +226,14 @@ export class ConversationAgent extends Agent<Env> {
           if (!successfulTool(await this.allEntries(), command.source.panelRef, 'present_openui'))
             throw new AppError(404, 'panel_not_found');
         }
-        this.models(); // Fail before admitting a request with missing model configuration.
-        this.thinkingLevel();
+        const execution = this.selection(command.config); // Validate and freeze settings before admission.
         const pending = await this.harness.pending({ session: '1' });
         if (pending.filter((p) => p.status === 'queued').length >= 10)
           throw new AppError(429, 'queue_full');
         this.ctx.storage.sql.exec(
           'INSERT INTO app_requests(id,payload)VALUES(?,?)',
           command.runId,
-          payload,
+          canonicalJson(command.config ? command : { ...command, execution }),
         );
       }
       if (!record?.accepted) {
@@ -198,12 +244,6 @@ export class ConversationAgent extends Agent<Env> {
     });
   }
   private async enqueue(command: RunCommand) {
-    // Apply the host's choice through Pi's public settings before a new submission. This also
-    // enables future reasoning in existing chats without rewriting their earlier history.
-    const root = await this.root();
-    const thinkingLevel = this.thinkingLevel();
-    if ((await root.agent(BG)).thinkingLevel !== thinkingLevel)
-      await root.configure({ thinkingLevel }, BG);
     let text = command.text;
     if (command.source) text += USER_ACTION_CONTEXT + '\n' + JSON.stringify(command.source);
     await this.harness.submit(text, {
@@ -371,11 +411,26 @@ export class ConversationAgent extends Agent<Env> {
     const inspection = await pi.inspect(BG);
     const pending = await this.harness.pending({ session: '1' });
     const history = await this.history(cursor);
+    const modelCatalog = this.modelCatalog();
+    const lastRequest = this.rows<{ payload: string }>(
+      'SELECT payload FROM app_requests WHERE accepted<>-1 ORDER BY rowid DESC LIMIT 1',
+    )[0];
+    const previousRequest = lastRequest ? JSON.parse(lastRequest.payload) : undefined;
+    const previous = (previousRequest?.config ?? previousRequest?.execution) as
+      ModelSelection | undefined;
+    // A removed model/effort falls back for the next message, without rewriting earlier requests.
+    const option = modelCatalog.models.find((m) => m.id === previous?.modelId);
+    const selection =
+      previous && option?.thinkingLevels.includes(previous.thinkingLevel)
+        ? previous
+        : modelCatalog.defaultSelection;
     return JSON.stringify({
       entries: browserEntries(history.items),
       cursor: history.next,
       pending,
       stopping: this.stopping,
+      modelCatalog,
+      selection,
       tools: inspection.tasks
         .filter((t) => t.record.kind === 'pi.tool')
         .map((t) => ({ taskId: Number(t.record.id) })),

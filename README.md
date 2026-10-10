@@ -18,19 +18,26 @@ pnpm dev
 
 打开 `http://localhost:5173`。默认 D1 ID 为本地占位值，仅本地使用；部署前必须替换。`APP_URL` 在 `wrangler.jsonc` 中配置，须等于实际访问的同源地址。不要混用 localhost 和 127.0.0.1。
 
-| 配置                                        | 用途                                                                           |
-| ------------------------------------------- | ------------------------------------------------------------------------------ |
-| `BETTER_AUTH_SECRET`                        | 至少 32 字符的随机 secret，每个环境独立                                        |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用                                                          |
-| `MODEL_PROVIDER`                            | 当前提供 `openai`、`anthropic` 或 `deepseek`                                   |
-| `MODEL_ID`                                  | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出                            |
-| `MODEL_API_KEY`                             | 仅服务端使用的供应商密钥                                                       |
-| `MODEL_THINKING_LEVEL`                      | 默认 `low`；`off` 可关闭，也可配置 minimal/medium/high/max，实际能力由模型决定 |
-| `TAVILY_API_KEY`                            | 可选；缺少时搜索工具明确报告未配置                                             |
+| 配置                                        | 用途                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `BETTER_AUTH_SECRET`                        | 至少 32 字符的随机 secret，每个环境独立                                                          |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用                                                                            |
+| `MODEL_PROVIDER`                            | 当前提供 `openai`、`anthropic` 或 `deepseek`                                                     |
+| `MODEL_ID`                                  | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出                                              |
+| `MODEL_API_KEY`                             | 仅服务端使用的供应商密钥                                                                         |
+| `MODEL_IDS`                                 | 可选，同一 provider 下用逗号分隔的模型白名单，须包含 `MODEL_ID`；留空展示已安装 Pi provider 目录 |
+| `MODEL_THINKING_LEVEL`                      | 默认 `low`；`off` 可关闭，也可配置 minimal/medium/high/xhigh/max，默认值按模型能力调整           |
+| `TAVILY_API_KEY`                            | 可选；缺少时搜索工具明确报告未配置                                                               |
 
 生产 `MODEL_PROVIDER` / `MODEL_ID` 使用 Wrangler `vars`；密钥使用 Cloudflare Secrets。没有默认模型、用户 API key 输入或浏览器密钥。缺少认证配置返回 503；缺少模型配置在接受任务前返回 503。
 
 聊天展示模型实际返回的推理文本或摘要，生成时可展开查看，完成后默认收起。历史恢复保留已有推理；没有提供推理的模型和旧记录不补造思考过程。推理配置应用于后续任务，不会重写历史。加密推理、redacted blocks 和供应商签名不会传到前端。
+
+输入框左下角使用 assistant-ui ModelSelector 的独立组件，选择服务端允许的模型和该模型实际支持的思考强度。当前 provider 共用服务端密钥；增加其他 provider 需在 `src/server/models.ts` 注册和配置，不会展示未配置的供应商。DeepSeek 目录包含 `deepseek-flash` 与 `deepseek-v4-pro`；后者不支持低档思考。
+
+每次 HTTP 提交携带 `config: { modelId, thinkingLevel }`。后端校验白名单和能力，将实际选择冻结在现有 `app_requests.payload` 中；重试包含同一配置，改动配置需新的 runId。模型调度从 Pi 的当前运行 operation 读取选择，因此切换选择器只影响下一次提交，不改变运行中或排队的任务。刷新会恢复最近一次提交的选择。请求记录没有凭据，未添加设置表或新的公共接口。Pi 继续管理队列、完整历史、压缩和恢复；应用在 `Models.streamSimple` 边界分发模型及思考选项。
+
+Pi 的压缩阈值仍采用会话默认 `MODEL_ID` 的目录窗口；当前两种 DeepSeek 模型的窗口一致。扩展到不同窗口的模型时，以白名单中窗口最小的模型作为 `MODEL_ID`，让共享聊天的压缩阈值适用于全部选择。
 
 Google 控制台选择 Web 应用，添加授权 JavaScript 来源 `http://localhost:5173`，授权重定向 URI：
 

@@ -55,6 +55,10 @@ export function runLimits(entries: () => Promise<readonly EntryRecord[]>): Exten
 export function withRunLimits(
   models: import('@earendil-works/pi-ai/models').Models,
   entries: () => Promise<readonly EntryRecord[]>,
+  dispatch?: () => Promise<{
+    model: import('@earendil-works/pi-ai').Model<import('@earendil-works/pi-ai').Api>;
+    thinkingLevel: import('@earendil-works/pi-ai').ModelThinkingLevel;
+  }>,
 ) {
   const result = Object.create(models) as import('@earendil-works/pi-ai/models').Models;
   result.streamSimple = (model, context, options) => {
@@ -62,6 +66,14 @@ export function withRunLimits(
     void (async () => {
       try {
         checkRunLimits(await entries());
+        if (dispatch) {
+          const selected = await dispatch();
+          model = selected.model;
+          options = {
+            ...options,
+            reasoning: selected.thinkingLevel === 'off' ? undefined : selected.thinkingLevel,
+          };
+        }
       } catch (error) {
         const message: AssistantMessage = {
           role: 'assistant',

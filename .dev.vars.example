@@ -6,5 +6,8 @@ MODEL_PROVIDER=openai
 MODEL_ID=
 MODEL_API_KEY=
 # Optional
+# Comma-separated model allowlist for this provider; omitted = installed provider catalog.
+# Must include MODEL_ID. Example for deepseek: deepseek-flash,deepseek-v4-pro
+MODEL_IDS=
 MODEL_THINKING_LEVEL=low
 TAVILY_API_KEY=

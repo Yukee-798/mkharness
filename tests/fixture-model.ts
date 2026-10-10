@@ -7,7 +7,15 @@ export const model: Model<'openai-responses'> = {
   name: 'Test only',
   api: 'openai-responses',
   baseUrl: 'https://fixture.invalid',
-  reasoning: false,
+  reasoning: true,
+  thinkingLevelMap: {
+    minimal: null,
+    low: 'low',
+    medium: null,
+    high: 'high',
+    xhigh: null,
+    max: 'max',
+  },
   input: ['text'],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: 100000,
@@ -129,8 +137,11 @@ export function fixtureModels() {
               },
             ]),
       api: 'openai-responses',
-      provider: 'fixture',
-      model: 'fixture',
+      provider: _model.provider,
+      model: _model.id,
+      thinkingLevel:
+        (_options as { reasoning?: AssistantMessage['thinkingLevel'] } | undefined)?.reasoning ??
+        'off',
       usage: text?.includes('long_summary')
         ? { ...usage, output: 30000, totalTokens: 30000 }
         : usage,
@@ -209,7 +220,15 @@ export function fixtureModels() {
         resolve: async () => ({ auth: { apiKey: 'fixture' }, source: 'fixture' }),
       },
     },
-    getModels: () => [model],
+    getModels: () => [
+      model,
+      {
+        ...model,
+        id: 'fixture-pro',
+        name: 'Test Pro',
+        thinkingLevelMap: { ...model.thinkingLevelMap, low: null },
+      },
+    ],
     stream,
     streamSimple: stream,
   });

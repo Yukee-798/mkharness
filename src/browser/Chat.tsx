@@ -33,6 +33,8 @@ import { ChatLoading } from './chat-loading';
 import { Alert, AlertDescription } from './ui/alert';
 import { MarkdownText } from './markdown-text';
 import { Reasoning } from './reasoning';
+import { ModelPicker } from './model-picker';
+import type { ModelCatalog, ModelSelection } from '../shared/model-selection';
 import { TooltipIconButton } from './tooltip-icon-button';
 import {
   ToolFallbackRoot,
@@ -47,6 +49,8 @@ export type Snapshot = {
   cursor?: unknown;
   pending: { operationId: string; status: 'running' | 'queued' }[];
   stopping: boolean;
+  modelCatalog?: ModelCatalog;
+  selection?: ModelSelection;
 };
 export async function loadSnapshot(id: string, signal?: AbortSignal) {
   const first = await request<Snapshot>(`/conversations/${id}/snapshot`, { signal });
@@ -79,6 +83,8 @@ export function Chat({
     [accepted, setAccepted] = useState<string[]>([]),
     [sending, setSending] = useState(false);
   const retries = useRef(0);
+  const [selection, setSelection] = useState<ModelSelection>();
+  const selected = selection ?? snapshot?.selection ?? snapshot?.modelCatalog?.defaultSelection;
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [connection, setConnection] = useState<'reconnecting' | 'recovered'>();
   useEffect(() => () => clearTimeout(reconnectTimer.current), []);
@@ -114,7 +120,7 @@ export function Chat({
     [id],
   );
   const submit = async (message: string, source?: RunCommand['source']) => {
-    await send(message, source);
+    await send(message, source, selected);
     onDirectoryChange?.();
     setAccepted((a) => [...a, message]);
     retries.current = 0;
@@ -250,8 +256,19 @@ export function Chat({
           }}
         />
         <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="px-1 text-[11px] text-muted-foreground">Shift + Enter 换行</span>
-          <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            {snapshot?.modelCatalog && selected ? (
+              <ModelPicker
+                catalog={snapshot.modelCatalog}
+                value={selected}
+                onChange={setSelection}
+                disabled={sending || snapshot.stopping}
+              />
+            ) : (
+              <span className="px-1 text-[11px] text-muted-foreground">Shift + Enter 换行</span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             {!!snapshot?.pending.length && (
               <Button
                 type="button"

@@ -1,6 +1,12 @@
 import { env } from 'cloudflare:test';
 import { it, expect } from 'vitest';
-import { applicationModels, applicationThinkingLevel } from '../../src/server/models';
+import {
+  applicationModels,
+  applicationThinkingLevel,
+  applicationModelCatalog,
+  validateModelSelection,
+} from '../../src/server/models';
+import { runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 it('enables low reasoning by default and respects an explicit off setting', async () => {
   expect(applicationThinkingLevel({})).toBe('low');
   expect(applicationThinkingLevel({ MODEL_THINKING_LEVEL: 'off' })).toBe('off');
@@ -9,14 +15,12 @@ it('enables low reasoning by default and respects an explicit off setting', asyn
   );
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   await stub.submitRun({ runId: crypto.randomUUID(), text: 'configuration check' });
-  // The chosen level belongs to the Pi agent, not a duplicate application settings table.
-  const { runInDurableObject } = await import('cloudflare:test');
-  const { BG } = await import('../../src/server/conversation');
+  const snapshot = await settle(stub);
+  expect(snapshot.modelCatalog.defaultSelection.thinkingLevel).toBe('low');
   expect(
-    await runInDurableObject(
-      stub,
-      async (instance) => (await (await instance.root()).agent(BG)).thinkingLevel,
-    ),
+    snapshot.entries
+      .flatMap((entry: any) => entry.model ?? [])
+      .find((message: any) => message.role === 'assistant').thinkingLevel,
   ).toBe('low');
 });
 it('registers the installed DeepSeek provider with an explicit catalog model', async () => {
@@ -46,4 +50,112 @@ it('rejects an absent model instead of silently substituting another DeepSeek mo
       MODEL_API_KEY: 'fixture-only',
     }),
   ).toThrow('MODEL_ID is absent');
+});
+it('publishes only allowed catalog models and their actual Pi effort levels without credentials', () => {
+  const config = {
+    MODEL_PROVIDER: 'deepseek',
+    MODEL_ID: 'deepseek-flash',
+    MODEL_API_KEY: 'fixture-only',
+  };
+  const models = applicationModels(config);
+  const catalog = applicationModelCatalog(config, models);
+  expect(catalog.models.map((m) => m.id)).toEqual(['deepseek-flash', 'deepseek-v4-pro']);
+  expect(catalog.models[0].thinkingLevels).toEqual(['off', 'low', 'high', 'max']);
+  expect(catalog.models[1].thinkingLevels).toEqual(['off', 'high', 'max']);
+  expect(JSON.stringify(catalog)).not.toContain('fixture-only');
+  expect(applicationModelCatalog({ ...config, MODEL_IDS: '' }, models)).toEqual(catalog);
+  const restricted = { ...config, MODEL_IDS: 'deepseek-flash' };
+  expect(() =>
+    validateModelSelection(restricted, models, {
+      modelId: 'deepseek-v4-pro',
+      thinkingLevel: 'high',
+    }),
+  ).toThrow('所选模型不可用');
+  expect(() =>
+    validateModelSelection(config, models, { modelId: 'deepseek-v4-pro', thinkingLevel: 'low' }),
+  ).toThrow('该模型不支持');
+  expect(() => applicationModelCatalog({ ...config, MODEL_IDS: 'missing' }, models)).toThrow(
+    'MODEL_IDS must include',
+  );
+});
+async function settle(stub: ReturnType<typeof env.CONVERSATIONS.getByName>) {
+  for (let i = 0; i < 250; i++) {
+    const snapshot = JSON.parse(await stub.snapshot());
+    if (!snapshot.pending.length) return snapshot;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error('Model selection queue did not settle');
+}
+it('keeps per-request model and effort across a busy queue, retries and SQLite-preserving restart', async () => {
+  let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const commands = [
+    {
+      runId: crypto.randomUUID(),
+      text: 'slow first',
+      config: { modelId: 'fixture', thinkingLevel: 'low' as const },
+    },
+    {
+      runId: crypto.randomUUID(),
+      text: 'second',
+      config: { modelId: 'fixture-pro', thinkingLevel: 'high' as const },
+    },
+    {
+      runId: crypto.randomUUID(),
+      text: 'third',
+      config: { modelId: 'fixture', thinkingLevel: 'off' as const },
+    },
+  ];
+  for (const command of commands)
+    expect(await stub.submitRun(command)).toMatchObject({ accepted: true });
+  expect(await stub.submitRun(commands[1])).toMatchObject({ accepted: true });
+  expect(
+    await stub.submitRun({
+      ...commands[1],
+      config: { ...commands[1].config, thinkingLevel: 'max' },
+    }),
+  ).toMatchObject({ error: { status: 409 } });
+  await abortAllDurableObjects();
+  stub = env.CONVERSATIONS.get(stub.id);
+  const snapshot = await settle(stub);
+  const messages = snapshot.entries
+    .flatMap((e: any) => e.model ?? [])
+    .filter((m: any) => m.role === 'assistant');
+  expect(messages.map((m: any) => [m.model, m.thinkingLevel])).toEqual([
+    ['fixture', 'low'],
+    ['fixture-pro', 'high'],
+    ['fixture', 'off'],
+  ]);
+  expect(snapshot.selection).toEqual(commands[2].config);
+  expect(
+    snapshot.entries.flatMap((e: any) => e.model ?? []).filter((m: any) => m.role === 'user'),
+  ).toHaveLength(3);
+  expect(
+    await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql
+        .exec('SELECT payload FROM app_requests ORDER BY rowid')
+        .toArray()
+        .map((r) => {
+          const payload = JSON.parse(String(r.payload));
+          return payload.config ?? payload.execution;
+        }),
+    ),
+  ).toEqual(commands.map((c) => c.config));
+});
+it('rejects unsupported choices before inserting a request', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  for (const config of [
+    { modelId: 'missing', thinkingLevel: 'low' as const },
+    { modelId: 'fixture-pro', thinkingLevel: 'low' as const },
+  ]) {
+    expect(
+      await stub.submitRun({ runId: crypto.randomUUID(), text: 'invalid', config }),
+    ).toMatchObject({ error: { status: 400 } });
+  }
+  expect(
+    await runInDurableObject(
+      stub,
+      (_instance, state) =>
+        state.storage.sql.exec('SELECT COUNT(*) AS count FROM app_requests').one().count,
+    ),
+  ).toBe(0);
 });
