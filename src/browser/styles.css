@@ -97,6 +97,12 @@
     touch-action: manipulation;
   }
 }
+input::placeholder,
+textarea::placeholder,
+.generated-panel :is(input, textarea)::placeholder {
+  color: color-mix(in oklch, var(--muted-foreground) 65%, var(--background));
+  opacity: 1;
+}
 /* Small appearance adjustments; native OpenUI state and actions remain intact. */
 /* OpenUI inline code uses body font tokens; keep it independent of prose weight. */
 .generated-panel :is(pre, code) {
