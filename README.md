@@ -84,7 +84,7 @@ pnpm deploy:test
 
 ## 代码入口与扩展
 
-界面优先复用 assistant-ui 的消息、Markdown、Viewport 与滚动组件；工具展示采用其官方组件的只读部分。登录、个人聊天目录、状态提示与自定义控件使用 shadcn/ui + Tailwind CSS。生成面板仍由 OpenUI 的原生目录渲染。Composer 使用 assistant-ui 表单包装和 shadcn Textarea，但发送、排队与停止保持独立 HTTP 接口，不调用 runtime 的默认发送或取消行为。
+界面优先复用 assistant-ui 的消息、Markdown、Viewport 与滚动组件。连续工具调用使用官方 ToolGroup ghost 变体，详情复用 ToolFallback 的只读展示组件；请求参数与结果独立滚动，桌面高度最多 256px、手机 176px。思考区使用官网示例的 Reasoning ghost 变体与 DisclosureTrigger，运行标签通过官方 tw-shimmer 循环扫光。组件源码位于 `src/browser/tool-group.tsx`、`tool-fallback.tsx`、`tool-call.tsx`、`reasoning.tsx`、`reasoning.aui.tsx`、`trace.tsx` 与 `surfaces.tsx`，可以直接修改；应用补充真实失败/停止状态、中文标签和无障碍适配。登录、个人聊天目录、状态提示与自定义控件使用 shadcn/ui + Tailwind CSS。生成内容仍由 OpenUI 的原生目录渲染。Composer 使用 assistant-ui 表单包装和 shadcn Textarea，但发送、排队与停止保持独立 HTTP 接口，不调用 runtime 的默认发送或取消行为。
 
 新增应用控件可执行 `pnpm dlx shadcn@latest add <component>`，新增 assistant-ui 展示组件可执行 `pnpm dlx shadcn@latest add @assistant-ui/<component>`。配置在 `components.json`，主题变量在 `src/browser/styles.css`；安装后检查依赖版本、导入路径及许可证记录。不要用默认 ThreadList 替代现有聊天目录，除非也明确接入应用的认证、D1 目录和 Pi 历史。
 

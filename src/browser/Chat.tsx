@@ -32,18 +32,27 @@ import { Textarea } from './ui/textarea';
 import { ChatLoading } from './chat-loading';
 import { Alert, AlertDescription } from './ui/alert';
 import { MarkdownText } from './markdown-text';
-import { Reasoning } from './reasoning';
+import { Reasoning, ReasoningRoot, ReasoningContent, ReasoningText } from './reasoning.aui';
 import { ModelPicker } from './model-picker';
 import type { ModelCatalog, ModelSelection } from '../shared/model-selection';
 import { TooltipIconButton } from './tooltip-icon-button';
+import { ToolCall } from './tool-call';
+import { ToolGroupRoot, ToolGroupContent } from './tool-group';
+import { DisclosureTrigger, disclosureContentClass, TraceLine } from './trace';
 import {
-  ToolFallbackRoot,
-  ToolFallbackTrigger,
-  ToolFallbackContent,
-  ToolFallbackResult,
-  ToolFallbackError,
-} from './tool-fallback';
-import { ArrowUp, ArrowDown, Check, MessageSquare, Square, LoaderCircle } from 'lucide-react';
+  ArrowUp,
+  ArrowDown,
+  Check,
+  MessageSquare,
+  Square,
+  LoaderCircle,
+  XCircle,
+  CircleMinus,
+  AlertCircle,
+  Globe,
+  Search,
+  Wrench,
+} from 'lucide-react';
 export type Snapshot = {
   entries: EntryRecord[];
   cursor?: unknown;
@@ -470,45 +479,73 @@ function Tool(part: ToolCallMessagePartProps) {
       </>
     );
   }
-  const names: Record<string, string> = {
-    read_web: '读取网页',
-    read_webpage: '读取网页',
-    search_web: '搜索网页',
+  return <ToolActivity part={part} />;
+}
+function ToolActivity({ part }: { part: ToolCallMessagePartProps }) {
+  const [open, setOpen] = useState(false);
+  const names: Record<string, { active: string; complete: string; failed: string }> = {
+    read_web: { active: '正在读取网页', complete: '已读取网页', failed: '网页读取失败' },
+    read_webpage: { active: '正在读取网页', complete: '已读取网页', failed: '网页读取失败' },
+    search_web: { active: '正在搜索网页', complete: '已搜索网页', failed: '网页搜索失败' },
   };
+  const name = names[part.toolName] ?? {
+    active: `正在执行：${part.toolName}`,
+    complete: `已完成：${part.toolName}`,
+    failed: `执行失败：${part.toolName}`,
+  };
+  const running = part.status?.type === 'running';
+  const cancelled = part.status?.type === 'incomplete' && part.status.reason === 'cancelled';
+  const failed = part.isError || (part.status?.type === 'incomplete' && !cancelled);
+  const waiting = part.status?.type === 'requires-action';
+  const label = cancelled ? '已停止' : failed ? name.failed : waiting ? '等待处理' : name.complete;
   const target = part.args?.query ?? part.args?.url;
-  let label = typeof target === 'string' ? target : undefined;
+  let query = typeof target === 'string' ? target : '';
   if (part.toolName === 'read_web' || part.toolName === 'read_webpage') {
     try {
-      label = new URL(label ?? '').hostname;
+      query = new URL(query).hostname;
     } catch {
-      label = undefined; // Show the source once its streaming URL can be parsed.
+      query = '';
     }
   }
-  // A completed tool call may still have returned an application error.
-  const status: ToolCallMessagePartProps['status'] =
-    part.isError && part.status?.type !== 'incomplete'
-      ? { type: 'incomplete', reason: 'error', error: part.result }
-      : part.status;
+  const result =
+    part.result ?? (part.status?.type === 'incomplete' ? part.status.error : undefined);
   return (
-    <ToolFallbackRoot>
-      <ToolFallbackTrigger
-        toolName={names[part.toolName] ?? part.toolName}
-        target={label}
-        status={status}
-      />
-      <ToolFallbackContent>
-        {!part.isError && <ToolFallbackResult result={part.result} />}
-        <ToolFallbackError status={status} />
-      </ToolFallbackContent>
-    </ToolFallbackRoot>
+    <ToolCall
+      label={label}
+      activeLabel={name.active}
+      query={query}
+      request={part.argsText ?? ''}
+      result={typeof result === 'string' ? result : (JSON.stringify(result, null, 2) ?? '')}
+      running={running}
+      icon={
+        part.toolName === 'search_web' ? (
+          <Search />
+        ) : part.toolName.startsWith('read_web') ? (
+          <Globe />
+        ) : (
+          <Wrench />
+        )
+      }
+      open={open}
+      onOpenChange={setOpen}
+      ariaLabel={`${running ? name.active : label}${query ? ` · ${query}` : ''}`}
+      statusIcon={
+        cancelled ? (
+          <CircleMinus className="size-3.5 text-muted-foreground" />
+        ) : failed ? (
+          <XCircle className="size-3.5 text-destructive" />
+        ) : waiting ? (
+          <AlertCircle className="size-3.5 text-muted-foreground" />
+        ) : undefined
+      }
+    />
   );
 }
 function GenerationProgress() {
   return (
-    <p role="status" className="flex items-center gap-2 py-1.5 text-sm text-muted-foreground">
-      <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" />
-      正在生成交互界面…
-    </p>
+    <div role="status">
+      <TraceLine live label="正在生成交互界面…" />
+    </div>
   );
 }
 function AssistantText(part: TextMessagePartProps) {
@@ -520,13 +557,21 @@ function AssistantText(part: TextMessagePartProps) {
     ),
   );
   if (internal) return null;
+  if (part.text === '' && part.status.type === 'running')
+    return <TraceLine live label="正在思考…" />;
   if (part.text.startsWith('Program/UI repair limit reached'))
     return <p role="alert">交互界面暂时无法生成。你可以重新发送需求再试一次。</p>;
   if (part.text.startsWith('Model round limit reached'))
     return <p role="alert">本次任务未能完成。你可以重新发送需求继续。</p>;
   return <MarkdownText />;
 }
-const groupReasoning = groupPartByType({ reasoning: ['group-reasoning'] });
+const groupAssistantParts = groupPartByType({
+  reasoning: ['group-reasoning'],
+  'tool-call': ['group-tool'],
+  'tool-call:prepare_program': [],
+  'tool-call:present_openui': [],
+  'standalone-tool-call': [],
+});
 function Assistant() {
   const toolTail = useAuiState((s) => {
     const last = s.message.content.findLast(
@@ -559,17 +604,51 @@ function Assistant() {
       className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[tool-tail=true]:mb-2"
     >
       {generating && <GenerationProgress />}
-      <MessagePrimitive.GroupedParts groupBy={groupReasoning} indicator="never">
+      <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
         {({ part, children }) => {
           switch (part.type) {
+            case 'group-tool':
+              if (part.indices.length === 1) return <>{children}</>;
+              return (
+                <ToolGroupRoot variant="ghost" defaultOpen className="my-1">
+                  <DisclosureTrigger
+                    live={part.status.type === 'running'}
+                    label={part.status.type === 'running' ? '正在调用' : '已调用'}
+                    detail={`${part.indices.length} 个工具`}
+                    data-slot="tool-group-trigger"
+                  />
+                  <ToolGroupContent className={`${disclosureContentClass} [&>div]:gap-2!`}>
+                    {children}
+                  </ToolGroupContent>
+                </ToolGroupRoot>
+              );
             case 'group-reasoning':
-              return <Reasoning active={part.status.type === 'running'}>{children}</Reasoning>;
+              return (
+                <ReasoningRoot
+                  variant="ghost"
+                  streaming={part.status.type === 'running'}
+                  className="my-1 mb-3"
+                >
+                  <DisclosureTrigger
+                    live={part.status.type === 'running'}
+                    label={part.status.type === 'running' ? '正在思考…' : '思考过程'}
+                  />
+                  <ReasoningContent
+                    aria-busy={part.status.type === 'running'}
+                    className={disclosureContentClass}
+                  >
+                    <ReasoningText className="ps-0">{children}</ReasoningText>
+                  </ReasoningContent>
+                </ReasoningRoot>
+              );
             case 'reasoning':
-              return <MarkdownText />;
+              return <Reasoning {...part} />;
             case 'text':
               return <AssistantText {...part} />;
             case 'tool-call':
               return <Tool {...part} />;
+            case 'indicator':
+              return generating ? null : <TraceLine live label="正在思考…" />;
             default:
               return null;
           }
