@@ -8,6 +8,7 @@ import { AppShell } from './AppShell';
 import { MessageSquare, Plus, LogIn, LogOut, ArrowRight, ChevronsUpDown } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
+import { ScrollArea } from './ui/scroll-area';
 import { ChatLoading } from './chat-loading';
 import { cn } from './ui/utils';
 import {
@@ -210,6 +211,12 @@ function Workspace({ name }: { name: string }) {
     }
   };
   const current = items.find((item) => item.id === id);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const groups = [
+    { label: 'Today', items: items.filter((item) => item.updated_at >= today.getTime()) },
+    { label: 'Earlier', items: items.filter((item) => item.updated_at < today.getTime()) },
+  ];
   const signOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
@@ -235,7 +242,6 @@ function Workspace({ name }: { name: string }) {
         {creating ? '创建中…' : '新建聊天'}
       </Button>
       <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <h2 className="px-2 text-xs font-medium text-muted-foreground">聊天记录</h2>
         {loading && !items.length && (
           <div className="space-y-2" role="status" aria-label="正在读取目录">
             <Skeleton className="h-9 w-full" />
@@ -245,56 +251,59 @@ function Workspace({ name }: { name: string }) {
         {!loading && !items.length && (
           <p className="px-2 py-4 text-sm text-muted-foreground">第一段对话，从这里开始。</p>
         )}
-        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto" aria-label="聊天记录">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              role="group"
-              aria-label={`聊天：${item.title}`}
-              className="group/chat flex items-center rounded-md has-[button[aria-current=page]]:bg-accent"
-            >
+        <ScrollArea className="-mx-4 min-h-0 flex-1">
+          <nav className="space-y-4 px-4" aria-label="聊天记录">
+            {groups
+              .filter((group) => group.items.length)
+              .map((group) => (
+                <section key={group.label} className="space-y-1" aria-label={group.label}>
+                  <h2 className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                    {group.label}
+                  </h2>
+                  {group.items.map((item) => (
+                    <div
+                      key={item.id}
+                      role="group"
+                      aria-label={`聊天：${item.title}`}
+                      className="group/chat flex items-center rounded-md has-[button[aria-current=page]]:bg-accent"
+                    >
+                      <Button
+                        variant="ghost"
+                        aria-current={id === item.id ? 'page' : undefined}
+                        className="h-auto min-w-0 flex-1 justify-start px-2 py-2 text-left font-medium text-muted-foreground aria-[current=page]:font-semibold aria-[current=page]:text-foreground"
+                        onClick={() => choose(item.id)}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                      </Button>
+                      <ConversationActions
+                        id={item.id}
+                        title={item.title}
+                        onRenamed={(title) => {
+                          setItems((current) =>
+                            current.map((chat) =>
+                              chat.id === item.id ? { ...chat, title } : chat,
+                            ),
+                          );
+                          refreshDirectory();
+                        }}
+                        onDeleted={() => deleted(item.id)}
+                      />
+                    </div>
+                  ))}
+                </section>
+              ))}
+            {next && (
               <Button
                 variant="ghost"
-                aria-current={id === item.id ? 'page' : undefined}
-                className="h-auto min-w-0 flex-1 justify-start gap-2 px-2 py-2.5 text-left font-medium aria-[current=page]:font-semibold"
-                onClick={() => choose(item.id)}
+                className="w-full"
+                disabled={loading}
+                onClick={() => setPages((value) => value + 1)}
               >
-                <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                <time
-                  className="shrink-0 text-[10px] text-muted-foreground"
-                  dateTime={new Date(item.updated_at).toISOString()}
-                >
-                  {new Date(item.updated_at).toLocaleDateString('zh-CN', {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </time>
+                更多聊天
               </Button>
-              <ConversationActions
-                id={item.id}
-                title={item.title}
-                onRenamed={(title) => {
-                  setItems((current) =>
-                    current.map((chat) => (chat.id === item.id ? { ...chat, title } : chat)),
-                  );
-                  refreshDirectory();
-                }}
-                onDeleted={() => deleted(item.id)}
-              />
-            </div>
-          ))}
-          {next && (
-            <Button
-              variant="ghost"
-              className="w-full"
-              disabled={loading}
-              onClick={() => setPages((value) => value + 1)}
-            >
-              更多聊天
-            </Button>
-          )}
-        </nav>
+            )}
+          </nav>
+        </ScrollArea>
       </div>
     </div>
   );
