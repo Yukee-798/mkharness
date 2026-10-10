@@ -11,7 +11,7 @@ import { cn } from './ui/utils';
 // The parent owns spacing between traces; all collapsed rows share the same height.
 export const traceRowClass = 'flex items-center gap-2 py-1 leading-5';
 
-// Keep space reserved when hidden so hover/focus never moves the label or source.
+// Keep the disclosure affordance visible immediately after the label or source.
 export function DisclosureChevron({
   className,
   ...props
@@ -21,9 +21,7 @@ export function DisclosureChevron({
       aria-hidden="true"
       data-slot="disclosure-chevron"
       className={cn(
-        'size-3.5 shrink-0 opacity-0 transition-[opacity,rotate] duration-200 motion-reduce:transition-none',
-        'group-hover/trigger:opacity-60 group-focus-visible/trigger:opacity-60',
-        'group-data-open/trigger:opacity-60 group-data-panel-open/trigger:opacity-60',
+        'size-3.5 shrink-0 opacity-60 transition-[rotate] duration-200 motion-reduce:transition-none',
         'group-data-open/trigger:rotate-90 group-data-panel-open/trigger:rotate-90',
         className,
       )}
