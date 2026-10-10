@@ -1,5 +1,31 @@
 import { test, expect } from '@playwright/test';
 
+test('native select portals share the application theme and preserve keyboard selection', async ({
+  page,
+}) => {
+  const ui =
+    '$duration = "short"\nroot = Select("duration",[SelectItem("short","短期"),SelectItem("long","长期")],"选择周期",null,$duration)';
+  await page.route('**/api/conversations/test/panels/**', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      return route.fulfill({ json: { revision: 1 } });
+    }
+    return route.fulfill({
+      json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 },
+    });
+  });
+  await page.goto('/tests/browser/panel.html');
+  const select = page
+    .getByRole('region', { name: 'Interactive answer' })
+    .first()
+    .getByRole('combobox');
+  await select.click();
+  await expect(page.getByRole('listbox')).toHaveClass(/openui-theme-portal-/);
+  await page.getByRole('option', { name: '短期', exact: true }).press('ArrowDown');
+  await page.getByRole('option', { name: '长期', exact: true }).press('Enter');
+  await expect(select).toHaveText('长期');
+  await expect(select).toBeFocused();
+});
+
 test('native clarification form validates, saves choices and submits only on explicit confirmation', async ({
   page,
 }) => {

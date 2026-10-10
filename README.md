@@ -78,6 +78,10 @@ pnpm deploy:test
 
 新增应用控件可执行 `pnpm dlx shadcn@latest add <component>`，新增 assistant-ui 展示组件可执行 `pnpm dlx shadcn@latest add @assistant-ui/<component>`。配置在 `components.json`，主题变量在 `src/browser/styles.css`；安装后检查依赖版本、导入路径及许可证记录。不要用默认 ThreadList 替代现有聊天目录，除非也明确接入应用的认证、D1 目录和 Pi 历史。
 
+OpenUI 通过根 `ThemeProvider` 共享 shadcn 的颜色、字体和圆角。全局品牌调整优先修改 `styles.css` 的变量；生成组件的字号、间距和主题映射在 `src/browser/openui-theme.ts`。正文与聊天同为 14px，手机输入保持 16px；外层面板不重复加卡片边框，只留焦点环所需空间，组件自己负责分组和表格滚动。图表仍保留可区分的系列颜色。原生目录和 ThemeProvider 从同一个包入口导入，避免 OpenUI 0.17.0 的独立子入口创建另一套上下文，导致弹层或图表主题自定义失效。需要新应用控件时继续使用 shadcn/ui + Tailwind；主题调整无需改动输入绑定、验证或动作。
+
+应用外壳在 `src/browser/AppShell.tsx`：Google 登录入口位于侧栏底部，登录后替换为个人账号菜单，退出仍通过 Better Auth。桌面侧栏支持展开和窄栏模式，偏好保存在浏览器本地；手机通过 Sheet 抽屉显示目录和底部账号。收起只改变布局，保持聊天和草稿挂载，不重新提交任务。侧栏沿用应用的个人目录，不接入第二套 ThreadList 后端。
+
 | 位置                                                     | 修改什么                                                       |
 | -------------------------------------------------------- | -------------------------------------------------------------- |
 | `src/browser/App.tsx` / `styles.css` / `ui/`             | 登录、个人目录、主题和 shadcn 页面组件                         |

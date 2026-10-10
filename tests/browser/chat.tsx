@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ThemeProvider } from '@openuidev/react-ui';
 import { Chat } from '../../src/browser/Chat';
+import { openUITheme } from '../../src/browser/openui-theme';
 import '@openuidev/react-ui/styles/index.css';
 import '../../src/browser/styles.css';
 function App() {
@@ -12,4 +14,8 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(
+  <ThemeProvider lightTheme={openUITheme}>
+    <App />
+  </ThemeProvider>,
+);

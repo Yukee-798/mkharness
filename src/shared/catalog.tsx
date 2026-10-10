@@ -16,7 +16,8 @@ import {
   useGetFieldValue,
   isReactiveAssign,
 } from '@openuidev/react-lang';
-import { openuiLibrary } from '@openuidev/react-ui/genui-lib';
+// Share the root export with ThemeProvider; the genui-lib bundle has a separate context.
+import { openuiLibrary } from '@openuidev/react-ui';
 import { z } from 'zod';
 import { finiteJson, jsonEqual } from './compute';
 import { validateSlider } from './slider';

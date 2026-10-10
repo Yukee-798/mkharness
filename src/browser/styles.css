@@ -3,7 +3,8 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -28,6 +29,10 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 :root {
+  --app-font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --app-font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -64,6 +69,25 @@
   input,
   textarea {
     touch-action: manipulation;
+  }
+}
+/* Small appearance adjustments; native OpenUI state and actions remain intact. */
+.generated-panel .openui-card-sunk {
+  box-shadow: none;
+}
+.generated-panel :is(.openui-input-medium, .openui-select-trigger-md, .openui-button-base-medium) {
+  min-height: 2.25rem;
+}
+.generated-panel :is(.openui-input, .openui-textarea) {
+  font-size: 1rem;
+}
+.generated-panel :is(.openui-button-base, .openui-select-trigger):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+@media (min-width: 768px) {
+  .generated-panel :is(.openui-input, .openui-textarea) {
+    font-size: 0.875rem;
   }
 }
 @media (prefers-reduced-motion: reduce) {

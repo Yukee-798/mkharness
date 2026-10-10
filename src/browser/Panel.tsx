@@ -206,7 +206,7 @@ export function Panel({
   };
   return (
     <section
-      className="generated-panel my-4 min-w-0 max-w-full overflow-x-auto rounded-xl border bg-background p-4 whitespace-normal sm:p-5"
+      className="generated-panel -mx-1 my-4 min-w-0 max-w-[calc(100%+0.5rem)] overflow-x-auto p-1 whitespace-normal"
       aria-label="Interactive answer"
       onChangeCapture={edit}
       onClickCapture={edit}
