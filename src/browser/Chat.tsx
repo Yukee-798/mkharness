@@ -26,6 +26,8 @@ import { AttachAgent, partialUI, StreamReplaced } from './transport';
 import { Panel } from './Panel';
 import { PanelDrafts } from './PanelDrafts';
 import { request, ApiError } from './api';
+import { useQuery } from '@tanstack/react-query';
+import { userKeys } from './queries';
 import { createSubmitter } from './submission';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -77,15 +79,22 @@ export async function loadSnapshot(id: string, signal?: AbortSignal) {
 }
 export function Chat({
   id,
+  userId,
   onDirectoryChange,
   onUnavailable,
 }: {
   id: string;
+  userId: string;
   onDirectoryChange?: () => void;
   onUnavailable?: () => void;
 }) {
   const unavailable = useRef(onUnavailable);
   unavailable.current = onUnavailable;
+  const query = useQuery({
+    queryKey: userKeys(userId).snapshot(id),
+    queryFn: ({ signal }) => loadSnapshot(id, signal),
+    retry: false,
+  });
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
     [error, setError] = useState(''),
@@ -103,25 +112,35 @@ export function Chat({
     const timer = setTimeout(() => setConnection(undefined), 3000);
     return () => clearTimeout(timer);
   }, [connection]);
+  const { refetch: refetchSnapshot } = query;
+  const restoredRevision = useRef(-1);
   useEffect(() => {
-    const controller = new AbortController();
-    void loadSnapshot(id, controller.signal)
-      .then((s) => {
-        setSnapshot(s);
-        setAccepted([]);
-        if (!s.pending.length)
-          setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : previous));
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) {
-          setConnection(undefined);
-          if (e instanceof ApiError && e.status === 404 && unavailable.current)
-            unavailable.current();
-          else setError(e.message);
-        }
-      });
-    return () => controller.abort();
-  }, [id, revision]);
+    if (revision !== 0 || !query.data || restoredRevision.current === 0) return;
+    restoredRevision.current = 0;
+    setSnapshot(query.data);
+  }, [revision, query.data]);
+  useEffect(() => {
+    if (revision === 0) return;
+    let active = true;
+    void refetchSnapshot().then(({ data: s }) => {
+      if (!active || !s) return;
+      restoredRevision.current = revision;
+      setSnapshot(s);
+      setAccepted([]);
+      if (!s.pending.length)
+        setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : previous));
+    });
+    return () => {
+      active = false;
+    };
+  }, [revision, refetchSnapshot]);
+  useEffect(() => {
+    const e = query.error;
+    if (!e) return;
+    setConnection(undefined);
+    if (e instanceof ApiError && e.status === 404 && unavailable.current) unavailable.current();
+    else setError(e.message);
+  }, [query.error]);
   const send = useMemo(
     () =>
       createSubmitter((command) =>

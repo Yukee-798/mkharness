@@ -1,5 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { authClient } from './auth';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { directoryOptions, userKeys } from './queries';
 import { request } from './api';
 import { Button } from './ui/button';
 import { PanelDrafts } from './PanelDrafts';
@@ -20,13 +23,17 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 const Chat = lazy(() => import('./Chat').then((module) => ({ default: module.Chat })));
-type Conversation = { id: string; title: string; updated_at: number };
-type Directory = { items: Conversation[]; next: string | null };
-function selectedChat() {
-  return new URL(location.href).searchParams.get('chat') ?? '';
-}
 export function App() {
   const { data: session, isPending, error: sessionError, refetch } = authClient.useSession();
+  const queryClient = useQueryClient();
+  const sessionId = session?.user.id;
+  useEffect(() => {
+    // Clear the previous account, without cancelling reads mounted for the new one.
+    queryClient.removeQueries({
+      predicate: (query) =>
+        !sessionId || (query.queryKey[0] === 'user' && query.queryKey[1] !== sessionId),
+    });
+  }, [queryClient, sessionId]);
   const [error, setError] = useState(''),
     [signingIn, setSigningIn] = useState(false),
     [menu, setMenu] = useState(false);
@@ -102,95 +109,45 @@ export function App() {
         </div>
       </AppShell>
     );
-  return <Workspace key={session.user.id} name={session.user.name} />;
+  return <Workspace key={session.user.id} name={session.user.name} userId={session.user.id} />;
 }
-function Workspace({ name }: { name: string }) {
-  const [items, setItems] = useState<Conversation[]>([]),
-    [next, setNext] = useState<string | null>(null),
-    [id, setId] = useState(selectedChat),
-    [menu, setMenu] = useState(false),
+function Workspace({ name, userId }: { name: string; userId: string }) {
+  const { chat: id = '' } = useSearch({ from: '/' });
+  const navigate = useNavigate({ from: '/' });
+  const client = useQueryClient();
+  const directoryQuery = useInfiniteQuery(directoryOptions(userId));
+  const items = directoryQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const next = directoryQuery.hasNextPage;
+  const loading = directoryQuery.isPending || directoryQuery.isFetching;
+  const [menu, setMenu] = useState(false),
     [error, setError] = useState(''),
-    [loading, setLoading] = useState(true),
     [creating, setCreating] = useState(false),
-    [signingOut, setSigningOut] = useState(false),
-    [version, setVersion] = useState(0),
-    [pages, setPages] = useState(1);
-  const refreshDirectory = useCallback(() => setVersion((v) => v + 1), []);
-  useEffect(() => {
-    const controller = new AbortController();
-    const selectionAtStart = selectedChat();
-    setLoading(true);
-    void (async () => {
-      const data = await request<Directory>('/conversations', { signal: controller.signal });
-      // Reload the visible pages together so reordered chats do not duplicate or disappear.
-      for (let page = 1; page < pages && data.next; page++) {
-        const more = await request<Directory>(
-          '/conversations?cursor=' + encodeURIComponent(data.next),
-          { signal: controller.signal },
-        );
-        data.items.push(...more.items);
-        data.next = more.next;
-      }
-      if (!controller.signal.aborted) {
-        setItems(data.items);
-        setNext(data.next);
-        setError('');
-        // Only an exhaustive list can confirm a chat was removed in another tab.
-        if (
-          selectionAtStart &&
-          selectedChat() === selectionAtStart &&
-          !data.next &&
-          !data.items.some((chat) => chat.id === selectionAtStart)
-        ) {
-          const fallback = data.items[0]?.id ?? '';
-          const url = new URL(location.href);
-          if (fallback) url.searchParams.set('chat', fallback);
-          else url.searchParams.delete('chat');
-          history.replaceState(null, '', url);
-          setId(fallback);
-          setMenu(false);
-        }
-      }
-    })()
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [version, pages]);
-  useEffect(() => {
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refreshDirectory();
-    };
-    addEventListener('focus', refreshWhenVisible);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => {
-      removeEventListener('focus', refreshWhenVisible);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-    };
-  }, [refreshDirectory]);
-  useEffect(() => {
-    const pop = () => {
-      setId(selectedChat());
+    [signingOut, setSigningOut] = useState(false);
+  const refreshDirectory = useCallback(() => {
+    void client.invalidateQueries({ queryKey: userKeys(userId).directory });
+  }, [client, userId]);
+  const choose = useCallback(
+    (value: string, replace = false) => {
+      void navigate({ search: value ? { chat: value } : {}, replace });
       setMenu(false);
-    };
-    addEventListener('popstate', pop);
-    return () => removeEventListener('popstate', pop);
-  }, []);
-  const choose = (value: string, replace = false) => {
-    const url = new URL(location.href);
-    if (value) url.searchParams.set('chat', value);
-    else url.searchParams.delete('chat');
-    if (replace) history.replaceState(null, '', url);
-    else history.pushState(null, '', url);
-    setId(value);
-    setMenu(false);
-  };
+    },
+    [navigate],
+  );
+  useEffect(() => {
+    const data = directoryQuery.data;
+    if (
+      id &&
+      data &&
+      !directoryQuery.isFetching &&
+      !directoryQuery.hasNextPage &&
+      !data.pages.some((page) => page.items.some((item) => item.id === id))
+    ) {
+      choose(data.pages[0]?.items[0]?.id ?? '', true);
+    }
+  }, [id, directoryQuery.data, directoryQuery.isFetching, directoryQuery.hasNextPage, choose]);
   const deleted = (value: string) => {
-    setItems((current) => current.filter((item) => item.id !== value));
-    if (selectedChat() === value) choose(items.find((item) => item.id !== value)?.id ?? '', true);
+    client.removeQueries({ queryKey: userKeys(userId).snapshot(value) });
+    if (id === value) choose(items.find((item) => item.id !== value)?.id ?? '', true);
     refreshDirectory();
   };
   const create = async () => {
@@ -200,9 +157,9 @@ function Workspace({ name }: { name: string }) {
       const chat = await request<{ id: string; title: string }>('/conversations', {
         method: 'POST',
       });
-      setItems((current) => [{ ...chat, updated_at: Date.now() }, ...current]);
+      // Await the directory read before navigation, so stale cache cannot reject the new ID.
+      await client.invalidateQueries({ queryKey: userKeys(userId).directory });
       choose(chat.id);
-      refreshDirectory();
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -278,12 +235,7 @@ function Workspace({ name }: { name: string }) {
                       <ConversationActions
                         id={item.id}
                         title={item.title}
-                        onRenamed={(title) => {
-                          setItems((current) =>
-                            current.map((chat) =>
-                              chat.id === item.id ? { ...chat, title } : chat,
-                            ),
-                          );
+                        onRenamed={() => {
                           refreshDirectory();
                         }}
                         onDeleted={() => deleted(item.id)}
@@ -297,7 +249,7 @@ function Workspace({ name }: { name: string }) {
                 variant="ghost"
                 className="w-full"
                 disabled={loading}
-                onClick={() => setPages((value) => value + 1)}
+                onClick={() => void directoryQuery.fetchNextPage()}
               >
                 更多聊天
               </Button>
@@ -325,9 +277,9 @@ function Workspace({ name }: { name: string }) {
           />
         )}
       >
-        {error && (
+        {(error || directoryQuery.error) && (
           <Alert variant="destructive" className="mx-4 mt-4 w-auto">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{error || directoryQuery.error?.message}</AlertDescription>
           </Alert>
         )}
         {id ? (
@@ -335,6 +287,7 @@ function Workspace({ name }: { name: string }) {
             <Chat
               key={id}
               id={id}
+              userId={userId}
               onDirectoryChange={refreshDirectory}
               onUnavailable={() => deleted(id)}
             />
