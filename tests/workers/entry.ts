@@ -1,6 +1,7 @@
 // Preload real catalog in test setup: Vite serves its module graph over HTTP, unlike bundled Cloudflare modules.
 import '../../src/shared/catalog';
 import { ConversationAgent as Base } from '../../src/server/conversation';
+import { staticSkills, exampleSkillSource } from '../../src/server/skills';
 import { exampleExtension } from '../../src/server/extensions';
 import { fixtureModels } from '../fixture-model';
 import { Type } from '@earendil-works/pi-ai';
@@ -17,6 +18,7 @@ export class ConversationAgent extends Base {
     return [
       ...(await super.extensions()),
       exampleExtension(),
+      await staticSkills([exampleSkillSource()]),
       {
         name: 'fixture',
         wraps: [

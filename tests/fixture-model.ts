@@ -114,6 +114,26 @@ export function fixtureModels() {
               },
             ];
     }
+    if (text?.includes('skill activation')) {
+      if (last?.role === 'user')
+        content = [
+          {
+            type: 'toolCall',
+            id: 'same-call',
+            name: 'activate_skill',
+            arguments: { name: 'source-comparison' },
+          },
+        ];
+      else if (last?.role === 'toolResult' && last.toolName === 'activate_skill')
+        content = [
+          {
+            type: 'toolCall',
+            id: 'same-call',
+            name: 'read_skill_resource',
+            arguments: { name: 'source-comparison', path: 'references/checklist.md' },
+          },
+        ];
+    }
     if (text?.includes('multiple_text_blocks'))
       content = [
         { type: 'text', text: 'First section' },
