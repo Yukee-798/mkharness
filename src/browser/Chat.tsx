@@ -708,6 +708,8 @@ const groupAssistantParts = groupPartByType({
   'standalone-tool-call': [],
 });
 function Assistant() {
+  const content = useAuiState((s) => s.message.content);
+  const [reasoningOpen, setReasoningOpen] = useState<Record<number, boolean>>({});
   const traceTail = useAuiState((s) => {
     const internal = s.message.content.some(
       (part) =>
@@ -723,9 +725,15 @@ function Assistant() {
           (part.toolName !== 'present_openui' || !part.isError))
       );
     });
+    const hasContent = s.message.content.some(
+      (part) =>
+        (part.type === 'text' && !internal && part.text !== '') ||
+        (part.type === 'tool-call' && part.toolName === 'present_openui' && !part.isError),
+    );
     return (
-      last?.type === 'reasoning' ||
-      (last?.type === 'tool-call' && last.toolName !== 'present_openui')
+      !hasContent &&
+      (last?.type === 'reasoning' ||
+        (last?.type === 'tool-call' && last.toolName !== 'present_openui'))
     );
   });
   const generating = useAuiState(
@@ -745,58 +753,87 @@ function Assistant() {
       data-trace-tail={traceTail || generating}
       className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[trace-tail=true]:mb-2 has-[+[data-slot=assistant-message]]:mb-2"
     >
-      <MessagePrimitive.GroupedParts groupBy={groupAssistantParts}>
-        {({ part, children }) => {
-          switch (part.type) {
-            case 'group-tool':
-              if (part.indices.length === 1) return <>{children}</>;
-              return (
-                <ToolGroupRoot variant="ghost" defaultOpen>
-                  <DisclosureTrigger
-                    icon={<Wrench />}
-                    live={part.status.type === 'running'}
-                    label={part.status.type === 'running' ? '正在调用' : '已调用'}
-                    detail={`${part.indices.length} 个工具`}
-                    data-slot="tool-group-trigger"
-                  />
-                  <ToolGroupContent className={`${disclosureContentClass} [&>div]:gap-2!`}>
-                    {children}
-                  </ToolGroupContent>
-                </ToolGroupRoot>
-              );
-            case 'group-reasoning':
-              return (
-                <ReasoningRoot
-                  variant="ghost"
-                  streaming={part.status.type === 'running'}
-                  className="mb-0"
-                >
-                  <DisclosureTrigger
-                    icon={<Brain />}
-                    live={part.status.type === 'running'}
-                    label={part.status.type === 'running' ? '正在思考…' : '思考过程'}
-                  />
-                  <ReasoningContent
-                    aria-busy={part.status.type === 'running'}
-                    className={disclosureContentClass}
+      {/* Both live parts and restored snapshots use the same reading order, while
+          original part scopes keep tool results and actions bound to their calls. */}
+      {(['reasoning', 'tools', 'content'] as const).map((section) => (
+        <MessagePrimitive.GroupedParts
+          key={section}
+          groupBy={groupAssistantParts}
+          indicator={section === 'reasoning' ? 'no-text' : 'never'}
+        >
+          {({ part, children }) => {
+            const target =
+              part.type === 'group-reasoning' ||
+              part.type === 'reasoning' ||
+              part.type === 'indicator'
+                ? 'reasoning'
+                : part.type === 'group-tool' ||
+                    (part.type === 'tool-call' && part.toolName !== 'present_openui')
+                  ? 'tools'
+                  : 'content';
+            // An empty fragment suppresses the native registered-UI fallback too.
+            if (target !== section) return <></>;
+            switch (part.type) {
+              case 'group-tool':
+                if (part.indices.length === 1) return <>{children}</>;
+                return (
+                  <ToolGroupRoot variant="ghost" defaultOpen>
+                    <DisclosureTrigger
+                      icon={<Wrench />}
+                      live={part.status.type === 'running'}
+                      label={part.status.type === 'running' ? '正在调用' : '已调用'}
+                      detail={`${part.indices.length} 个工具`}
+                      data-slot="tool-group-trigger"
+                    />
+                    <ToolGroupContent className={`${disclosureContentClass} [&>div]:gap-2!`}>
+                      {children}
+                    </ToolGroupContent>
+                  </ToolGroupRoot>
+                );
+              case 'group-reasoning': {
+                // Native group keys follow raw part positions. Preserve manual disclosure
+                // choices by reasoning ordinal when a committed snapshot moves those parts.
+                const ordinal = content
+                  .slice(0, part.indices[0])
+                  .filter((item) => item.type === 'reasoning').length;
+                return (
+                  <ReasoningRoot
+                    variant="ghost"
+                    streaming={part.status.type === 'running'}
+                    open={reasoningOpen[ordinal]}
+                    onOpenChange={(open) =>
+                      setReasoningOpen((previous) => ({ ...previous, [ordinal]: open }))
+                    }
+                    className="mb-0"
                   >
-                    <ReasoningText className="ps-0">{children}</ReasoningText>
-                  </ReasoningContent>
-                </ReasoningRoot>
-              );
-            case 'reasoning':
-              return <Reasoning {...part} />;
-            case 'text':
-              return <AssistantText {...part} />;
-            case 'tool-call':
-              return <Tool {...part} />;
-            case 'indicator':
-              return generating ? null : <TraceLine live label="正在思考…" icon={<Brain />} />;
-            default:
-              return null;
-          }
-        }}
-      </MessagePrimitive.GroupedParts>
+                    <DisclosureTrigger
+                      icon={<Brain />}
+                      live={part.status.type === 'running'}
+                      label={part.status.type === 'running' ? '正在思考…' : '思考过程'}
+                    />
+                    <ReasoningContent
+                      aria-busy={part.status.type === 'running'}
+                      className={disclosureContentClass}
+                    >
+                      <ReasoningText className="ps-0">{children}</ReasoningText>
+                    </ReasoningContent>
+                  </ReasoningRoot>
+                );
+              }
+              case 'reasoning':
+                return <Reasoning {...part} />;
+              case 'text':
+                return <AssistantText {...part} />;
+              case 'tool-call':
+                return <Tool {...part} />;
+              case 'indicator':
+                return generating ? null : <TraceLine live label="正在思考…" icon={<Brain />} />;
+              default:
+                return null;
+            }
+          }}
+        </MessagePrimitive.GroupedParts>
+      ))}
     </MessagePrimitive.Root>
   );
 }
