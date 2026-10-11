@@ -22,6 +22,10 @@ pnpm dev
 
 本地默认关闭 Miniflare 的持久日志/调用链采集，终端错误输出保留。当前工具版本的本地诊断库没有自动过期清理；必要时使用 `X_LOCAL_OBSERVABILITY=true pnpm dev` 临时开启，排查后关闭。只有在开发服务完全停止后，才可以清理 `.wrangler/state/v3/observability`；不要删除相邻的 D1、DO 或整个 state 目录。该开关属于当前 Cloudflare 工具版本的实验能力，升级工具后需重新验证。
 
+本地改动 ConversationAgent 或其依赖时，开发服务重启 Worker，并保留 SQLite；前端单独改动继续使用 React 热更新。当前 Cloudflare Vite runner 直接热替换 DO 类会保留旧实例中的异步 Pi runtime，不能用于恢复同一份存储。`config/durable-reload.ts` 在开发环境阻止这类替换。
+
+`agents@0.28.0` 使用随仓库提交的 pnpm patch：PiHarness 必须等待旧 runtime 关闭完成后才能重新打开，并发 dispose 共用同一次关闭。升级 Agents 时先运行 `pnpm test:workers` 和 `pnpm test:hmr`；只有上游已经修复且回归通过，才移除此 patch。运行实例写入校验仍作为防线，不承担正常的生命周期交接。
+
 线上 Workers Logs 默认采样 10% 的请求；这不是硬性写入量上限，也不是按错误采样。Pi onReport 逐次输出异常分类和类型，不做应用层节流。线上保留期、配额和计费由 Cloudflare 管理，部署前按实际流量调整采样并配置用量告警。应用聊天和 Pi 历史与诊断日志分开保存。
 
 | 配置                                        | 用途                                                                                             |
@@ -232,6 +236,7 @@ pnpm check         # lint、格式、类型、单元/workerd 测试及构建
 pnpm typecheck
 pnpm test:unit
 pnpm test:workers
+pnpm test:hmr
 pnpm test:e2e
 pnpm build
 pnpm exec wrangler deploy --dry-run

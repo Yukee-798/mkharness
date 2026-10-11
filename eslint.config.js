@@ -63,7 +63,13 @@ export default defineConfig([
     languageOptions: { globals: globals.worker },
   },
   {
-    files: ['*.{js,mjs,ts}', 'scripts/**/*.mjs', 'tests/e2e/**/*.ts', 'tests/unit/**/*.{ts,tsx}'],
+    files: [
+      '*.{js,mjs,ts}',
+      'scripts/**/*.mjs',
+      'tests/hmr/**/*.mjs',
+      'tests/e2e/**/*.ts',
+      'tests/unit/**/*.{ts,tsx}',
+    ],
     languageOptions: { globals: globals.node },
   },
   {

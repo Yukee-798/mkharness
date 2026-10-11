@@ -1,0 +1,11 @@
+{
+  "name": "pi-hmr-probe",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "CONVERSATIONS", "class_name": "ConversationAgent" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationAgent"] }],
+  "vars": { "MODEL_PROVIDER": "fixture", "MODEL_ID": "fixture" },
+}

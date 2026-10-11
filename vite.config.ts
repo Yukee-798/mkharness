@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import { durableReload } from './config/durable-reload';
 // Miniflare's local trace store has no retention policy. Keep console diagnostics,
 // but only collect persistent spans/logs when explicitly requested for debugging.
 process.env.X_LOCAL_OBSERVABILITY ??= 'false';
@@ -22,6 +23,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    durableReload(),
     {
       name: 'browser-test-fixtures',
       apply: 'serve',
