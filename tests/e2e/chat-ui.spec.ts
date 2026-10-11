@@ -9,10 +9,7 @@ test('generation diagnostics stay internal while a terminal failure uses product
       model: [
         {
           role: 'assistant',
-          content: [
-            { type: 'text', text: 'I will prepare a compute program and compare expected values.' },
-            { type: 'toolCall', id: 'prepare', name: 'prepare_program', arguments: {} },
-          ],
+          content: [{ type: 'toolCall', id: 'prepare', name: 'prepare_program', arguments: {} }],
         },
       ],
     },
@@ -51,32 +48,14 @@ test('generation diagnostics stay internal while a terminal failure uses product
         },
       ],
     },
-    {
-      id: 5,
-      model: [
-        {
-          role: 'assistant',
-          content: [],
-          stopReason: 'error',
-          errorMessage: 'Program/UI repair limit reached (initial attempt plus two repairs).',
-        },
-      ],
-    },
   ];
   await page.route('**/api/conversations/**', (route) =>
     route.fulfill({ json: { entries, pending: [], stopping: false } }),
   );
   await page.goto('/tests/browser/chat.html');
-  await expect(page.getByRole('alert')).toHaveText(
-    '交互界面暂时无法生成。你可以重新发送需求再试一次。',
-  );
+  await expect(page.getByRole('alert')).toHaveText('内容暂时无法生成。可以调整需求再试一次。');
   await expect(
     page.getByText('Test case output differs from expected', { exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByText('I will prepare a compute program and compare expected values.', {
-      exact: true,
-    }),
   ).toHaveCount(0);
   await expect(
     page.getByText('Invalid OpenUI: unresolved recipeForm', { exact: false }),
@@ -84,9 +63,7 @@ test('generation diagnostics stay internal while a terminal failure uses product
   await expect(page.getByRole('button', { name: /准备计算程序|复制回答/ })).toHaveCount(0);
   await expect(page.getByText('正在生成交互界面…', { exact: true })).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole('alert')).toHaveText(
-    '交互界面暂时无法生成。你可以重新发送需求再试一次。',
-  );
+  await expect(page.getByRole('alert')).toHaveText('内容暂时无法生成。可以调整需求再试一次。');
 });
 
 test('assistant markdown renders semantically and keyboard composition submits once over HTTP', async ({

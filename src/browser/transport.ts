@@ -73,11 +73,31 @@ export class AttachAgent extends AbstractAgent {
                 };
               }
             ).snapshot;
-            if (state?.runId === runId && state.toolProgress)
-              this.toolProgress(runId, state.toolProgress);
             if (state?.runId === runId && state.messageIds)
               for (const [canonicalId, liveId] of Object.entries(state.messageIds))
                 if (!this.messageIds.has(canonicalId)) this.messageIds.set(canonicalId, liveId);
+            if (state?.runId === runId && state.toolProgress) {
+              const inverse = new Map(
+                Object.entries(state.messageIds ?? {}).map(([canonical, live]) => [
+                  live,
+                  canonical,
+                ]),
+              );
+              this.toolProgress(
+                runId,
+                Object.fromEntries(
+                  Object.entries(state.toolProgress).map(([id, value]) => {
+                    const boundary = id.indexOf('.');
+                    const prefix = id.slice(0, boundary);
+                    const canonical = inverse.get(prefix) ?? prefix;
+                    return [
+                      (this.messageIds.get(canonical) ?? canonical) + id.slice(boundary),
+                      value,
+                    ];
+                  }),
+                ),
+              );
+            }
             if (
               state?.runId === runId &&
               Array.isArray(state.remote) &&

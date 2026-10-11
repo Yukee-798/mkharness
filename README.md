@@ -102,7 +102,7 @@ Query 负责用户目录和快照读取（模型目录仍随快照返回）；�
 
 ## 原生扩展与远端服务
 
-开发者装配入口是 `src/server/assembly.ts`，返回 `Extension[] | Promise<Extension[]>`；`ConversationAgent.extensions()` 在此基础上安装会话内的 MCP 和异步示例。工具、task kind、section 与 Extension 名称必须稳定且不重名；需要包装时使用原生 wraps。保留旧 kind/version 才能恢复 pending task，删除定义会产生明确恢复失败。
+开发者装配入口是 `src/extensions/server.ts` 的静态能力定义，返回原生 Extension 的 `ServerContribution`；`src/server/assembly.ts` 负责验证并收集；`ConversationAgent.extensions()` 在此基础上安装会话内的 MCP 和异步示例。工具、task kind、section 与 Extension 名称必须稳定且不重名；需要包装时使用原生 wraps。保留旧 kind/version 才能恢复 pending task，删除定义会产生明确恢复失败。
 
 可选配置：
 
@@ -117,7 +117,7 @@ Query 负责用户目录和快照读取（模型目录仍随快照返回）；�
 | `ASYNC_SERVICE_TOKEN`      | 可选服务端 Bearer 凭据                                         |
 | `ASYNC_RECOVERY`           | `none` / `key` / `lookup`，默认 `none`；必须匹配真实供应商契约 |
 
-`src/server/extensions.ts` 提供最小原生示例；前端静态结果组件注册在 `src/browser/tool-results.tsx`，与 assistant-ui 工具详情分开显示。未知工具保留有界请求/结果详情。部署代码可信，终端用户不能安装代码；没有插件市场或第二套 SDK。
+`src/server/extensions.ts` 提供最小原生示例；前端在 `src/extensions/example/browser.tsx` 提供原生 Toolkit，并由 `src/extensions/browser.ts` 静态懒加载。renderer 复用 assistant-ui 工具详情，结果展示由能力自己组合。未知工具保留有界请求/结果详情。部署代码可信，终端用户不能安装代码；没有插件市场或第二套 SDK。
 
 Skills 使用 `src/server/skills.ts` 的预检与原生 `skills(sources)` 桥接。正文和资源在装配时从部署内的受信任来源读取，模型只先看到目录，激活后才得到正文。增加自己的 `SkillSource` 和静态 Markdown / 文本资源即可；不要通过浏览器或模型提供任意 URL / 路径。资源读取保留在 Pi 历史，脚本文本不会执行，也不会注册新工具。仅作类型使用的 `agents/skills` 必须 type-only 导入，避免把未启用的脚本执行依赖引入构建。
 
@@ -159,30 +159,32 @@ Stop 使用子任务的新 abort invocation 尝试有界取消；本地 idle 与
 
 恢复元数据只有 MCP 定义绑定、远端调用意图/引用两类 Pi documents；未新增任务、插件或结果表。附件、R2、沙箱、媒体业务、支付订阅及人工审批留作后续扩展。
 
+双端静态装配、资源/CAS、冻结来源动作、公开进度和未来 Adapter 的完整契约见 [扩展接入说明](docs/extensions/README.md)。OpenUI 可整体关闭或移除，不需要核心 Chat 增加工具名称分支。
+
 ## 代码入口与扩展
 
 界面优先复用 assistant-ui 的消息、Markdown、Viewport 与滚动组件。连续工具调用使用官方 ToolGroup ghost 变体，详情复用 ToolFallback 的只读展示组件；请求参数与结果独立滚动，桌面高度最多 256px、手机 176px。思考区使用官网示例的 Reasoning ghost 变体与 DisclosureTrigger，运行标签通过官方 tw-shimmer 循环扫光。组件源码位于 `src/browser/tool-group.tsx`、`tool-fallback.tsx`、`tool-call.tsx`、`reasoning.tsx`、`reasoning.aui.tsx`、`trace.tsx` 与 `surfaces.tsx`，可以直接修改；应用补充真实失败/停止状态、中文标签和无障碍适配。登录、个人聊天目录、状态提示与自定义控件使用 shadcn/ui + Tailwind CSS。生成内容仍由 OpenUI 的原生目录渲染。Composer 使用 assistant-ui 表单包装和 shadcn Textarea，但发送、排队与停止保持独立 HTTP 接口，不调用 runtime 的默认发送或取消行为。
 
 新增应用控件可执行 `pnpm dlx shadcn@latest add <component>`，新增 assistant-ui 展示组件可执行 `pnpm dlx shadcn@latest add @assistant-ui/<component>`。配置在 `components.json`，主题变量在 `src/browser/styles.css`；安装后检查依赖版本、导入路径及许可证记录。不要用默认 ThreadList 替代现有聊天目录，除非也明确接入应用的认证、D1 目录和 Pi 历史。
 
-OpenUI 通过根 `ThemeProvider` 共享 shadcn 的颜色、字体和圆角。全局品牌调整优先修改 `styles.css` 的变量；生成组件的字号、间距和主题映射在 `src/browser/openui-theme.ts`。正文与聊天同为 14px，手机输入保持 16px；外层面板不重复加卡片边框，只留焦点环所需空间，组件自己负责分组和表格滚动。图表仍保留可区分的系列颜色。原生目录和 ThemeProvider 从同一个包入口导入，避免 OpenUI 0.17.0 的独立子入口创建另一套上下文，导致弹层或图表主题自定义失效。需要新应用控件时继续使用 shadcn/ui + Tailwind；主题调整无需改动输入绑定、验证或动作。
+OpenUI 在自身 renderer 内通过局部 `ThemeProvider` 共享 shadcn 的颜色、字体和圆角。全局品牌调整优先修改 `styles.css` 的变量；生成组件的字号、间距和主题映射在 `src/extensions/openui/theme.ts`。正文与聊天同为 14px，手机输入保持 16px；外层面板不重复加卡片边框，只留焦点环所需空间，组件自己负责分组和表格滚动。图表仍保留可区分的系列颜色。原生目录和 ThemeProvider 从同一个包入口导入，避免 OpenUI 0.17.0 的独立子入口创建另一套上下文，导致弹层或图表主题自定义失效。需要新应用控件时继续使用 shadcn/ui + Tailwind；主题调整无需改动输入绑定、验证或动作。
 
 应用外壳在 `src/browser/AppShell.tsx`：Google 登录入口位于侧栏底部，登录后替换为个人账号菜单，退出仍通过 Better Auth。桌面侧栏支持展开和窄栏模式，偏好保存在浏览器本地；手机通过 Sheet 抽屉显示目录和底部账号。收起只改变布局，保持聊天和草稿挂载，不重新提交任务。侧栏沿用应用的个人目录，不接入第二套 ThreadList 后端。
 
 OpenUI Inspect 调试浮框默认禁用，避免 SDK 在开发页自动挂载调试界面和加载其 CDN 脚本；需要该工具时使用 `OPENUI_INSPECT=1 pnpm dev` 启动。仅关闭浮框，不改变程序/UI 校验或 Pi 工具历史。Inspect 的 Autofix 推广不代表本模板已启用该服务。
 
-| 位置                                                     | 修改什么                                                       |
-| -------------------------------------------------------- | -------------------------------------------------------------- |
-| `src/browser/App.tsx` / `styles.css` / `ui/`             | 登录、个人目录、主题和 shadcn 页面组件                         |
-| `src/browser/Chat.tsx` / `transport.ts`                  | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
-| `src/browser/Panel.tsx` / `draft.ts` / `PanelDrafts.tsx` | OpenUI 面板、输入快照、用户内存草稿、500ms 保存与冲突反馈      |
-| `src/shared/catalog.tsx`                                 | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查   |
-| `src/shared/compute.ts` / 两端 `compute.ts`              | 有限 JSON、QuickJS 资源限制与 WASM 加载                        |
-| `src/server/conversation.ts`                             | PiHarness、提交调和、队列准入与持久停止意图                    |
-| `src/server/panel-tools.ts` / `limits.ts`                | 生成程序/UI 的工具、指令和有限修正                             |
-| `src/server/web.ts`                                      | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
-| `src/server/models.ts`                                   | 注册其他 Pi provider；保持显式模型和服务端凭据                 |
-| `src/server/auth.ts` / `index.ts`                        | Better Auth、归属验证和聊天业务 API                            |
+| 位置                                                                  | 修改什么                                                       |
+| --------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `src/browser/App.tsx` / `styles.css` / `ui/`                          | 登录、个人目录、主题和 shadcn 页面组件                         |
+| `src/browser/Chat.tsx` / `transport.ts`                               | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
+| `src/extensions/openui/Panel.tsx` / `draft.ts` / `ResourceDrafts.tsx` | OpenUI 面板、输入快照、用户内存草稿、500ms 保存与冲突反馈      |
+| `src/extensions/openui/catalog.tsx`                                   | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查   |
+| `src/shared/compute.ts` / 两端 `compute.ts`                           | 有限 JSON、QuickJS 资源限制与 WASM 加载                        |
+| `src/server/conversation.ts`                                          | PiHarness、提交调和、队列准入与持久停止意图                    |
+| `src/extensions/openui/tools.ts` / `limits.ts`                        | 生成程序/UI 的工具、指令和有限修正                             |
+| `src/server/web.ts`                                                   | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
+| `src/server/models.ts`                                                | 注册其他 Pi provider；保持显式模型和服务端凭据                 |
+| `src/server/auth.ts` / `index.ts`                                     | Better Auth、归属验证和聊天业务 API                            |
 
 生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
 

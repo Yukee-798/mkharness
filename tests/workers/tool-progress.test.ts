@@ -1,4 +1,6 @@
-import { env } from 'cloudflare:test';
+import { ToolTask } from '@earendil-works/pi-durable';
+import { BG } from '../../src/server/conversation';
+import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 function events(body: string) {
   return body
@@ -67,4 +69,55 @@ it('native fault with no result entry becomes a restored failure rather than per
       .flatMap((entry: any) => entry.model ?? [])
       .filter((message: any) => message.role === 'toolResult'),
   ).toHaveLength(0);
+});
+
+it('restores an older no-result failure even after more than one page of later receipts', async () => {
+  let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const runId = crypto.randomUUID();
+  await stub.submitRun({ runId, text: 'fault seam' });
+  await (await stub.observeRun(runId)).text();
+  await runInDurableObject(stub, async (instance) => {
+    const root = await instance.root();
+    await root.commit(async (tx) => {
+      for (let i = 0; i < 101; i++) {
+        const id = await tx.createTask(
+          ToolTask,
+          { assistant: 1 as any, callId: 'fixture-receipt' },
+          { ownership: { kind: 'conversation' } },
+        );
+        const fixture = tx as any;
+        const record = fixture.stagedTasks().find((task: any) => task.id === id)!;
+        fixture.setTask({
+          ...record,
+          state: { status: 'terminal', outcome: { status: 'completed', result: { entryId: 1 } } },
+        });
+      }
+    }, BG);
+  });
+  await abortAllDurableObjects();
+  stub = env.CONVERSATIONS.get(stub.id);
+  expect(Object.values(JSON.parse(await stub.snapshot()).toolProgress)).toEqual([
+    { status: 'failed' },
+  ]);
+  const summary = crypto.randomUUID();
+  await stub.submitRun({ runId: summary, text: 'long_summary' });
+  await (await stub.observeRun(summary)).text();
+  await runInDurableObject(stub, async (instance) => {
+    const root = await instance.root();
+    const task = await root.compact('Summarize previous work briefly.', BG);
+    await (await instance.harness.pi()).waitForTask(task, BG);
+  });
+  const compacted = JSON.parse(await stub.snapshot());
+  expect(compacted.entries.some((entry: any) => entry.kind === 'pi.compaction')).toBe(true);
+  expect(Object.values(compacted.toolProgress)).toContainEqual({ status: 'failed' });
+  const restoredEvents = events(await (await stub.observeRun(summary)).text());
+  expect(
+    restoredEvents.some(
+      (event) =>
+        event.type === 'STATE_SNAPSHOT' &&
+        Object.values(event.snapshot.toolProgress).some(
+          (progress: any) => progress.status === 'failed',
+        ),
+    ),
+  ).toBe(true);
 });

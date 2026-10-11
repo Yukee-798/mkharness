@@ -2,10 +2,12 @@ import { Globe, Search } from 'lucide-react';
 import type { Toolkit, ToolCallMessagePartProps } from '@assistant-ui/react';
 import { ToolActivity } from '../../browser/tool-activity';
 function Read(part: ToolCallMessagePartProps) {
-  let query = '';
+  let query: string;
   try {
     query = new URL(String(part.args?.url)).hostname;
-  } catch {}
+  } catch {
+    query = '';
+  }
   return (
     <ToolActivity
       part={part}

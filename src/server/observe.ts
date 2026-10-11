@@ -13,11 +13,14 @@ export async function observeRun(
 ): Promise<Response> {
   const root = await owner.root(),
     pi = await owner.harness.pi();
+  const historyEntries = await owner.allEntries();
   const watch = await watchEvents(pi, root.id, BG);
-  const progress = await restoreToolProgress(pi, watch.snapshot).catch(async (error) => {
-    await watch.stop();
-    throw error;
-  });
+  const progress = await restoreToolProgress(pi, watch.snapshot, historyEntries).catch(
+    async (error) => {
+      await watch.stop();
+      throw error;
+    },
+  );
   const projector = await owner.progressProjector().catch(async (error) => {
     await watch.stop();
     throw error;
@@ -27,7 +30,7 @@ export async function observeRun(
     await watch.stop();
     return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
   }
-  const entries = new Map((await owner.allEntries()).map((e) => [Number(e.id), e]));
+  const entries = new Map(historyEntries.map((e) => [Number(e.id), e]));
   let committedRemote: Record<string, RemoteIntent> | undefined;
   let remoteRevision = 0;
   let sendState: (() => void) | undefined;

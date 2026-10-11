@@ -44,8 +44,6 @@ import {
   MessageSquare,
   Square,
   LoaderCircle,
-  XCircle,
-  AlertCircle,
   Wrench,
   Brain,
 } from 'lucide-react';

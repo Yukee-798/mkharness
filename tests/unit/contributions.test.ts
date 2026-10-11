@@ -21,3 +21,15 @@ it('loads only reviewed browser IDs and isolates failed optional modules', async
   expect(result.modules).toHaveLength(1);
   expect(result.unavailable).toEqual(['missing', 'broken']);
 });
+it('rejects incomplete host handlers and conflicting browser tool registrations', async () => {
+  expect(() => collectContributions([{ id: 'broken', resources: {} }] as any)).toThrow('invalid');
+  expect(() => collectContributions([{ id: 'broken', actions: { choose: {} } }] as any)).toThrow(
+    'invalid',
+  );
+  const result = await loadBrowserExtensions(['first', 'second'], {
+    first: async () => ({ toolkit: { duplicate: { type: 'backend', render: () => null } } }),
+    second: async () => ({ toolkit: { duplicate: { type: 'backend', render: () => null } } }),
+  });
+  expect(result.unavailable).toEqual(['second']);
+  expect(result.modules).toHaveLength(1);
+});

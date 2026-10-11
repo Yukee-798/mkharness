@@ -42,6 +42,7 @@ export default defineConfig([
       'src/browser/**/*.{ts,tsx}',
       'src/routes/**/*.tsx',
       'src/shared/**/*.tsx',
+      'src/extensions/**/*.tsx',
       'tests/browser/**/*.{ts,tsx}',
       'tests/unit/**/*.tsx',
     ],

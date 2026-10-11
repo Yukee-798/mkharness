@@ -663,14 +663,17 @@ export class ConversationAgent extends Agent<Env> {
         ),
       BG,
     );
-    const watch = await watchEvents(pi, ROOT_CONVERSATION_ID, BG);
     let toolProgress;
-    try {
-      toolProgress = (await restoreToolProgress(pi, watch.snapshot)).project(
-        await this.progressProjector(),
-      );
-    } finally {
-      await watch.stop();
+    if (!cursor) {
+      const entries = await this.allEntries();
+      const watch = await watchEvents(pi, ROOT_CONVERSATION_ID, BG);
+      try {
+        toolProgress = (await restoreToolProgress(pi, watch.snapshot, entries)).project(
+          await this.progressProjector(),
+        );
+      } finally {
+        await watch.stop();
+      }
     }
     const history = await this.history(cursor);
     const modelCatalog = this.modelCatalog();

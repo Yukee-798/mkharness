@@ -78,6 +78,7 @@ it('committed progress rejects foreign-run and older projections; no execution i
 });
 it('cloned observations retain committed identities across runs without accepting foreign or replacement aliases', async () => {
   const ids = new Map([['2', 'draft:earlier:1']]);
+  const toolProgress = vi.fn();
   const events = [
     { type: 'RUN_STARTED', threadId: 'c', runId: 'r' },
     {
@@ -86,7 +87,11 @@ it('cloned observations retain committed identities across runs without acceptin
     },
     {
       type: 'STATE_SNAPSHOT',
-      snapshot: { runId: 'r', messageIds: { '2': 'draft:r:wrong', '4': 'draft:r:1' } },
+      snapshot: {
+        runId: 'r',
+        messageIds: { '2': 'draft:r:wrong', '4': 'draft:r:1' },
+        toolProgress: { '2.same.with.dot': { status: 'running' } },
+      },
     },
     {
       type: 'MESSAGES_SNAPSHOT',
@@ -131,6 +136,7 @@ it('cloned observations retain committed identities across runs without acceptin
       () => {},
       () => {},
       ids,
+      toolProgress,
     );
     const observed: any[] = [];
     await new Promise<void>((resolve, reject) =>
@@ -139,6 +145,9 @@ it('cloned observations retain committed identities across runs without acceptin
         .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
         .subscribe({ next: (event) => observed.push(event), complete: resolve, error: reject }),
     );
+    expect(toolProgress).toHaveBeenCalledWith('r', {
+      'draft:earlier:1.same.with.dot': { status: 'running' },
+    });
     expect([...ids]).toEqual([
       ['2', 'draft:earlier:1'],
       ['4', 'draft:r:1'],

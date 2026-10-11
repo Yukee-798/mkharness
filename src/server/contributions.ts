@@ -30,6 +30,18 @@ export function collectContributions(contributions: readonly ServerContribution[
       throw new AppError(503, 'invalid_extension_id');
     if (seen.has(contribution.id))
       throw new AppError(503, 'duplicate_extension_id', 'duplicate extension ID');
+    if (
+      (contribution.resources &&
+        (typeof contribution.resources.read !== 'function' ||
+          (contribution.resources.validateState !== undefined &&
+            typeof contribution.resources.validateState !== 'function'))) ||
+      (contribution.projectTool !== undefined && typeof contribution.projectTool !== 'function') ||
+      Object.entries(contribution.actions ?? {}).some(
+        ([name, action]) =>
+          !/^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(name) || typeof action?.normalize !== 'function',
+      )
+    )
+      throw new AppError(503, 'invalid_extension_handler');
     seen.add(contribution.id);
   }
   validateExtensions(
