@@ -1,7 +1,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { it, expect } from 'vitest';
-async function generate(stub: ReturnType<typeof env.CONVERSATIONS.getByName>) {
-  await stub.submitRun({ runId: crypto.randomUUID(), text: 'panel' });
+import { fixtureModels } from '../fixture-model';
+async function generate(stub: ReturnType<typeof env.CONVERSATIONS.getByName>, text = 'panel') {
+  await stub.submitRun({ runId: crypto.randomUUID(), text });
   for (let i = 0; i < 600; i++) {
     const s = JSON.parse(await stub.snapshot());
     if (s.pending.length === 0) return s;
@@ -55,6 +56,41 @@ it('publishes from committed tools, preserves raw input and rejects conflicting 
   expect(JSON.parse(await stub.loadResource('openui', newRef)).revision).toBe(0);
   expect(JSON.parse(await stub.loadResource('openui', ref)).state).toEqual({ $cost: '1.' });
 });
+it('reads and saves a published resource whose valid component budgets exceed 1 MiB together', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  // Keep this size-boundary fixture within its model window so it tests resources, not compaction.
+  await runInDurableObject(stub, (instance) => {
+    (instance as any).models = () => fixtureModels(1000000);
+  });
+  const snapshot = await generate(stub, 'large_panel');
+  const published = snapshot.entries
+    .flatMap((entry: any) => entry.model ?? [])
+    .find(
+      (message: any) =>
+        message.role === 'toolResult' && message.toolName === 'present_openui' && !message.isError,
+    );
+  expect(
+    published,
+    JSON.stringify(
+      snapshot.entries
+        .flatMap((entry: any) => entry.model ?? [])
+        .filter((message: any) => message.role === 'toolResult')
+        .map((message: any) => ({
+          name: message.toolName,
+          error: message.isError,
+          content: message.content,
+        })),
+    ),
+  ).toBeDefined();
+  const ref = JSON.parse(published.content[0].text).panelRef;
+  const loaded = JSON.parse(await stub.loadResource('openui', ref));
+  expect(loaded.data.program.data.padding).toHaveLength(900 * 1024);
+  expect(loaded.data.ui.length).toBeGreaterThan(200 * 1024);
+  expect(await stub.saveResourceState('openui', ref, { $cost: '120' }, 0)).toEqual({ revision: 1 });
+  expect(
+    await stub.saveResourceState('openui', ref, { value: 'x'.repeat(1048576) }, 1),
+  ).toMatchObject({ error: { code: 'invalid_state' } });
+});
 it('generic resources require an enabled handler and explicit state validation', async () => {
   const target = env.CONVERSATIONS.getByName(crypto.randomUUID());
   await runInDurableObject(target, async (instance) => {
@@ -79,6 +115,35 @@ it('generic resources require an enabled handler and explicit state validation',
     expect(JSON.parse(await instance.loadResource('read-only', 'resource'))).toMatchObject({
       error: { status: 404 },
     });
+  });
+});
+it('bounds resource data separately from initial and saved state', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  await runInDurableObject(stub, async (instance) => {
+    const base = await (instance as any).contributions();
+    const escaped = {
+      data: { text: '\u0001'.repeat(320 * 1024), payload: 'x'.repeat(900 * 1024) },
+      initialState: {},
+    };
+    (instance as any).contributions = async () => [
+      ...base,
+      { id: 'escaped-resource', resources: { read: async () => escaped } },
+    ];
+    expect(JSON.parse(await instance.loadResource('escaped-resource', 'ref')).data).toEqual(
+      escaped.data,
+    );
+    for (const value of [
+      { data: 'x'.repeat(3 * 1024 * 1024), initialState: {} },
+      { data: {}, initialState: 'x'.repeat(1024 * 1024) },
+    ]) {
+      (instance as any).contributions = async () => [
+        ...base,
+        { id: 'large-resource', resources: { read: async () => value } },
+      ];
+      expect(JSON.parse(await instance.loadResource('large-resource', 'ref'))).toEqual({
+        error: { status: 503, code: 'invalid_resource' },
+      });
+    }
   });
 });
 it('refuses a source panel from another chat or an unpublished call', async () => {

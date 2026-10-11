@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, resource } from './fixtures';
 
 test('generation diagnostics stay internal while a terminal failure uses product language', async ({
   page,
@@ -111,4 +111,164 @@ test('assistant markdown renders semantically and keyboard composition submits o
   await input.press('Enter');
   await expect.poll(() => submitted.length).toBe(1);
   await expect(input).toHaveValue('');
+});
+
+test('unresolved generated-content failure stays visible after the next user message', async ({
+  page,
+}) => {
+  let next = false;
+  const entries = () => [
+    {
+      id: 1,
+      model: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id: 'ui', name: 'present_openui', arguments: { ui: 'invalid' } },
+          ],
+        },
+      ],
+    },
+    {
+      id: 2,
+      model: [
+        {
+          role: 'toolResult',
+          toolCallId: 'ui',
+          toolName: 'present_openui',
+          content: [{ type: 'text', text: 'Invalid OpenUI' }],
+          isError: true,
+        },
+      ],
+    },
+    ...(next
+      ? [
+          { id: 3, model: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }] },
+          {
+            id: 4,
+            model: [{ role: 'assistant', content: [{ type: 'text', text: 'Next answer.' }] }],
+          },
+        ]
+      : []),
+  ];
+  await page.route('**/api/conversations/**', (route) => {
+    if (route.request().method() === 'POST') {
+      next = true;
+      return route.fulfill({ status: 202, json: { accepted: true } });
+    }
+    return route.fulfill({ json: { entries: entries(), pending: [], stopping: false } });
+  });
+  await page.goto('/tests/browser/chat.html');
+  await expect(page.getByRole('alert')).toContainText('内容暂时无法生成');
+  await page.getByLabel('消息', { exact: true }).fill('hello');
+  await page.getByLabel('消息', { exact: true }).press('Enter');
+  await expect(page.getByText('Next answer.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('内容暂时无法生成');
+});
+
+test('a no-result native fault replaces the inert generated-content preview with a terminal failure', async ({
+  page,
+}) => {
+  await page.route('**/api/conversations/**', (route) =>
+    route.fulfill({
+      json: {
+        entries: [
+          {
+            id: 1,
+            model: [
+              {
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'ui',
+                    name: 'present_openui',
+                    arguments: { ui: 'root = Stack([Text("text","Inert preview")])' },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        toolProgress: { '1.ui': { status: 'failed' } },
+        pending: [],
+        stopping: false,
+      },
+    }),
+  );
+  await page.goto('/tests/browser/chat.html');
+  await expect(page.getByRole('alert')).toContainText('内容暂时无法生成');
+  await expect(page.getByText('Inert preview', { exact: true })).toHaveCount(0);
+});
+
+test('a later publication repairs errors only within its own response', async ({ page }) => {
+  const ui = 'root = Stack([Text("text","Repaired answer")])';
+  await page.route('**/api/conversations/**', (route) => {
+    if (route.request().url().includes('/extensions/openui/resources/'))
+      return route.fulfill({
+        json: resource({ panelRef: '3.ui', ui, program: null, revision: 0 }),
+      });
+    return route.fulfill({
+      json: {
+        entries: [
+          {
+            id: 1,
+            model: [
+              {
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'bad',
+                    name: 'present_openui',
+                    arguments: { ui: 'invalid' },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            id: 2,
+            model: [
+              {
+                role: 'toolResult',
+                toolCallId: 'bad',
+                toolName: 'present_openui',
+                content: [{ type: 'text', text: 'Invalid OpenUI' }],
+                isError: true,
+              },
+            ],
+          },
+          {
+            id: 3,
+            model: [
+              {
+                role: 'assistant',
+                content: [
+                  { type: 'toolCall', id: 'ui', name: 'present_openui', arguments: { ui } },
+                ],
+              },
+            ],
+          },
+          {
+            id: 4,
+            model: [
+              {
+                role: 'toolResult',
+                toolCallId: 'ui',
+                toolName: 'present_openui',
+                content: [{ type: 'text', text: '{"panelRef":"3.ui"}' }],
+                isError: false,
+              },
+            ],
+          },
+        ],
+        pending: [],
+        stopping: false,
+      },
+    });
+  });
+  await page.goto('/tests/browser/chat.html');
+  await expect(page.getByText('Repaired answer', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

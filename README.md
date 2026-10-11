@@ -173,18 +173,20 @@ OpenUI 在自身 renderer 内通过局部 `ThemeProvider` 共享 shadcn 的颜�
 
 OpenUI Inspect 调试浮框默认禁用，避免 SDK 在开发页自动挂载调试界面和加载其 CDN 脚本；需要该工具时使用 `OPENUI_INSPECT=1 pnpm dev` 启动。仅关闭浮框，不改变程序/UI 校验或 Pi 工具历史。Inspect 的 Autofix 推广不代表本模板已启用该服务。
 
-| 位置                                                                  | 修改什么                                                       |
-| --------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `src/browser/App.tsx` / `styles.css` / `ui/`                          | 登录、个人目录、主题和 shadcn 页面组件                         |
-| `src/browser/Chat.tsx` / `transport.ts`                               | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
-| `src/extensions/openui/Panel.tsx` / `draft.ts` / `ResourceDrafts.tsx` | OpenUI 面板、输入快照、用户内存草稿、500ms 保存与冲突反馈      |
-| `src/extensions/openui/catalog.tsx`                                   | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查   |
-| `src/shared/compute.ts` / 两端 `compute.ts`                           | 有限 JSON、QuickJS 资源限制与 WASM 加载                        |
-| `src/server/conversation.ts`                                          | PiHarness、提交调和、队列准入与持久停止意图                    |
-| `src/extensions/openui/tools.ts` / `limits.ts`                        | 生成程序/UI 的工具、指令和有限修正                             |
-| `src/server/web.ts`                                                   | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
-| `src/server/models.ts`                                                | 注册其他 Pi provider；保持显式模型和服务端凭据                 |
-| `src/server/auth.ts` / `index.ts`                                     | Better Auth、归属验证和聊天业务 API                            |
+| 位置                                                 | 修改什么                                                       |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| `src/browser/App.tsx` / `styles.css` / `ui/`         | 登录、个人目录、主题和 shadcn 页面组件                         |
+| `src/browser/Chat.tsx` / `transport.ts`              | assistant-ui 历史、独立 HTTP Composer、只 attach 的 AG-UI 观察 |
+| `src/extensions/openui/Panel.tsx`                    | OpenUI 内容、计算绑定和动作                                    |
+| `src/browser/draft.ts` / `ResourceDrafts.tsx`        | 通用资源草稿、500ms 保存与冲突反馈                             |
+| `src/extensions/openui/catalog.tsx`                  | 原生组件目录和可选 StateSync；修改目录后同时运行界面契约检查   |
+| `src/shared/compute.ts` / 两端 `compute.ts`          | 有限 JSON、QuickJS 资源限制与 WASM 加载                        |
+| `src/server/conversation.ts`                         | PiHarness、提交调和、队列准入与持久停止意图                    |
+| `src/extensions/openui/tools.ts` / `instructions.ts` | 生成程序/UI 的工具、指令和有限修正                             |
+| `src/server/limits.ts`                               | 必需的通用模型和工具预算                                       |
+| `src/server/web.ts`                                  | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
+| `src/server/models.ts`                               | 注册其他 Pi provider；保持显式模型和服务端凭据                 |
+| `src/server/auth.ts` / `index.ts`                    | Better Auth、归属验证和聊天业务 API                            |
 
 生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
 

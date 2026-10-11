@@ -29,7 +29,7 @@ export const usage = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-export function fixtureModels() {
+export function fixtureModels(contextWindow = model.contextWindow) {
   const models = createModels();
   const stream = (_model: Model<any>, context: TranscriptContext, _options?: unknown) => {
     const events = new AssistantMessageEventStream();
@@ -94,7 +94,9 @@ export function fixtureModels() {
             arguments: {
               code: 'export function compute(i,d){return {double:Number(i.cost)*d.factor}}',
               initialInputs: { cost: '100' },
-              data: { factor: 2 },
+              data: text.includes('large_panel')
+                ? { factor: 2, padding: 'x'.repeat(900 * 1024) }
+                : { factor: 2 },
               cases: [{ inputs: { cost: '100' }, expected: { double: 200 } }],
             },
           },
@@ -107,7 +109,12 @@ export function fixtureModels() {
             name: 'present_openui',
             arguments: {
               programRef: (last.details as any)?.ref ?? 'missing',
-              ui: '$cost = "100"\nresult = Query("run_program",{cost:$cost},{double:0})\nroot = Stack([Input("cost","Cost","number",null,$cost),Text("text","Interactive example")])',
+              ui:
+                '$cost = "100"\nresult = Query("run_program",{cost:$cost},{double:0})\nroot = Stack([Input("cost","Cost","number",null,$cost),Text("text",' +
+                JSON.stringify(
+                  text.includes('large_panel') ? 'x'.repeat(200 * 1024) : 'Interactive example',
+                ) +
+                ')])',
             },
           },
         ];
@@ -298,9 +305,10 @@ export function fixtureModels() {
       },
     },
     getModels: () => [
-      model,
+      { ...model, contextWindow },
       {
         ...model,
+        contextWindow,
         id: 'fixture-pro',
         name: 'Test Pro',
         thinkingLevelMap: { ...model.thinkingLevelMap, low: null },

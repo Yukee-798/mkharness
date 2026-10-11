@@ -549,7 +549,15 @@ export class ConversationAgent extends Agent<Env> {
     )?.resources;
     if (!handler) throw new AppError(404, 'resource_not_found');
     const value = await handler.read(ref, { entries: () => this.allEntries() });
-    jsonText(value);
+    try {
+      // Resource data may combine independently bounded content/program components.
+      // Saved and initial state retain their separate 1 MiB budget.
+      // JSON escaping can expand UI/code bytes sixfold; 3 MiB covers their existing budgets.
+      jsonText(value.data, 3 * 1024 * 1024);
+      jsonText(value.initialState);
+    } catch {
+      throw new AppError(503, 'invalid_resource');
+    }
     return { handler, value, key: JSON.stringify([extensionId, ref]) };
   }
   async loadResource(extensionId: string, ref: string): Promise<string> {
