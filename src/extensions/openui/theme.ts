@@ -46,7 +46,6 @@ export const openUITheme = createTheme({
   borderInteractiveSelected: 'var(--primary)',
   borderAccent: 'var(--primary)',
   borderAccentEmphasis: 'var(--primary)',
-  borderAccentSelected: 'var(--primary)',
   borderDangerEmphasis: 'var(--destructive)',
   chatUserResponseBg: 'var(--muted)',
   chatUserResponseText: 'var(--foreground)',

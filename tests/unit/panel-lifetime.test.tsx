@@ -3,12 +3,12 @@ import { it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor, fireEvent, act, cleanup } from '@testing-library/react';
 import { Panel } from '../../src/extensions/openui/Panel';
 const pending = vi.hoisted(
-  () => [] as { id: string; inputs: any; resolve: (value: any) => void }[],
+  () => [] as { id: string; inputs: any; signal?: AbortSignal; resolve: (value: any) => void }[],
 );
 vi.mock('../../src/browser/compute', () => ({
   computeProgram: vi.fn(
-    (program, inputs) =>
-      new Promise((resolve) => pending.push({ id: program.data, inputs, resolve })),
+    (program, inputs, signal) =>
+      new Promise((resolve) => pending.push({ id: program.data, inputs, signal, resolve })),
   ),
 }));
 afterEach(() => {
@@ -64,6 +64,7 @@ it('keeps computation alive on a non-editing click and isolates late results aft
   await waitFor(() => expect(pending.filter((p) => p.inputs.choice === 'B')).not.toHaveLength(0));
   fireEvent.change(view.getAllByPlaceholderText('Choice')[0]!, { target: { value: 'C' } });
   await waitFor(() => expect(pending.filter((p) => p.inputs.choice === 'C')).not.toHaveLength(0));
+  expect(pending.filter((p) => p.inputs.choice === 'B').every((p) => p.signal?.aborted)).toBe(true);
   await act(async () => {
     pending
       .filter((p) => p.inputs.choice === 'B' || p.id === 'two')
@@ -74,6 +75,7 @@ it('keeps computation alive on a non-editing click and isolates late results aft
     expect((view.getAllByPlaceholderText('Target')[1] as HTMLInputElement).value).toBe('A'),
   );
   view.unmount();
+  expect(pending.filter((p) => p.inputs.choice === 'C').every((p) => p.signal?.aborted)).toBe(true);
   const before = saved.length;
   await act(async () =>
     pending

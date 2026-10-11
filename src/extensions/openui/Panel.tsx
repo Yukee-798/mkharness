@@ -108,7 +108,7 @@ export function Panel({
     if (!bundle?.program) return undefined;
     let live = true,
       failed = false;
-    const active = new Set<symbol>(),
+    const active = new Set<AbortController>(),
       provenance = new WeakMap<object, string>();
     guard.isCurrent = (frame: unknown) => {
       if (!frame || typeof frame !== 'object') return false;
@@ -132,14 +132,15 @@ export function Panel({
     const provider = {
       run_program: async (inputs: Record<string, unknown>) => {
         finiteJson(inputs);
-        const token = Symbol(),
+        const controller = new AbortController(),
           startedEpoch = guard.epoch;
-        active.add(token);
+        active.add(controller);
         failed = false;
         guard.ready = false;
         try {
-          const result = await computeProgram(bundle.program!, inputs as Json);
-          if (!live || startedEpoch !== guard.epoch) throw new Error('Stale computation discarded');
+          const result = await computeProgram(bundle.program!, inputs as Json, controller.signal);
+          if (!live || controller.signal.aborted || startedEpoch !== guard.epoch)
+            throw new Error('Stale computation discarded');
           if (!result.ok) {
             failed = true;
             setError(result.error.message);
@@ -149,7 +150,7 @@ export function Panel({
             provenance.set(result.value, canonicalJson(inputs));
           return result.value;
         } finally {
-          active.delete(token);
+          active.delete(controller);
           notify();
         }
       },
@@ -157,7 +158,8 @@ export function Panel({
     return {
       provider,
       ready: () => active.size === 0 && !failed,
-      resetError: () => {
+      invalidate: () => {
+        for (const controller of active) controller.abort();
         failed = false;
       },
       activate: () => {
@@ -165,6 +167,7 @@ export function Panel({
       },
       dispose: () => {
         live = false;
+        for (const controller of active) controller.abort();
         guard.ready = false;
       },
     };
@@ -177,7 +180,7 @@ export function Panel({
     userEvent.current = false;
     guard.epoch = ++epoch.current;
     guard.halted = false;
-    tools?.resetError();
+    tools?.invalidate();
     if (mounted.current) setError('');
   }, [guard, tools]);
   const change = useCallback(

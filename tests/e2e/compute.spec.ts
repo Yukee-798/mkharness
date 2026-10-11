@@ -1,4 +1,47 @@
 import { test, expect } from '@playwright/test';
+test('cancels an obsolete real Worker and starts a fresh calculation', async ({ page }) => {
+  await page.goto('/tests/browser/compute.html');
+  await page.waitForFunction(() => typeof (window as any).computeProgram === 'function');
+  const result = await page.evaluate(async () => {
+    const Original = window.Worker;
+    const controller = new AbortController();
+    let terminated = 0;
+    window.Worker = class extends Original {
+      constructor(_url: URL | string, options?: WorkerOptions) {
+        super(new URL('/tests/browser/stalled.worker.ts', location.origin), options);
+        this.addEventListener('message', (event) => {
+          if (event.data.type === 'started') controller.abort();
+        });
+      }
+      override terminate() {
+        terminated++;
+        super.terminate();
+      }
+    };
+    try {
+      const cancelled = await (window as any).computeProgram(
+        { code: 'export function compute(){return 1}', data: null },
+        {},
+        controller.signal,
+      );
+      return { cancelled, terminated };
+    } finally {
+      window.Worker = Original;
+    }
+  });
+  expect(result).toMatchObject({
+    cancelled: { ok: false, error: { kind: 'cancelled' } },
+    terminated: 1,
+  });
+  expect(
+    await page.evaluate(() =>
+      (window as any).computeProgram(
+        { code: 'export function compute(){return 2}', data: null },
+        {},
+      ),
+    ),
+  ).toEqual({ ok: true, value: 2 });
+});
 test('real browser loads WASM, terminates runaway calculation and recovers', async ({ page }) => {
   await page.goto('/tests/browser/compute.html');
   await page.waitForFunction(() => typeof (window as any).computeProgram === 'function');
