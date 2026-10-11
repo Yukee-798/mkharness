@@ -11,6 +11,7 @@ import { Observable } from 'rxjs';
 import { parsePartialJsonObject } from 'assistant-stream/utils';
 import type { RemoteProgress } from '../shared/remote-progress';
 import { aliasMessages, messageAliases } from '../shared/stream';
+import type { ToolProgressMap } from '../shared/tool-progress';
 export class StreamReplaced extends Error {}
 export function partialUI(argsText: string) {
   const value = parsePartialJsonObject(argsText);
@@ -25,6 +26,7 @@ export class AttachAgent extends AbstractAgent {
     private connected: () => void = () => {},
     private progress: (runId: string, value: RemoteProgress[]) => void = () => {},
     private messageIds = new Map<string, string>(),
+    private toolProgress: (runId: string, value: ToolProgressMap) => void = () => {},
   ) {
     super({ threadId: conversationId });
   }
@@ -36,6 +38,7 @@ export class AttachAgent extends AbstractAgent {
       this.connected,
       this.progress,
       this.messageIds,
+      this.toolProgress,
     );
   }
   run(input: RunAgentInput) {
@@ -71,9 +74,12 @@ export class AttachAgent extends AbstractAgent {
                   remoteRevision?: number;
                   remote?: RemoteProgress[];
                   messageIds?: Record<string, string>;
+                  toolProgress?: ToolProgressMap;
                 };
               }
             ).snapshot;
+            if (state?.runId === runId && state.toolProgress)
+              this.toolProgress(runId, state.toolProgress);
             if (state?.runId === runId && state.messageIds)
               for (const [canonicalId, liveId] of Object.entries(state.messageIds))
                 if (!this.messageIds.has(canonicalId)) this.messageIds.set(canonicalId, liveId);

@@ -5,6 +5,7 @@ import type { ConversationAgent } from './conversation';
 import { BG } from './conversation';
 import { RemoteIntents, type RemoteIntent } from './remote-example';
 import { remoteProgress } from '../shared/remote-progress';
+import { restoreToolProgress } from './tool-progress';
 export async function observeRun(
   owner: ConversationAgent,
   runId: string,
@@ -13,6 +14,14 @@ export async function observeRun(
   const root = await owner.root(),
     pi = await owner.harness.pi();
   const watch = await watchEvents(pi, root.id, BG);
+  const progress = await restoreToolProgress(pi, watch.snapshot).catch(async (error) => {
+    await watch.stop();
+    throw error;
+  });
+  const projector = await owner.progressProjector().catch(async (error) => {
+    await watch.stop();
+    throw error;
+  });
   let record = await owner.submission(runId);
   if (!record) {
     await watch.stop();
@@ -93,6 +102,13 @@ export async function observeRun(
             status: record!.status,
             stopping: owner.stopping,
             messageIds: Object.fromEntries(liveMessageIds),
+            toolProgress: Object.fromEntries(
+              Object.entries(progress.project(projector)).map(([id, value]) => {
+                const boundary = id.indexOf('.');
+                const alias = liveMessageIds.get(id.slice(0, boundary));
+                return [alias ? alias + id.slice(boundary) : id, value];
+              }),
+            ),
             remoteRevision,
             remote: remoteProgress(committedRemote ?? initialRemote),
           },
@@ -141,12 +157,48 @@ export async function observeRun(
       }, 15000);
       watch.start(async (events) => {
         try {
+          // Pi emits starts before the assistant entry in the same atomic tool-round commit.
+          // Bind the entire batch to its committed assistant entry before processing raw provider IDs.
+          for (const event of events)
+            if (
+              (event.type === 'message_end' || event.type === 'entry_appended') &&
+              event.entry.model?.some(
+                (message) =>
+                  message.role === 'assistant' &&
+                  message.content.some((block) => block.type === 'toolCall'),
+              )
+            )
+              progress.round(event.entry);
           for (const event of events) {
             if (ended) return;
             if (event.type === 'submission' && event.record.id === record!.id) {
               record = event.record;
               state();
               if (terminal()) return;
+            } else if (
+              event.type === 'tool_execution_start' ||
+              event.type === 'tool_execution_update' ||
+              event.type === 'tool_execution_end'
+            ) {
+              const callId = progress.resolve(event.toolCallId, event.toolName);
+              if (!callId) {
+                reset();
+                return;
+              }
+              if (event.type === 'tool_execution_end') {
+                progress.end(
+                  callId,
+                  !!event.entry &&
+                    !event.entry.model?.some(
+                      (message) => message.role === 'toolResult' && message.isError,
+                    ),
+                );
+                if (event.entry) {
+                  entries.set(Number(event.entry.id), event.entry);
+                  history(event.entry);
+                }
+              } else progress.update(callId, event.type === 'tool_execution_update' ? event : {});
+              state();
             } else if (event.type === 'snapshot') {
               reset();
               return;
@@ -174,10 +226,7 @@ export async function observeRun(
               entries.set(Number(event.entry.id), event.entry);
               state();
               history(event.entry);
-            } else if (
-              event.type === 'entry_appended' ||
-              (event.type === 'tool_execution_end' && event.entry)
-            ) {
+            } else if (event.type === 'entry_appended') {
               const entry = (event as { entry: EntryRecord }).entry;
               entries.set(Number(entry.id), entry);
               history(entry);

@@ -21,6 +21,7 @@ export interface ToolCallProps {
   query: string;
   request: string;
   result: string;
+  progress?: string;
   running: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -39,6 +40,7 @@ export function ToolCall({
   query,
   request,
   result,
+  progress,
   running,
   open,
   onOpenChange,
@@ -65,6 +67,11 @@ export function ToolCall({
         <DisclosureChevron data-slot="tool-call-chevron" />
       </CollapsibleTrigger>
       <ToolFallbackContent>
+        {progress && (
+          <pre aria-label="工具进度" tabIndex={0} className={payloadScroll}>
+            {progress}
+          </pre>
+        )}
         <p className="text-xs text-muted-foreground">请求参数</p>
         <ToolFallbackArgs
           argsText={request}

@@ -6,6 +6,7 @@ import {
   ROOT_CONVERSATION_ID,
   createRegistry,
   createSession,
+  watchEvents,
   type Cursor,
   type Extension,
   type EntryRecord,
@@ -42,6 +43,7 @@ import { validateExtensions } from './extensions';
 import { withRunLimits, runLimits, toolBudget } from './limits';
 import { observeRun } from './observe';
 import { browserEntries } from '../shared/stream';
+import { restoreToolProgress, toolProjector } from './tool-progress';
 import {
   applicationModels,
   applicationThinkingLevel,
@@ -638,6 +640,9 @@ export class ConversationAgent extends Agent<Env> {
     if (this.deleting) return Response.json({ error: { code: 'not_found' } }, { status: 404 });
     return observeRun(this, runId, threadId);
   }
+  async progressProjector() {
+    return toolProjector(await this.contributions());
+  }
   async snapshot(rawCursor?: string): Promise<string> {
     if (this.deleting) return JSON.stringify({ error: { status: 404, code: 'not_found' } });
     let cursor: Cursor | undefined;
@@ -658,6 +663,15 @@ export class ConversationAgent extends Agent<Env> {
         ),
       BG,
     );
+    const watch = await watchEvents(pi, ROOT_CONVERSATION_ID, BG);
+    let toolProgress;
+    try {
+      toolProgress = (await restoreToolProgress(pi, watch.snapshot)).project(
+        await this.progressProjector(),
+      );
+    } finally {
+      await watch.stop();
+    }
     const history = await this.history(cursor);
     const modelCatalog = this.modelCatalog();
     const lastRequest = this.rows<{ payload: string }>(
@@ -676,6 +690,7 @@ export class ConversationAgent extends Agent<Env> {
     return JSON.stringify({
       entries: browserEntries(history.items),
       cursor: history.next,
+      toolProgress,
       pending,
       stopping: this.stopping,
       modelCatalog,

@@ -59,7 +59,7 @@ it('retains action parameters in the committed model input for the source panel'
     extensionId: 'openui',
     name: 'continue',
     payload: {
-      ref: result.details.ref,
+      ref: JSON.parse(result.content[0].text).panelRef,
       state: { $choice: 'B' },
       params: { context: 'Selected item B', itemIndex: 1 },
     },

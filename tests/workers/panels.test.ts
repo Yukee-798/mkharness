@@ -16,7 +16,7 @@ it('publishes from committed tools, preserves raw input and rejects conflicting 
     .flatMap((e: any) => e.model ?? [])
     .find((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui' && !m.isError);
   expect(tool).toBeDefined();
-  const ref = tool.details.ref;
+  const ref = JSON.parse(tool.content[0].text).panelRef;
   const loaded = JSON.parse(await stub.loadResource('openui', ref));
   expect(loaded.data.program.data).toEqual({ factor: 2 });
   expect(loaded.revision).toBe(0);
@@ -50,7 +50,7 @@ it('publishes from committed tools, preserves raw input and rejects conflicting 
   const tools = next.entries
     .flatMap((e: any) => e.model ?? [])
     .filter((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui' && !m.isError);
-  const newRef = tools.at(-1).details.ref;
+  const newRef = JSON.parse(tools.at(-1).content[0].text).panelRef;
   expect(newRef).not.toBe(ref);
   expect(JSON.parse(await stub.loadResource('openui', newRef)).revision).toBe(0);
   expect(JSON.parse(await stub.loadResource('openui', ref)).state).toEqual({ $cost: '1.' });

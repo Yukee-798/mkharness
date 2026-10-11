@@ -39,6 +39,8 @@ export function fixtureModels() {
     const last = context.messages.at(-1);
     const tool = text?.includes('ignores_cancel') && last?.role === 'user';
     let content: AssistantMessage['content'] | undefined;
+    if (text?.includes('fault seam') && last?.role === 'user')
+      content = [{ type: 'toolCall', id: 'same-call', name: 'fault_probe', arguments: {} }];
     if (text?.includes('progress seam')) {
       const round = context.messages.filter(
         (message) => message.role === 'toolResult' && message.toolName === 'progress_probe',

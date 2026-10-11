@@ -41,6 +41,8 @@ import type { RemoteProgress } from '../shared/remote-progress';
 import { TooltipIconButton } from './tooltip-icon-button';
 import { ToolActivity } from './tool-activity';
 import { useExtensionConfig } from './extension-config';
+import { ToolProgressContext } from './tool-progress';
+import type { ToolProgressMap } from '../shared/tool-progress';
 import { ToolGroupRoot, ToolGroupContent } from './tool-group';
 import { DisclosureTrigger, disclosureContentClass, TraceLine } from './trace';
 import {
@@ -57,6 +59,7 @@ import {
 } from 'lucide-react';
 export type Snapshot = {
   entries: EntryRecord[];
+  toolProgress?: ToolProgressMap;
   cursor?: unknown;
   pending: { operationId: string; status: 'running' | 'queued' }[];
   stopping: boolean;
@@ -476,6 +479,7 @@ function Runtime({
   footer: ReactNode;
 }) {
   const extensions = useExtensionConfig(userId);
+  const [toolProgress, setToolProgress] = useState<ToolProgressMap>(snapshot.toolProgress ?? {});
   // Commit aliases belong to this runtime only. Fresh mounts restore canonical Pi IDs.
   const messageIds = useMemo(() => new Map<string, string>(), []);
   const history = useMemo(() => {
@@ -505,6 +509,11 @@ function Runtime({
           if (active?.operationId === runId) callbacks.current.progress(value);
         },
         messageIds,
+        (runId, value) => {
+          const pending = callbacks.current.snapshot.pending;
+          const active = pending.find((item) => item.status === 'running') ?? pending[0];
+          if (active?.operationId === runId) setToolProgress(value);
+        },
       ),
     [id, messageIds],
   );
@@ -530,44 +539,49 @@ function Runtime({
   }, [runtime, history, activeRunId, restoration]);
   return (
     <AssistantRuntimeProvider runtime={runtime} config={extensions.config}>
-      <ChatContext value={{ id, userId, submit }}>
-        <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
-          <ThreadPrimitive.Viewport
-            data-slot="chat-viewport"
-            scrollToBottomOnRunStart={false}
-            className="group/viewport relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain has-[[data-slot=chat-welcome]]:justify-center-safe has-[[data-slot=chat-welcome]]:py-8"
-          >
-            <ThreadPrimitive.Empty>
-              <div data-slot="chat-welcome" className="mx-auto max-w-md shrink-0 px-6 text-center">
-                <MessageSquare className="mx-auto mb-4 size-6 text-muted-foreground" />
-                <p className="text-xl font-medium tracking-tight">今天想解决什么问题？</p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  直接提问，或描述你想比较、计算和调整的内容。
-                </p>
-              </div>
-            </ThreadPrimitive.Empty>
-            <div
-              data-slot="chat-messages"
-              className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-8 pb-6 empty:hidden sm:px-6"
+      <ToolProgressContext value={activeRunId ? toolProgress : (snapshot.toolProgress ?? {})}>
+        <ChatContext value={{ id, userId, submit }}>
+          <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
+            <ThreadPrimitive.Viewport
+              data-slot="chat-viewport"
+              scrollToBottomOnRunStart={false}
+              className="group/viewport relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain has-[[data-slot=chat-welcome]]:justify-center-safe has-[[data-slot=chat-welcome]]:py-8"
             >
-              <ThreadPrimitive.Messages
-                components={{ UserMessage: User, AssistantMessage: Assistant }}
-              />
-            </div>
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl shrink-0 bg-background px-4 pt-3 pb-4 group-has-[[data-slot=chat-welcome]]/viewport:static group-has-[[data-slot=chat-welcome]]/viewport:mt-0 group-has-[[data-slot=chat-welcome]]/viewport:pt-6 group-has-[[data-slot=chat-welcome]]/viewport:pb-0 sm:px-6">
-              <ThreadPrimitive.ScrollToBottom asChild>
-                <TooltipIconButton
-                  tooltip="回到最新消息"
-                  className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm group-has-[[data-slot=chat-welcome]]/viewport:hidden"
+              <ThreadPrimitive.Empty>
+                <div
+                  data-slot="chat-welcome"
+                  className="mx-auto max-w-md shrink-0 px-6 text-center"
                 >
-                  <ArrowDown className="size-4" />
-                </TooltipIconButton>
-              </ThreadPrimitive.ScrollToBottom>
-              {footer}
-            </ThreadPrimitive.ViewportFooter>
-          </ThreadPrimitive.Viewport>
-        </ThreadPrimitive.Root>
-      </ChatContext>
+                  <MessageSquare className="mx-auto mb-4 size-6 text-muted-foreground" />
+                  <p className="text-xl font-medium tracking-tight">今天想解决什么问题？</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    直接提问，或描述你想比较、计算和调整的内容。
+                  </p>
+                </div>
+              </ThreadPrimitive.Empty>
+              <div
+                data-slot="chat-messages"
+                className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-8 pb-6 empty:hidden sm:px-6"
+              >
+                <ThreadPrimitive.Messages
+                  components={{ UserMessage: User, AssistantMessage: Assistant }}
+                />
+              </div>
+              <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl shrink-0 bg-background px-4 pt-3 pb-4 group-has-[[data-slot=chat-welcome]]/viewport:static group-has-[[data-slot=chat-welcome]]/viewport:mt-0 group-has-[[data-slot=chat-welcome]]/viewport:pt-6 group-has-[[data-slot=chat-welcome]]/viewport:pb-0 sm:px-6">
+                <ThreadPrimitive.ScrollToBottom asChild>
+                  <TooltipIconButton
+                    tooltip="回到最新消息"
+                    className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm group-has-[[data-slot=chat-welcome]]/viewport:hidden"
+                  >
+                    <ArrowDown className="size-4" />
+                  </TooltipIconButton>
+                </ThreadPrimitive.ScrollToBottom>
+                {footer}
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+          </ThreadPrimitive.Root>
+        </ChatContext>
+      </ToolProgressContext>
     </AssistantRuntimeProvider>
   );
 }

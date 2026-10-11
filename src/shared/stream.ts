@@ -184,6 +184,16 @@ function text(message: PiMessage) {
 }
 /** A browser projection only: provider replay metadata stays in authoritative Pi storage. */
 function browserMessage(message: PiMessage): PiMessage {
+  if (message.role === 'toolResult') {
+    return {
+      role: message.role,
+      toolCallId: message.toolCallId,
+      toolName: message.toolName,
+      content: message.content,
+      isError: message.isError,
+      timestamp: message.timestamp,
+    };
+  }
   return message.role !== 'assistant'
     ? message
     : {
@@ -202,7 +212,7 @@ function browserMessage(message: PiMessage): PiMessage {
       };
 }
 export function browserEntries(entries: readonly EntryRecord[]): EntryRecord[] {
-  return entries.map((entry) => ({
+  return entries.map(({ data: _data, ...entry }) => ({
     ...entry,
     model: entry.model?.map(browserMessage),
     edits: entry.edits?.map((edit) =>

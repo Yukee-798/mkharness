@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import { Wrench, CircleMinus, XCircle, AlertCircle } from 'lucide-react';
 import { ToolCall } from './tool-call';
+import { useToolProgress } from './tool-progress';
 export function ToolActivity({
   part,
   labels,
@@ -14,14 +15,21 @@ export function ToolActivity({
   query?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const progress = useToolProgress(part.toolCallId);
   const name = labels ?? {
     active: `正在执行：${part.toolName}`,
     complete: `已完成：${part.toolName}`,
     failed: `执行失败：${part.toolName}`,
   };
-  const running = part.status?.type === 'running';
+  const running =
+    progress?.status === 'failed' || progress?.status === 'complete'
+      ? false
+      : part.status?.type === 'running';
   const cancelled = part.status?.type === 'incomplete' && part.status.reason === 'cancelled';
-  const failed = part.isError || (part.status?.type === 'incomplete' && !cancelled);
+  const failed =
+    progress?.status === 'failed' ||
+    part.isError ||
+    (part.status?.type === 'incomplete' && !cancelled);
   const waiting = part.status?.type === 'requires-action';
   const label = cancelled ? '已停止' : failed ? name.failed : waiting ? '等待处理' : name.complete;
   const query = displayQuery ?? '';
@@ -34,6 +42,13 @@ export function ToolActivity({
       query={query}
       request={part.argsText ?? ''}
       result={typeof result === 'string' ? result : (JSON.stringify(result, null, 2) ?? '')}
+      progress={
+        progress?.value !== undefined
+          ? JSON.stringify(progress.value, null, 2)
+          : progress?.truncated
+            ? '进度内容超过显示上限'
+            : undefined
+      }
       running={running}
       icon={icon ?? <Wrench />}
       open={open}

@@ -101,9 +101,10 @@ it('safe-replays a publish interrupted before tool-result commit without duplica
     .flatMap((e: any) => e.model ?? [])
     .filter((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui' && !m.isError);
   expect(panels).toHaveLength(1);
-  expect(JSON.parse(await target.loadResource('openui', panels[0].details.ref)).data.ui).toContain(
-    'Interactive example',
-  );
+  expect(
+    JSON.parse(await target.loadResource('openui', JSON.parse(panels[0].content[0].text).panelRef))
+      .data.ui,
+  ).toContain('Interactive example');
 });
 it('resolves an old panel through the public full-history API after actual Pi compaction, and detects two-tab CAS conflicts', async () => {
   const target = stub();
@@ -112,7 +113,7 @@ it('resolves an old panel through the public full-history API after actual Pi co
   const panel = initial.entries
     .flatMap((e: any) => e.model ?? [])
     .find((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui');
-  const ref = panel.details.ref;
+  const ref = JSON.parse(panel.content[0].text).panelRef;
   const writes = await Promise.all([
     target.saveResourceState('openui', ref, { $cost: '' }, 0),
     target.saveResourceState('openui', ref, { $cost: '1.' }, 0),
