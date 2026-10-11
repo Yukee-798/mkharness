@@ -44,6 +44,7 @@ import {
 } from './models';
 import type { ModelSelection } from '../shared/model-selection';
 import { remoteProgress } from '../shared/remote-progress';
+import { claimPiStorage, validatePiStorage, RuntimeStorageError } from './pi-storage';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
   value: () => undefined,
@@ -99,7 +100,28 @@ export class ConversationAgent extends Agent<Env> {
     this.deletionId = typeof deletion === 'string' ? deletion : undefined;
     this.harness = new PiHarness({
       defaults: { model: { provider: env.MODEL_PROVIDER, id: env.MODEL_ID } },
-      harness: async ({ storage, context }) => {
+      harness: async ({ storage: nativeStorage, context }) => {
+        const runtime: { pi?: Harness; superseded: boolean } = { superseded: false };
+        const storage = claimPiStorage(nativeStorage, ctx.storage, () => {
+          runtime.superseded = true;
+          void runtime.pi?.close(BG).catch(() => {
+            console.error(JSON.stringify({ stage: 'pi', error: 'runtime_close_failed' }));
+          });
+        });
+        // Materialize recovery documents before Harness.open/resume can schedule tasks.
+        // Invalid persistence fails this conversation's startup instead of starving the worker.
+        try {
+          await validatePiStorage(storage);
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              stage: 'pi',
+              error: 'runtime_storage_invalid',
+              documentId: error instanceof RuntimeStorageError ? error.documentId : undefined,
+            }),
+          );
+          throw error;
+        }
         const registry = createRegistry();
         // A read-only bootstrap snapshot avoids calling the not-yet-open Harness from its factory.
         const saved = await createSession(storage).snapshot(
@@ -137,10 +159,22 @@ export class ConversationAgent extends Agent<Env> {
               if (this.mcpPrepared?.bindings.length && conversation.id === ROOT_CONVERSATION_ID)
                 (await tx.doc(MCPBindings, conversation.id)).bindings = this.mcpPrepared.bindings;
             },
-            onReport: () => console.error(JSON.stringify({ stage: 'pi', error: 'runtime_report' })),
+            onReport: (error) =>
+              console.error(
+                JSON.stringify({
+                  stage: 'pi',
+                  error: error instanceof RuntimeStorageError ? error.code : 'runtime_report',
+                  name: error instanceof Error ? error.name : typeof error,
+                }),
+              ),
           },
           context,
         );
+        runtime.pi = pi;
+        if (runtime.superseded) {
+          await pi.close(BG);
+          throw new RuntimeStorageError('runtime_superseded');
+        }
         const existing = await pi.conversation(ROOT_CONVERSATION_ID, context);
         if (existing && this.mcpPrepared?.bindings.length)
           await existing.commit(async (tx) => {
