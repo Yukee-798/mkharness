@@ -45,6 +45,7 @@ import {
 import type { ModelSelection } from '../shared/model-selection';
 import { remoteProgress } from '../shared/remote-progress';
 import { claimPiStorage, validatePiStorage, RuntimeStorageError } from './pi-storage';
+import { boundedReporter } from './diagnostics';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
   value: () => undefined,
@@ -159,14 +160,16 @@ export class ConversationAgent extends Agent<Env> {
               if (this.mcpPrepared?.bindings.length && conversation.id === ROOT_CONVERSATION_ID)
                 (await tx.doc(MCPBindings, conversation.id)).bindings = this.mcpPrepared.bindings;
             },
-            onReport: (error) =>
+            onReport: boundedReporter<unknown>((error, suppressed) =>
               console.error(
                 JSON.stringify({
                   stage: 'pi',
                   error: error instanceof RuntimeStorageError ? error.code : 'runtime_report',
-                  name: error instanceof Error ? error.name : typeof error,
+                  name: error instanceof Error ? error.name.slice(0, 64) : typeof error,
+                  ...(suppressed ? { suppressed } : {}),
                 }),
               ),
+            ),
           },
           context,
         );

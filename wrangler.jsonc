@@ -10,6 +10,7 @@
   },
   "observability": {
     "enabled": true,
+    "head_sampling_rate": 0.1,
   },
   "vars": {
     "APP_URL": "http://localhost:5173",

@@ -5,6 +5,9 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+// Miniflare's local trace store has no retention policy. Keep console diagnostics,
+// but only collect persistent spans/logs when explicitly requested for debugging.
+process.env.X_LOCAL_OBSERVABILITY ??= 'false';
 export default defineConfig({
   resolve: {
     alias: {
