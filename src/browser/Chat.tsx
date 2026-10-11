@@ -39,8 +39,8 @@ import { ModelPicker } from './model-picker';
 import type { ModelCatalog, ModelSelection } from '../shared/model-selection';
 import type { RemoteProgress } from '../shared/remote-progress';
 import { TooltipIconButton } from './tooltip-icon-button';
-import { ToolCall } from './tool-call';
-import { toolResults } from './tool-results';
+import { ToolActivity } from './tool-activity';
+import { useExtensionConfig } from './extension-config';
 import { ToolGroupRoot, ToolGroupContent } from './tool-group';
 import { DisclosureTrigger, disclosureContentClass, TraceLine } from './trace';
 import {
@@ -51,10 +51,7 @@ import {
   Square,
   LoaderCircle,
   XCircle,
-  CircleMinus,
   AlertCircle,
-  Globe,
-  Search,
   Wrench,
   Brain,
 } from 'lucide-react';
@@ -435,6 +432,7 @@ export function Chat({
           <Runtime
             key={`${userId}:${id}`}
             id={id}
+            userId={userId}
             snapshot={snapshot}
             restoration={restoration}
             submit={submit}
@@ -456,6 +454,7 @@ export function Chat({
 }
 function Runtime({
   id,
+  userId,
   snapshot,
   restoration,
   submit,
@@ -466,6 +465,7 @@ function Runtime({
   footer,
 }: {
   id: string;
+  userId: string;
   snapshot: Snapshot;
   restoration: number;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
@@ -475,6 +475,7 @@ function Runtime({
   progress: (value: RemoteProgress[]) => void;
   footer: ReactNode;
 }) {
+  const extensions = useExtensionConfig(userId);
   // Commit aliases belong to this runtime only. Fresh mounts restore canonical Pi IDs.
   const messageIds = useMemo(() => new Map<string, string>(), []);
   const history = useMemo(() => {
@@ -528,7 +529,7 @@ function Runtime({
     return () => runtime.thread.cancelRun();
   }, [runtime, history, activeRunId, restoration]);
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
+    <AssistantRuntimeProvider runtime={runtime} config={extensions.config}>
       <ChatContext value={{ id, submit }}>
         <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
           <ThreadPrimitive.Viewport
@@ -607,83 +608,7 @@ function Tool(part: ToolCallMessagePartProps) {
       </>
     );
   }
-  const Result = toolResults[part.toolName];
-  return (
-    <>
-      <ToolActivity part={part} />
-      {Result && <Result {...part} />}
-    </>
-  );
-}
-function ToolActivity({ part }: { part: ToolCallMessagePartProps }) {
-  const [open, setOpen] = useState(false);
-  const names: Record<string, { active: string; complete: string; failed: string }> = {
-    read_web: { active: '正在读取网页', complete: '已读取网页', failed: '网页读取失败' },
-    read_webpage: { active: '正在读取网页', complete: '已读取网页', failed: '网页读取失败' },
-    search_web: { active: '正在搜索网页', complete: '已搜索网页', failed: '网页搜索失败' },
-    example_generate: {
-      active: '正在等待结果',
-      complete: '已获取结果',
-      failed: '暂时无法获取结果',
-    },
-    example_recheck: {
-      active: '正在复查原任务',
-      complete: '已复查原任务',
-      failed: '暂时无法确认结果',
-    },
-  };
-  const name = names[part.toolName] ?? {
-    active: `正在执行：${part.toolName}`,
-    complete: `已完成：${part.toolName}`,
-    failed: `执行失败：${part.toolName}`,
-  };
-  const running = part.status?.type === 'running';
-  const cancelled = part.status?.type === 'incomplete' && part.status.reason === 'cancelled';
-  const failed = part.isError || (part.status?.type === 'incomplete' && !cancelled);
-  const waiting = part.status?.type === 'requires-action';
-  const label = cancelled ? '已停止' : failed ? name.failed : waiting ? '等待处理' : name.complete;
-  const target = part.args?.query ?? part.args?.url;
-  let query = typeof target === 'string' ? target : '';
-  if (part.toolName === 'read_web' || part.toolName === 'read_webpage') {
-    try {
-      query = new URL(query).hostname;
-    } catch {
-      query = '';
-    }
-  }
-  const result =
-    part.result ?? (part.status?.type === 'incomplete' ? part.status.error : undefined);
-  return (
-    <ToolCall
-      label={label}
-      activeLabel={name.active}
-      query={query}
-      request={part.argsText ?? ''}
-      result={typeof result === 'string' ? result : (JSON.stringify(result, null, 2) ?? '')}
-      running={running}
-      icon={
-        part.toolName === 'search_web' ? (
-          <Search />
-        ) : part.toolName.startsWith('read_web') ? (
-          <Globe />
-        ) : (
-          <Wrench />
-        )
-      }
-      open={open}
-      onOpenChange={setOpen}
-      ariaLabel={`${running ? name.active : label}${query ? ` · ${query}` : ''}`}
-      statusIcon={
-        cancelled ? (
-          <CircleMinus className="size-3.5 text-muted-foreground" />
-        ) : failed ? (
-          <XCircle className="size-3.5 text-destructive" />
-        ) : waiting ? (
-          <AlertCircle className="size-3.5 text-muted-foreground" />
-        ) : undefined
-      }
-    />
-  );
+  return <ToolActivity part={part} />;
 }
 function AssistantText(part: TextMessagePartProps) {
   const internal = useAuiState((s) =>
@@ -829,7 +754,14 @@ function Assistant() {
               case 'text':
                 return <AssistantText {...part} />;
               case 'tool-call':
-                return <Tool {...part} />;
+                return (
+                  <MessagePrimitive.PartByIndex
+                    index={content.findIndex(
+                      (item) => item.type === 'tool-call' && item.toolCallId === part.toolCallId,
+                    )}
+                    components={{ tools: { Fallback: Tool } }}
+                  />
+                );
               case 'indicator':
                 return generating ? null : <TraceLine live label="正在思考…" icon={<Brain />} />;
               default:

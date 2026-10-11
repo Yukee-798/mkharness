@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { auth } from './auth';
 import { boundedText } from './web';
+import { extensionIds } from '../extensions/server';
 import {
   AppError,
   commandSchema,
@@ -26,6 +27,7 @@ app.use('/api/*', async (c, next) => {
   c.set('userId', session.user.id);
   await next();
 });
+app.get('/api/capabilities', (c) => c.json({ extensionIds: extensionIds(c.env) }));
 app.get('/api/conversations', async (c) => {
   const offset = Math.max(0, Math.min(1000000, Number(c.req.query('cursor')) || 0));
   const { results } = await c.env.DB.prepare(

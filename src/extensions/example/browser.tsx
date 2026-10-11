@@ -1,4 +1,5 @@
-import type { ComponentType } from 'react';
+import type { Toolkit } from '@assistant-ui/react';
+import { ToolActivity } from '../../browser/tool-activity';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 
 function DescribeTextResult(part: ToolCallMessagePartProps) {
@@ -20,7 +21,17 @@ function DescribeTextResult(part: ToolCallMessagePartProps) {
     <p className="rounded-lg border px-3 py-2 text-sm">文字包含 {value.characters} 个字符。</p>
   );
 }
-// Static, application-reviewed React components. Tool details stay available separately.
-export const toolResults: Record<string, ComponentType<ToolCallMessagePartProps>> = {
-  describe_text: DescribeTextResult,
-};
+function DescribeText(part: ToolCallMessagePartProps) {
+  return (
+    <>
+      <ToolActivity
+        part={part}
+        labels={{ active: '正在统计文字', complete: '已统计文字', failed: '文字统计失败' }}
+      />
+      <DescribeTextResult {...part} />
+    </>
+  );
+}
+export const toolkit = {
+  describe_text: { type: 'backend', render: DescribeText },
+} satisfies Toolkit;

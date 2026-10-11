@@ -28,6 +28,23 @@ beforeAll(async () => {
 });
 it('rejects unauthenticated requests with 401', async () =>
   expect((await app.request('http://localhost:5173/api/conversations', {}, env)).status).toBe(401));
+it('capabilities are authenticated configuration reads that never acquire a DO', async () => {
+  expect((await app.request('http://localhost:5173/api/capabilities', {}, env)).status).toBe(401);
+  const unavailableDO = {
+    getByName: () => {
+      throw new Error('capability read acquired a DO');
+    },
+  };
+  const response = await app.request(
+    'http://localhost:5173/api/capabilities',
+    {
+      headers: { cookie: await cookie('token-a') },
+    },
+    { ...env, CONVERSATIONS: unavailableDO } as any,
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ extensionIds: ['web', 'openui'] });
+});
 it('isolates listing and every resource operation using real Better Auth sessions', async () => {
   const a = await cookie('token-a'),
     b = await cookie('token-b');
