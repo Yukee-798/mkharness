@@ -87,7 +87,12 @@ it('refuses a source panel from another chat or an unpublished call', async () =
     await target.submitRun({
       runId: crypto.randomUUID(),
       text: 'continue',
-      source: { panelRef: '2.missing', action: 'continue_analysis', state: { $cost: '' } },
+      source: {
+        action: 'extension_action',
+        extensionId: 'openui',
+        name: 'continue',
+        payload: { ref: '2.missing', state: { $cost: '' } },
+      },
     }),
   ).toMatchObject({ error: { status: 404 } });
 });

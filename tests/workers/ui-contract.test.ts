@@ -55,10 +55,14 @@ it('retains action parameters in the committed model input for the source panel'
         message.role === 'toolResult' && message.toolName === 'present_openui' && !message.isError,
     );
   const source = {
-    panelRef: result.details.ref,
-    action: 'continue_analysis' as const,
-    state: { $choice: 'B' },
-    params: { context: 'Selected item B', itemIndex: 1 },
+    action: 'extension_action' as const,
+    extensionId: 'openui',
+    name: 'continue',
+    payload: {
+      ref: result.details.ref,
+      state: { $choice: 'B' },
+      params: { context: 'Selected item B', itemIndex: 1 },
+    },
   };
   expect(
     await stub.submitRun({ runId: crypto.randomUUID(), text: 'Explain this choice', source }),
@@ -71,7 +75,12 @@ it('retains action parameters in the committed model input for the source panel'
     typeof user.content === 'string'
       ? user.content
       : user.content.map((part: any) => part.text ?? '').join('');
-  expect(text).toBe('Explain this choice' + USER_ACTION_CONTEXT + '\n' + JSON.stringify(source));
+  expect(text).toBe(
+    'Explain this choice' +
+      USER_ACTION_CONTEXT +
+      '\n' +
+      JSON.stringify({ inputs: source.payload.state, params: source.payload.params }),
+  );
 });
 
 it('requires computation provenance for program-backed StateSync while preserving simple local writeback', async () => {

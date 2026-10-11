@@ -6,6 +6,7 @@ import { AppError } from '../../shared/contracts';
 import { finiteJson } from '../../shared/compute';
 import { successfulTool } from '../../shared/references';
 import { validateUI } from '../../server/panel-tools';
+import { actionParams } from '../../shared/ui-actions';
 export function openuiContribution(
   entries: () => Promise<readonly EntryRecord[]>,
 ): ServerContribution {
@@ -50,6 +51,32 @@ export function openuiContribution(
           throw new AppError(400, 'invalid_state');
         finiteJson(state);
         return state;
+      },
+    },
+    actions: {
+      continue: {
+        async normalize(payload, context) {
+          if (
+            !payload ||
+            typeof payload !== 'object' ||
+            Array.isArray(payload) ||
+            typeof payload.ref !== 'string'
+          )
+            throw new AppError(400, 'invalid_action_payload');
+          if (!successfulTool(await context.entries(), payload.ref, 'present_openui'))
+            throw new AppError(404, 'resource_not_found');
+          const state = payload.state;
+          if (!state || typeof state !== 'object' || Array.isArray(state))
+            throw new AppError(400, 'invalid_action_payload');
+          finiteJson(state);
+          let params;
+          try {
+            params = actionParams(payload.params ?? {});
+          } catch {
+            throw new AppError(400, 'invalid_action_payload');
+          }
+          return { inputs: state, ...(Object.keys(params).length ? { params } : {}) };
+        },
       },
     },
   };

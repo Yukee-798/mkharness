@@ -213,11 +213,17 @@ export function Panel({
       }
       try {
         const params = actionParams(event.params);
+        const inputs = structuredClone({ ...state.current, ...event.formState });
+        finiteJson(inputs);
         void submit(event.humanFriendlyMessage || 'Analyze the current inputs', {
-          panelRef: bundle.panelRef,
-          action: 'continue_analysis',
-          state: structuredClone({ ...state.current, ...event.formState }),
-          ...(Object.keys(params).length ? { params } : {}),
+          action: 'extension_action',
+          extensionId: 'openui',
+          name: 'continue',
+          payload: {
+            ref: bundle.panelRef,
+            state: inputs,
+            ...(Object.keys(params).length ? { params } : {}),
+          },
         }).catch((e) => setError(e.message));
         setError('');
       } catch (error) {

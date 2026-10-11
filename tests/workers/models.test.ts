@@ -136,7 +136,7 @@ it('keeps per-request model and effort across a busy queue, retries and SQLite-p
         .toArray()
         .map((r) => {
           const payload = JSON.parse(String(r.payload));
-          return payload.config ?? payload.execution;
+          return payload.execution;
         }),
     ),
   ).toEqual(commands.map((c) => c.config));

@@ -293,7 +293,7 @@ it('keeps streamed message, reasoning and tool identities when a draft commits, 
   expect(toMessages(entries)[1].id).toBe('2');
 });
 it('keeps the current action context out of visible user history', () => {
-  const source = { panelRef: '2.call', action: 'continue_analysis', state: { $budget: '12.' } };
+  const source = { inputs: { $budget: '12.' } };
   const original = '请按我的选择继续\n保留这个换行';
   const entries = [
     {

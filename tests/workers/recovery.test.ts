@@ -27,7 +27,10 @@ it.each([false, true])(
       state.storage.sql.exec(
         'INSERT INTO app_requests(id,payload,accepted)VALUES(?,?,0)',
         command.runId,
-        JSON.stringify(command),
+        JSON.stringify({
+          request: command,
+          execution: { modelId: 'fixture', thinkingLevel: 'off' },
+        }),
       );
       if (accepted)
         await instance.harness.submit(command.text, {

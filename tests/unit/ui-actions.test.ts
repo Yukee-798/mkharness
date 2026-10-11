@@ -1,6 +1,5 @@
 import { expect, it } from 'vitest';
-import { commandSchema } from '../../src/shared/contracts';
-import { externalURL } from '../../src/shared/ui-actions';
+import { externalURL, actionParams } from '../../src/shared/ui-actions';
 
 it('normalizes complete HTTP and HTTPS links without weakening the protocol boundary', () => {
   expect(externalURL('HTTPS://EXAMPLE.COM:443/watch?q=food#part')).toBe(
@@ -33,24 +32,14 @@ it.each([
   expect(() => externalURL(value)).toThrow();
 });
 
-it('accepts bounded JSON action context in a panel source and rejects unusable context', () => {
-  const command = {
-    runId: '3fac0a0b-18f2-4d54-b8cb-4a7e49d74ec9',
-    text: 'Explain this choice',
-    source: {
-      panelRef: '2.call',
-      action: 'continue_analysis',
-      state: { $choice: 'B' },
-      params: { context: 'Selected item: B', itemIndex: 1, details: { title: 'Video B' } },
-    },
-  };
-  expect(commandSchema.parse(command).source).toEqual(command.source);
+it('accepts bounded finite action parameters and rejects unusable context', () => {
+  expect(
+    actionParams({ context: 'Selected item: B', itemIndex: 1, details: { title: 'Video B' } }),
+  ).toEqual({ context: 'Selected item: B', itemIndex: 1, details: { title: 'Video B' } });
   for (const params of [
     { context: 'x'.repeat(16385) },
     { count: Infinity },
     { missing: undefined },
   ])
-    expect(
-      commandSchema.safeParse({ ...command, source: { ...command.source, params } }).success,
-    ).toBe(false);
+    expect(() => actionParams(params)).toThrow();
 });

@@ -11,7 +11,14 @@ import {
   type EntryRecord,
 } from '@earendil-works/pi-durable';
 import type { Models } from '@earendil-works/pi-ai/models';
-import { AppError, commandSchema, USER_ACTION_CONTEXT, type RunCommand } from '../shared/contracts';
+import {
+  AppError,
+  commandSchema,
+  USER_ACTION_CONTEXT,
+  type RunCommand,
+  storedRequestSchema,
+  type StoredRequest,
+} from '../shared/contracts';
 import { jsonText, canonicalJson } from '../shared/compute';
 import { applicationContributions } from './assembly';
 import type { ServerContribution } from './contributions';
@@ -33,7 +40,6 @@ import {
 } from './remote-example';
 import { validateExtensions } from './extensions';
 import { withRunLimits, runLimits, toolBudget } from './limits';
-import { successfulTool } from '../shared/references';
 import { observeRun } from './observe';
 import { browserEntries } from '../shared/stream';
 import {
@@ -220,7 +226,7 @@ export class ConversationAgent extends Agent<Env> {
       config,
     );
   }
-  private async runningCommand() {
+  private async runningRequest() {
     // Pi owns the queue. Resolve the currently running operation, never the newest queued request.
     const running = (await this.harness.pending({ session: '1' })).find(
       (p) => p.status === 'running',
@@ -231,20 +237,18 @@ export class ConversationAgent extends Agent<Env> {
         'SELECT payload FROM app_requests WHERE id=?',
         running.operationId,
       )[0];
-    const stored = row
-      ? (JSON.parse(row.payload) as RunCommand & { execution?: ModelSelection })
-      : undefined;
+    const stored = row ? storedRequestSchema.parse(JSON.parse(row.payload)) : undefined;
     return stored;
   }
   private async modelDispatch() {
-    const stored = await this.runningCommand();
+    const stored = await this.runningRequest();
     const doc = await (await this.harness.pi()).snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
     if (
-      !remoteModelAllowed(doc?.operations ?? {}, stored) ||
+      !remoteModelAllowed(doc?.operations ?? {}, stored?.request) ||
       remoteRunBlocked(await this.allEntries())
     )
       throw new AppError(409, 'remote_outcome_unknown');
-    const selection = stored?.execution ?? stored?.config ?? this.selection();
+    const selection = stored?.execution ?? this.selection();
     const model = this.models().getModel(this.env.MODEL_PROVIDER, selection.modelId);
     if (!model)
       throw new AppError(
@@ -279,9 +283,9 @@ export class ConversationAgent extends Agent<Env> {
             remoteExample(remote, {
               identity: this.ctx.id.toString(),
               command: async () => {
-                const command = await this.runningCommand();
+                const command = await this.runningRequest();
                 if (!command) throw new AppError(409, 'run_context_missing');
-                return command;
+                return command.request;
               },
             }),
           ]
@@ -355,15 +359,32 @@ export class ConversationAgent extends Agent<Env> {
         'SELECT payload,accepted FROM app_requests WHERE id=?',
         command.runId,
       )[0];
-      if (record && canonicalJson(commandSchema.parse(JSON.parse(record.payload))) !== payload)
+      if (
+        record &&
+        canonicalJson(storedRequestSchema.parse(JSON.parse(record.payload)).request) !== payload
+      )
         throw new AppError(409, 'request_conflict');
       if (record?.accepted === -1) throw new AppError(409, 'request_withdrawn');
-      if (!record) {
+      let stored = record ? storedRequestSchema.parse(JSON.parse(record.payload)) : undefined;
+      if (!stored) {
         await this.root();
+        let sourceContext;
         if (command.source) {
-          if (command.source.action === 'continue_analysis') {
-            if (!successfulTool(await this.allEntries(), command.source.panelRef, 'present_openui'))
-              throw new AppError(404, 'panel_not_found');
+          if (command.source.action === 'extension_action') {
+            const source = command.source;
+            const action = (await this.contributions()).find(
+              (contribution) => contribution.id === source.extensionId,
+            )?.actions;
+            if (!action || !Object.hasOwn(action, source.name))
+              throw new AppError(404, 'extension_action_unavailable');
+            sourceContext = await action[source.name]!.normalize(source.payload, {
+              entries: () => this.allEntries(),
+            });
+            try {
+              jsonText(sourceContext);
+            } catch {
+              throw new AppError(400, 'invalid_action_context');
+            }
           } else {
             const doc = await (
               await this.harness.pi()
@@ -390,12 +411,19 @@ export class ConversationAgent extends Agent<Env> {
         this.ctx.storage.sql.exec(
           'INSERT INTO app_requests(id,payload)VALUES(?,?)',
           command.runId,
-          canonicalJson(command.config ? command : { ...command, execution }),
+          jsonText(
+            (stored = {
+              request: command,
+              execution,
+              ...(sourceContext === undefined ? {} : { sourceContext }),
+            }),
+            2 * 1048576 + 65536,
+          ),
         );
       }
       if (!record?.accepted) {
         await this.recovery.schedule();
-        await this.enqueue(command);
+        await this.enqueue(stored!);
       }
       return { runId: command.runId, accepted: true as const };
     });
@@ -405,7 +433,8 @@ export class ConversationAgent extends Agent<Env> {
     const saved = await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
     if (!saved) return;
     const referenced =
-      command.source && command.source.action !== 'continue_analysis'
+      command.source &&
+      (command.source.action === 'retry_remote' || command.source.action === 'recheck_remote')
         ? command.source.taskId
         : undefined;
     const published = new Set(
@@ -432,9 +461,13 @@ export class ConversationAgent extends Agent<Env> {
             delete doc.operations[operation.taskId];
       }, BG);
   }
-  private async enqueue(command: RunCommand) {
+  private async enqueue(stored: StoredRequest) {
+    const command = stored.request;
     let text = command.text;
-    if (command.source) text += USER_ACTION_CONTEXT + '\n' + JSON.stringify(command.source);
+    const context =
+      stored.sourceContext ??
+      (command.source?.action !== 'extension_action' ? command.source : undefined);
+    if (context !== undefined) text += USER_ACTION_CONTEXT + '\n' + JSON.stringify(context);
     await this.harness.submit(text, {
       session: '1',
       operationId: command.runId,
@@ -457,7 +490,7 @@ export class ConversationAgent extends Agent<Env> {
         'SELECT id,payload FROM app_requests WHERE accepted=0 ORDER BY rowid',
       )) {
         if (this.stopping) break;
-        await this.enqueue(JSON.parse(record.payload) as RunCommand);
+        await this.enqueue(storedRequestSchema.parse(JSON.parse(record.payload)));
       }
     });
   }
@@ -630,9 +663,10 @@ export class ConversationAgent extends Agent<Env> {
     const lastRequest = this.rows<{ payload: string }>(
       'SELECT payload FROM app_requests WHERE accepted<>-1 ORDER BY rowid DESC LIMIT 1',
     )[0];
-    const previousRequest = lastRequest ? JSON.parse(lastRequest.payload) : undefined;
-    const previous = (previousRequest?.config ?? previousRequest?.execution) as
-      ModelSelection | undefined;
+    const previousRequest = lastRequest
+      ? storedRequestSchema.parse(JSON.parse(lastRequest.payload))
+      : undefined;
+    const previous = previousRequest?.execution as ModelSelection | undefined;
     // A removed model/effort falls back for the next message, without rewriting earlier requests.
     const option = modelCatalog.models.find((m) => m.id === previous?.modelId);
     const selection =
