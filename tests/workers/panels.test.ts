@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { it, expect } from 'vitest';
 async function generate(stub: ReturnType<typeof env.CONVERSATIONS.getByName>) {
   await stub.submitRun({ runId: crypto.randomUUID(), text: 'panel' });
@@ -17,23 +17,69 @@ it('publishes from committed tools, preserves raw input and rejects conflicting 
     .find((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui' && !m.isError);
   expect(tool).toBeDefined();
   const ref = tool.details.ref;
-  const loaded = JSON.parse(await stub.loadPanel(ref));
-  expect(loaded.program.data).toEqual({ factor: 2 });
+  const loaded = JSON.parse(await stub.loadResource('openui', ref));
+  expect(loaded.data.program.data).toEqual({ factor: 2 });
   expect(loaded.revision).toBe(0);
-  expect(await stub.savePanelState(ref, { $cost: '' }, 0)).toMatchObject({ revision: 1 });
-  expect(await stub.savePanelState(ref, { $cost: '120' }, 0)).toMatchObject({
+  const unrelated = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  expect(JSON.parse(await unrelated.loadResource('openui', ref))).toMatchObject({
+    error: { status: 404 },
+  });
+  expect(JSON.parse(await stub.loadResource('unknown', ref))).toMatchObject({
+    error: { status: 404 },
+  });
+  expect(await stub.saveResourceState('openui', ref, {}, -1)).toMatchObject({
+    error: { code: 'invalid_revision' },
+  });
+  expect(
+    await stub.saveResourceState('openui', ref, { value: 'x'.repeat(1048576) }, 0),
+  ).toMatchObject({ error: { code: 'invalid_state' } });
+  expect(await stub.saveResourceState('openui', ref, null, 0)).toMatchObject({
+    error: { code: 'invalid_state' },
+  });
+  expect(await stub.saveResourceState('openui', ref, { $cost: '' }, 0)).toMatchObject({
+    revision: 1,
+  });
+  expect(await stub.saveResourceState('openui', ref, { $cost: '120' }, 0)).toMatchObject({
     error: { status: 409 },
   });
-  expect(JSON.parse(await stub.loadPanel(ref)).state).toEqual({ $cost: '' });
-  expect(await stub.savePanelState(ref, { $cost: '1.' }, 1)).toMatchObject({ revision: 2 });
+  expect(JSON.parse(await stub.loadResource('openui', ref)).state).toEqual({ $cost: '' });
+  expect(await stub.saveResourceState('openui', ref, { $cost: '1.' }, 1)).toMatchObject({
+    revision: 2,
+  });
   const next = await generate(stub);
   const tools = next.entries
     .flatMap((e: any) => e.model ?? [])
     .filter((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui' && !m.isError);
   const newRef = tools.at(-1).details.ref;
   expect(newRef).not.toBe(ref);
-  expect(JSON.parse(await stub.loadPanel(newRef)).revision).toBe(0);
-  expect(JSON.parse(await stub.loadPanel(ref)).state).toEqual({ $cost: '1.' });
+  expect(JSON.parse(await stub.loadResource('openui', newRef)).revision).toBe(0);
+  expect(JSON.parse(await stub.loadResource('openui', ref)).state).toEqual({ $cost: '1.' });
+});
+it('generic resources require an enabled handler and explicit state validation', async () => {
+  const target = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  await runInDurableObject(target, async (instance) => {
+    const base = await (instance as any).contributions();
+    (instance as any).contributions = async () => [
+      ...base,
+      {
+        id: 'read-only',
+        resources: { read: async () => ({ data: { text: 'read' }, initialState: {} }) },
+      },
+    ];
+    expect(JSON.parse(await instance.loadResource('read-only', 'resource'))).toEqual({
+      ref: 'resource',
+      data: { text: 'read' },
+      state: {},
+      revision: 0,
+    });
+    expect(await instance.saveResourceState('read-only', 'resource', {}, 0)).toMatchObject({
+      error: { status: 405 },
+    });
+    (instance as any).contributions = async () => base;
+    expect(JSON.parse(await instance.loadResource('read-only', 'resource'))).toMatchObject({
+      error: { status: 404 },
+    });
+  });
 });
 it('refuses a source panel from another chat or an unpublished call', async () => {
   const target = env.CONVERSATIONS.getByName(crypto.randomUUID());

@@ -24,7 +24,7 @@ import { toMessages } from '../shared/stream';
 import type { RunCommand } from '../shared/contracts';
 import { AttachAgent, partialUI, StreamReplaced } from './transport';
 import { Panel } from './Panel';
-import { PanelDrafts } from './PanelDrafts';
+import { ResourceDrafts } from './ResourceDrafts';
 import { request, ApiError } from './api';
 import { useQuery } from '@tanstack/react-query';
 import { userKeys } from './queries';
@@ -426,7 +426,7 @@ export function Chat({
     </div>
   );
   return (
-    <PanelDrafts>
+    <ResourceDrafts>
       <div className="chat flex min-h-0 flex-1 flex-col">
         {snapshot ? (
           <Runtime
@@ -449,7 +449,7 @@ export function Chat({
           </>
         )}
       </div>
-    </PanelDrafts>
+    </ResourceDrafts>
   );
 }
 function Runtime({
@@ -530,7 +530,7 @@ function Runtime({
   }, [runtime, history, activeRunId, restoration]);
   return (
     <AssistantRuntimeProvider runtime={runtime} config={extensions.config}>
-      <ChatContext value={{ id, submit }}>
+      <ChatContext value={{ id, userId, submit }}>
         <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
           <ThreadPrimitive.Viewport
             data-slot="chat-viewport"
@@ -574,10 +574,11 @@ function Runtime({
 
 const ChatContext = createContext<{
   id: string;
+  userId: string;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
 } | null>(null);
 function Tool(part: ToolCallMessagePartProps) {
-  const { id, submit } = useContext(ChatContext)!;
+  const { id, userId, submit } = useContext(ChatContext)!;
   if (part.toolName === 'prepare_program') return null;
   if (part.toolName === 'present_openui') {
     const preview =
@@ -600,6 +601,7 @@ function Tool(part: ToolCallMessagePartProps) {
           <Panel
             key={panelRef ?? part.toolCallId}
             conversationId={id}
+            userId={userId}
             panelRef={panelRef}
             preview={preview}
             submit={submit}

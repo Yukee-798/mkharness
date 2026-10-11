@@ -66,8 +66,8 @@ it('isolates listing and every resource operation using real Better Auth session
     ['runs', 'POST'],
     ['runs/abc/events', 'GET'],
     ['stop', 'POST'],
-    ['panels/1.call', 'GET'],
-    ['panels/1.call/state', 'PATCH'],
+    ['extensions/openui/resources/1.call', 'GET'],
+    ['extensions/openui/resources/1.call/state', 'PATCH'],
   ]) {
     const response = await app.request(
       'http://localhost:5173/api/conversations/' + id + '/' + path,
@@ -94,7 +94,7 @@ it('validates malformed and oversized input bodies before invoking Pi', async ()
   );
   const { id } = (await created.json()) as any;
   const bad = await app.request(
-    `http://localhost:5173/api/conversations/${id}/panels/1.call/state`,
+    `http://localhost:5173/api/conversations/${id}/extensions/openui/resources/1.call/state`,
     { method: 'PATCH', headers, body: '{' },
     env,
   );

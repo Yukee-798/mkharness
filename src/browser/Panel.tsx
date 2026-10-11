@@ -15,8 +15,8 @@ import type { RawState, RunCommand } from '../shared/contracts';
 import { actionParams, externalURL, UI_ACTIONS } from '../shared/ui-actions';
 import { computeProgram } from './compute';
 import { request } from './api';
-import { type PanelDraft, type SaveStatus } from './draft';
-import { usePanelDrafts } from './PanelDrafts';
+import { type ResourceDraft, type SaveStatus } from './draft';
+import { useResourceDrafts } from './ResourceDrafts';
 import { Button } from './ui/button';
 export type PanelBundle = {
   panelRef: string;
@@ -27,11 +27,13 @@ export type PanelBundle = {
 };
 export function Panel({
   conversationId,
+  userId = '',
   panelRef,
   preview,
   submit,
 }: {
   conversationId: string;
+  userId?: string;
   panelRef?: string;
   preview?: string;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
@@ -40,8 +42,8 @@ export function Panel({
     [error, setError] = useState(''),
     [status, setStatus] = useState<SaveStatus>('saved'),
     [guardTick, setGuardTick] = useState(0);
-  const [draft, setDraft] = useState<PanelDraft>();
-  const drafts = usePanelDrafts();
+  const [draft, setDraft] = useState<ResourceDraft>();
+  const drafts = useResourceDrafts();
   const state = useRef<RawState>({}),
     epoch = useRef(0),
     userEvent = useRef(false),
@@ -55,19 +57,24 @@ export function Panel({
   useEffect(() => {
     if (!panelRef) return;
     const controller = new AbortController();
-    void request<PanelBundle>(
-      `/conversations/${conversationId}/panels/${encodeURIComponent(panelRef)}`,
+    void request<{
+      ref: string;
+      data: Pick<PanelBundle, 'ui' | 'program'>;
+      state: RawState;
+      revision: number;
+    }>(
+      `/conversations/${conversationId}/extensions/openui/resources/${encodeURIComponent(panelRef)}`,
       { signal: controller.signal },
     )
       .then((value) => {
         if (controller.signal.aborted) return;
         const entry = drafts.open(
-          `${conversationId}/${panelRef}`,
+          [userId, conversationId, 'openui', panelRef],
           value.state ?? {},
           value.revision,
           async (raw, revision) => {
             const result = await request<{ revision: number }>(
-              `/conversations/${conversationId}/panels/${encodeURIComponent(panelRef)}/state`,
+              `/conversations/${conversationId}/extensions/openui/resources/${encodeURIComponent(panelRef)}/state`,
               { method: 'PATCH', body: JSON.stringify({ state: raw, expectedRevision: revision }) },
             );
             return result.revision;
@@ -75,13 +82,18 @@ export function Panel({
         );
         state.current = entry.saver.current();
         setDraft(entry);
-        setBundle({ ...value, state: state.current });
+        setBundle({
+          ...value.data,
+          panelRef: value.ref,
+          revision: value.revision,
+          state: state.current,
+        });
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [conversationId, panelRef, drafts]);
+  }, [userId, conversationId, panelRef, drafts]);
   const saver = draft?.saver;
   useEffect(() => draft?.subscribe(setStatus), [draft]);
   const guard = useMemo<PanelGuard>(

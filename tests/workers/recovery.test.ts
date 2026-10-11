@@ -98,7 +98,7 @@ it('safe-replays a publish interrupted before tool-result commit without duplica
     .flatMap((e: any) => e.model ?? [])
     .filter((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui' && !m.isError);
   expect(panels).toHaveLength(1);
-  expect(JSON.parse(await target.loadPanel(panels[0].details.ref)).ui).toContain(
+  expect(JSON.parse(await target.loadResource('openui', panels[0].details.ref)).data.ui).toContain(
     'Interactive example',
   );
 });
@@ -111,8 +111,8 @@ it('resolves an old panel through the public full-history API after actual Pi co
     .find((m: any) => m.role === 'toolResult' && m.toolName === 'present_openui');
   const ref = panel.details.ref;
   const writes = await Promise.all([
-    target.savePanelState(ref, { $cost: '' }, 0),
-    target.savePanelState(ref, { $cost: '1.' }, 0),
+    target.saveResourceState('openui', ref, { $cost: '' }, 0),
+    target.saveResourceState('openui', ref, { $cost: '1.' }, 0),
   ]);
   expect(writes.filter((w) => 'revision' in w)).toHaveLength(1);
   expect(writes.filter((w) => 'error' in w)).toHaveLength(1);
@@ -127,5 +127,7 @@ it('resolves an old panel through the public full-history API after actual Pi co
   });
   const final = await idle(target);
   expect(final.entries.some((e: any) => e.kind === 'pi.compaction')).toBe(true);
-  expect(JSON.parse(await target.loadPanel(ref)).program.data).toEqual({ factor: 2 });
+  expect(JSON.parse(await target.loadResource('openui', ref)).data.program.data).toEqual({
+    factor: 2,
+  });
 });

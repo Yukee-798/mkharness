@@ -60,27 +60,28 @@ export function createDraftSaver(
     },
   };
 }
-export type PanelDraft = {
+export type ResourceDraft = {
   saver: ReturnType<typeof createDraftSaver>;
   status: SaveStatus;
   subscribe: (listener: (status: SaveStatus) => void) => () => void;
 };
 // UI memory lives above chat/runtime replacement. Pi tools remain the only source
 // for the immutable UI/program; this cache owns raw edits and their pending save.
-export function createPanelDrafts() {
-  const drafts = new Map<string, PanelDraft>();
+export function createResourceDrafts() {
+  const drafts = new Map<string, ResourceDraft>();
   return {
     open(
-      key: string,
+      scope: readonly [userId: string, conversationId: string, extensionId: string, ref: string],
       state: RawState,
       revision: number,
       save: (state: RawState, revision: number) => Promise<number>,
     ) {
+      const key = JSON.stringify(scope);
       const previous = drafts.get(key);
       if (previous?.saver.dirty()) return previous;
       previous?.saver.dispose();
       const listeners = new Set<(status: SaveStatus) => void>();
-      const draft: PanelDraft = {
+      const draft: ResourceDraft = {
         status: 'saved',
         saver: createDraftSaver(
           save,
@@ -102,9 +103,10 @@ export function createPanelDrafts() {
       drafts.set(key, draft);
       return draft;
     },
-    removeConversation(id: string) {
+    removeConversation(id: string, userId?: string) {
       for (const [key, draft] of drafts) {
-        if (key.startsWith(id + '/')) {
+        const scope = JSON.parse(key) as string[];
+        if (scope[1] === id && (userId === undefined || scope[0] === userId)) {
           draft.saver.dispose();
           drafts.delete(key);
         }

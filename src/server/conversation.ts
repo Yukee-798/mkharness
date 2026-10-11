@@ -13,7 +13,8 @@ import {
 import type { Models } from '@earendil-works/pi-ai/models';
 import { AppError, commandSchema, USER_ACTION_CONTEXT, type RunCommand } from '../shared/contracts';
 import { jsonText, canonicalJson } from '../shared/compute';
-import { applicationExtensions } from './assembly';
+import { applicationContributions } from './assembly';
+import type { ServerContribution } from './contributions';
 import {
   MCPBindings,
   buildMcp,
@@ -31,8 +32,7 @@ import {
   type RemoteConfig,
 } from './remote-example';
 import { validateExtensions } from './extensions';
-import { withRunLimits, toolBudget } from './limits';
-import { validateUI } from './panel-tools';
+import { withRunLimits, runLimits, toolBudget } from './limits';
 import { successfulTool } from '../shared/references';
 import { observeRun } from './observe';
 import { browserEntries } from '../shared/stream';
@@ -78,6 +78,7 @@ export class ConversationAgent extends Agent<Env> {
   private deletionId?: string;
   private mcpPrepared?: Awaited<ReturnType<typeof buildMcp>>;
   private deleteWork?: Promise<void>;
+  private contributionSet?: Promise<readonly ServerContribution[]>;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     configureMcpStartup(
@@ -259,10 +260,19 @@ export class ConversationAgent extends Agent<Env> {
   protected remoteConfiguration(): RemoteConfig | undefined {
     return remoteConfiguration(this.env as unknown as Record<string, unknown>);
   }
+  protected contributions(): Promise<readonly ServerContribution[]> {
+    return (this.contributionSet ??= applicationContributions(this.env, () => this.allEntries()));
+  }
   protected async extensions(): Promise<Extension[]> {
     const remote = this.remoteConfiguration();
     return [
-      ...(await applicationExtensions(this.env, () => this.allEntries())),
+      runLimits(
+        () => this.allEntries(),
+        toolBudget(this.env as unknown as Record<string, unknown>),
+      ),
+      ...(await this.contributions()).flatMap((contribution) =>
+        contribution.extension ? [contribution.extension] : [],
+      ),
       ...(this.mcpPrepared ? [this.mcpPrepared.extension] : []),
       ...(remote
         ? [
@@ -497,45 +507,62 @@ export class ConversationAgent extends Agent<Env> {
       this.stopWork = undefined;
     }));
   }
-  async loadPanel(ref: string): Promise<string> {
-    if (this.deleting) return JSON.stringify({ error: { status: 404, code: 'not_found' } });
-    const entries = await this.allEntries(),
-      panel = successfulTool(entries, ref, 'present_openui');
-    if (!panel) return JSON.stringify({ error: { status: 404, code: 'panel_not_found' } });
-    const programRef = panel.args.programRef;
-    const program =
-      typeof programRef === 'string'
-        ? successfulTool(entries, programRef, 'prepare_program')
-        : undefined;
-    if (programRef && !program)
-      return JSON.stringify({ error: { status: 409, code: 'program_not_recoverable' } });
-    const saved = this.rows<{ state: string; revision: number }>(
-      'SELECT state,revision FROM app_inputs WHERE ref=?',
-      ref,
-    )[0];
-    return JSON.stringify({
-      panelRef: ref,
-      ui: panel.args.ui,
-      program: program ? { code: program.args.code, data: program.args.data } : null,
-      state: saved
-        ? JSON.parse(saved.state)
-        : (await validateUI(String(panel.args.ui), !!program)).stateDeclarations,
-      revision: saved?.revision ?? 0,
-    });
+  private async resource(extensionId: string, ref: string) {
+    if (this.deleting) throw new AppError(404, 'not_found');
+    const handler = (await this.contributions()).find(
+      (contribution) => contribution.id === extensionId,
+    )?.resources;
+    if (!handler) throw new AppError(404, 'resource_not_found');
+    const value = await handler.read(ref, { entries: () => this.allEntries() });
+    jsonText(value);
+    return { handler, value, key: JSON.stringify([extensionId, ref]) };
   }
-  async savePanelState(
+  async loadResource(extensionId: string, ref: string): Promise<string> {
+    try {
+      const { value, key } = await this.resource(extensionId, ref);
+      const saved = this.rows<{ state: string; revision: number }>(
+        'SELECT state,revision FROM app_inputs WHERE ref=?',
+        key,
+      )[0];
+      return JSON.stringify({
+        ref,
+        data: value.data,
+        state: saved ? JSON.parse(saved.state) : value.initialState,
+        revision: saved?.revision ?? 0,
+      });
+    } catch (error) {
+      if (error instanceof AppError)
+        return JSON.stringify({ error: { status: error.status, code: error.code } });
+      throw error;
+    }
+  }
+  async saveResourceState(
+    extensionId: string,
     ref: string,
-    state: Record<string, unknown>,
+    state: unknown,
     expectedRevision: number,
   ): Promise<{ revision: number } | { error: { status: number; code: string } }> {
-    const panel = JSON.parse(await this.loadPanel(ref));
-    if (panel.error) return panel;
-    if (this.deleting) return { error: { status: 404, code: 'not_found' } };
+    try {
+      return await this.writeResourceState(extensionId, ref, state, expectedRevision);
+    } catch (error) {
+      if (error instanceof AppError) return { error: { status: error.status, code: error.code } };
+      throw error;
+    }
+  }
+  private async writeResourceState(
+    extensionId: string,
+    ref: string,
+    state: unknown,
+    expectedRevision: number,
+  ) {
+    const { handler, key } = await this.resource(extensionId, ref);
+    if (this.deleting) throw new AppError(404, 'not_found');
+    if (!handler.validateState) throw new AppError(405, 'resource_read_only');
     let text: string;
     try {
-      text = jsonText(state);
+      text = jsonText(handler.validateState(state));
     } catch {
-      return { error: { status: 400, code: 'invalid_state' } };
+      throw new AppError(400, 'invalid_state');
     }
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
       return { error: { status: 400, code: 'invalid_revision' } };
@@ -544,7 +571,7 @@ export class ConversationAgent extends Agent<Env> {
         'UPDATE app_inputs SET state=?,revision=revision+1,updated=? WHERE ref=? AND revision=? RETURNING revision',
         text,
         Date.now(),
-        ref,
+        key,
         expectedRevision,
       )
       .toArray()[0];
@@ -552,7 +579,7 @@ export class ConversationAgent extends Agent<Env> {
       result = this.ctx.storage.sql
         .exec(
           'INSERT INTO app_inputs(ref,state,revision,updated)VALUES(?,?,1,?) ON CONFLICT(ref) DO NOTHING RETURNING revision',
-          ref,
+          key,
           text,
           Date.now(),
         )

@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { directoryOptions, userKeys } from './queries';
 import { request } from './api';
 import { Button } from './ui/button';
-import { PanelDrafts } from './PanelDrafts';
+import { ResourceDrafts } from './ResourceDrafts';
 import { ConversationActions } from './ConversationActions';
 import { AppShell } from './AppShell';
 import { MessageSquare, Plus, LogIn, LogOut, ArrowRight, ChevronsUpDown } from 'lucide-react';
@@ -260,7 +260,7 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
     </div>
   );
   return (
-    <PanelDrafts>
+    <ResourceDrafts>
       <AppShell
         menu={menu}
         onMenuChange={setMenu}
@@ -306,7 +306,7 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
           </div>
         )}
       </AppShell>
-    </PanelDrafts>
+    </ResourceDrafts>
   );
 }
 

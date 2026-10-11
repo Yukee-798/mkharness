@@ -3,12 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { auth } from './auth';
 import { boundedText } from './web';
 import { extensionIds } from '../extensions/server';
-import {
-  AppError,
-  commandSchema,
-  conversationTitleSchema,
-  type RawState,
-} from '../shared/contracts';
+import { AppError, commandSchema, conversationTitleSchema } from '../shared/contracts';
 const app = new Hono<{ Bindings: Env; Variables: { userId: string; conversationId: string } }>();
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'private, no-store');
@@ -132,14 +127,17 @@ app.get('/api/conversations/:id/runs/:runId/events', (c) =>
 app.post('/api/conversations/:id/stop', async (c) =>
   c.json(await c.env.CONVERSATIONS.getByName(c.get('conversationId')).stopConversation(), 202),
 );
-app.get('/api/conversations/:id/panels/:ref', async (c) => {
+app.get('/api/conversations/:id/extensions/:extensionId/resources/:ref', async (c) => {
   const reply = JSON.parse(
-    await c.env.CONVERSATIONS.getByName(c.get('conversationId')).loadPanel(c.req.param('ref')),
+    await c.env.CONVERSATIONS.getByName(c.get('conversationId')).loadResource(
+      c.req.param('extensionId'),
+      c.req.param('ref'),
+    ),
   );
   return c.json(reply, reply.error?.status ?? 200);
 });
-app.patch('/api/conversations/:id/panels/:ref/state', async (c) => {
-  let body: { state?: RawState; expectedRevision: number };
+app.patch('/api/conversations/:id/extensions/:extensionId/resources/:ref/state', async (c) => {
+  let body: { state?: unknown; expectedRevision: number };
   let raw: string;
   try {
     raw = await boundedText(new Response(c.req.raw.body, { headers: c.req.raw.headers }), 1048576);
@@ -151,9 +149,9 @@ app.patch('/api/conversations/:id/panels/:ref/state', async (c) => {
   } catch {
     throw new AppError(400, 'invalid_json');
   }
-  if (!body?.state || typeof body.state !== 'object' || Array.isArray(body.state))
-    throw new AppError(400, 'invalid_state');
-  const reply = await c.env.CONVERSATIONS.getByName(c.get('conversationId')).savePanelState(
+  if (!body || !Object.hasOwn(body, 'state')) throw new AppError(400, 'invalid_state');
+  const reply = await c.env.CONVERSATIONS.getByName(c.get('conversationId')).saveResourceState(
+    c.req.param('extensionId'),
     c.req.param('ref'),
     body.state,
     body.expectedRevision,

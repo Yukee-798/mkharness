@@ -1,5 +1,5 @@
 import { it, expect, vi } from 'vitest';
-import { createDraftSaver, createPanelDrafts, type SaveStatus } from '../../src/browser/draft';
+import { createDraftSaver, createResourceDrafts, type SaveStatus } from '../../src/browser/draft';
 it('serializes saves, coalesces edits and uses acknowledged revisions without replacing raw drafts', async () => {
   vi.useFakeTimers();
   const calls: { state: unknown; revision: number }[] = [];
@@ -78,18 +78,20 @@ it('retries a transient save using the current draft and last acknowledged revis
 
 it('deleting a chat cancels only its pending panel saves and discards its dirty drafts', async () => {
   vi.useFakeTimers();
-  const drafts = createPanelDrafts();
+  const drafts = createResourceDrafts();
   const save = vi.fn(async (_state, revision: number) => revision + 1);
-  const removed = drafts.open('a/panel', {}, 0, save);
-  const retained = drafts.open('ab/panel', {}, 0, save);
+  const removed = drafts.open(['user', 'a', 'openui', 'panel'], {}, 0, save);
+  const retained = drafts.open(['user', 'ab', 'openui', 'panel'], {}, 0, save);
   try {
     removed.saver.update({ $n: '12.' });
     retained.saver.update({ $n: '' });
     drafts.removeConversation('a');
-    expect(drafts.open('a/panel', { $n: 'fresh' }, 0, save).saver.current()).toEqual({
+    expect(
+      drafts.open(['user', 'a', 'openui', 'panel'], { $n: 'fresh' }, 0, save).saver.current(),
+    ).toEqual({
       $n: 'fresh',
     });
-    expect(drafts.open('ab/panel', {}, 0, save)).toBe(retained);
+    expect(drafts.open(['user', 'ab', 'openui', 'panel'], {}, 0, save)).toBe(retained);
     await vi.advanceTimersByTimeAsync(500);
     expect(save.mock.calls).toEqual([[{ $n: '' }, 0]]);
   } finally {

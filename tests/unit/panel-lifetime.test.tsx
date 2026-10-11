@@ -29,9 +29,14 @@ it('keeps computation alive on a non-editing click and isolates late results aft
             init?.method === 'PATCH'
               ? (saved.push(JSON.parse(init.body)), { revision: saved.length })
               : {
-                  panelRef: '2.same',
-                  ui,
-                  program: { code: 'unused', data: String(url).includes('/one/') ? 'one' : 'two' },
+                  ref: '2.same',
+                  data: {
+                    ui,
+                    program: {
+                      code: 'unused',
+                      data: String(url).includes('/one/') ? 'one' : 'two',
+                    },
+                  },
                   revision: 0,
                 },
           ),

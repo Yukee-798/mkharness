@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { request, ApiError } from './api';
-import { usePanelDrafts } from './PanelDrafts';
+import { useResourceDrafts } from './ResourceDrafts';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Alert, AlertDescription } from './ui/alert';
@@ -46,7 +46,7 @@ export function ConversationActions({
   const [name, setName] = useState(title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const drafts = usePanelDrafts();
+  const drafts = useResourceDrafts();
   const deleted = () => {
     drafts.removeConversation(id);
     setDeleteOpen(false);
