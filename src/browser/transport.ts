@@ -8,15 +8,10 @@ import {
   type ToolCallResultEvent,
 } from '@ag-ui/core';
 import { Observable } from 'rxjs';
-import { parsePartialJsonObject } from 'assistant-stream/utils';
 import type { RemoteProgress } from '../shared/remote-progress';
 import { aliasMessages, messageAliases } from '../shared/stream';
 import type { ToolProgressMap } from '../shared/tool-progress';
 export class StreamReplaced extends Error {}
-export function partialUI(argsText: string) {
-  const value = parsePartialJsonObject(argsText);
-  return typeof value?.ui === 'string' ? value.ui : undefined;
-}
 /** The only run path is GET attach. HTTP submission belongs to the composer. */
 export class AttachAgent extends AbstractAgent {
   constructor(

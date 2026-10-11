@@ -27,6 +27,6 @@ export function useExtensionConfig(userId: string) {
       {},
       ...(loaded.data?.modules ?? []).map((module) => module.activity),
     );
-    return { config: AuiConfig({ tools: Tools({ toolkit }) }), activity };
+    return { config: AuiConfig({ tools: Tools({ toolkit }) }), toolkit, activity };
   }, [loaded.data]);
 }

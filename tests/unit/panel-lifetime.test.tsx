@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor, fireEvent, act, cleanup } from '@testing-library/react';
-import { Panel } from '../../src/browser/Panel';
+import { Panel } from '../../src/extensions/openui/Panel';
 const pending = vi.hoisted(
   () => [] as { id: string; inputs: any; resolve: (value: any) => void }[],
 );

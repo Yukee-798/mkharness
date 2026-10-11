@@ -2,7 +2,6 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import stylesheet from '../browser/styles.css?url';
-import openUIStylesheet from '@openuidev/react-ui/index.css?url';
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
@@ -11,10 +10,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       { title: 'Agent UI' },
     ],
-    links: [
-      { rel: 'stylesheet', href: openUIStylesheet },
-      { rel: 'stylesheet', href: stylesheet },
-    ],
+    links: [{ rel: 'stylesheet', href: stylesheet }],
   }),
   component: Outlet,
   shellComponent: RootDocument,

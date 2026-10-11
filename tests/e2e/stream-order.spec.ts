@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { resource } from './fixtures';
+import { test, expect } from './fixtures';
 import { toMessages } from '../../src/shared/stream';
 
 for (const answer of ['text', 'openui'] as const) {
@@ -106,10 +107,14 @@ for (const answer of ['text', 'openui'] as const) {
     try {
       await page.route('**/api/conversations/**', (route) => {
         const url = route.request().url();
+        if (url.endsWith('/capabilities'))
+          return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
         if (url.endsWith('/events'))
           return route.continue({ url: `http://127.0.0.1:${port}/events` });
-        if (url.includes('/panels/'))
-          return route.fulfill({ json: { panelRef: '2.ui', ui, program: null, revision: 0 } });
+        if (url.includes('/extensions/openui/resources/'))
+          return route.fulfill({
+            json: resource({ panelRef: '2.ui', ui, program: null, revision: 0 }),
+          });
         return route.fulfill({
           json: {
             entries: committed ? entries : [],

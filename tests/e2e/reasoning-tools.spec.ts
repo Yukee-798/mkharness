@@ -1,4 +1,4 @@
-import { test, expect, type Locator } from '@playwright/test';
+import { test, expect, type Locator } from './fixtures';
 
 async function expectShimmer(label: Locator) {
   await expect(label).toBeVisible();
@@ -139,10 +139,7 @@ test('collapsed reasoning, tool groups and single tools share spacing across Pi 
     assistant(2, [thinking, call('three'), call('hidden', 'prepare_program')]),
     assistant(3, [thinking]),
     // Internal publication messages must not leave empty spacing between traces.
-    assistant(4, [
-      { type: 'text', text: 'Preparing a computation program.' },
-      call('hidden-again', 'prepare_program'),
-    ]),
+    assistant(4, [call('hidden-again', 'prepare_program')]),
     assistant(5, [thinking]),
     assistant(6, [{ type: 'text', text: '这是最终结论。' }]),
   ];
@@ -150,6 +147,9 @@ test('collapsed reasoning, tool groups and single tools share spacing across Pi 
     route.fulfill({ json: { entries, pending: [], stopping: false } }),
   );
   await page.goto('/tests/browser/chat.html');
+  await expect(
+    page.getByRole('button', { name: '等待处理 · example.com', exact: true }),
+  ).toHaveCount(3);
   const group = page.getByRole('button', { name: '已调用 2 个工具', exact: true });
   await group.click();
   await expect(group).toHaveAttribute('aria-expanded', 'false');

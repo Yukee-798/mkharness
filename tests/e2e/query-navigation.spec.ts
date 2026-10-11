@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 async function returnToPage(page: import('@playwright/test').Page) {
   await page.evaluate(() => {
@@ -26,6 +26,8 @@ test('idle read refresh adopts new history and attaches externally started work 
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route('**/api/conversations/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/capabilities'))
+      return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
     if (path.endsWith('/snapshot')) {
       snapshots++;
       return route.fulfill({ json: { entries, pending, stopping: false } });
@@ -73,6 +75,8 @@ test('cached idle chat adopts fresh history when revisited without submitting or
     submissions = 0;
   await page.route('**/api/conversations/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/capabilities'))
+      return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
     if (path.endsWith('/snapshot'))
       return route.fulfill({
         json: { entries: path.includes('/a/') ? entries : [], pending: [], stopping: false },
@@ -101,6 +105,8 @@ test('focus refetches reads without replacing the active stream or draft', async
   const held = new Promise<void>((resolve) => (finish = resolve));
   await page.route('**/api/conversations/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/capabilities'))
+      return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
     if (path.endsWith('/snapshot')) {
       snapshots++;
       return route.fulfill({

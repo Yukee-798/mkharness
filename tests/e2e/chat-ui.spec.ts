@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test('generation diagnostics stay internal while a terminal failure uses product language', async ({
   page,

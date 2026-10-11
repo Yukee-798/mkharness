@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { resource } from './fixtures';
+import { test, expect } from './fixtures';
 
 for (const conflict of [false, true])
   test(`a chat runtime refresh retains ${conflict ? 'a conflicted' : 'an unsaved'} raw panel draft`, async ({
@@ -33,6 +34,8 @@ for (const conflict of [false, true])
       snapshots = 0;
     await page.route('**/api/conversations/**', async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/capabilities'))
+        return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
       if (path.endsWith('/state')) {
         const body = route.request().postDataJSON();
         patches.push(body);
@@ -41,9 +44,9 @@ for (const conflict of [false, true])
         saved = body.state;
         return route.fulfill({ json: { revision: ++revision } });
       }
-      if (path.includes('/panels/'))
+      if (path.includes('/extensions/openui/resources/'))
         return route.fulfill({
-          json: { panelRef: '2.call', ui, program: null, state: saved, revision },
+          json: resource({ panelRef: '2.call', ui, program: null, state: saved, revision }),
         });
       if (path.endsWith('/snapshot')) {
         snapshots++;
@@ -72,12 +75,12 @@ test('delayed native slider edits each restart the automatic writeback budget', 
 }) => {
   const ui =
     '$amount=[1]\n$target=""\nresult=Query("run_program",{n:$amount},{next:"",ready:false})\nroot=Stack([Slider("amount","continuous",0,100,1,[1],"Amount",null,$amount),Input("target","Target","text",null,$target),StateSync($target,result.next,result.ready,{result:result,inputs:{n:$amount}})])';
-  await page.route('**/api/conversations/test/panels/**', (route) =>
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', (route) =>
     route.fulfill({
       json:
         route.request().method() === 'PATCH'
           ? { revision: 1 }
-          : {
+          : resource({
               panelRef: '2.same',
               ui,
               program: {
@@ -85,7 +88,7 @@ test('delayed native slider edits each restart the automatic writeback budget', 
                 data: null,
               },
               revision: 0,
-            },
+            }),
     }),
   );
   await page.goto('/tests/browser/panel.html');
@@ -115,8 +118,8 @@ test('a historical invalid slider is contained without crashing the chat', async
   const ui = 'root=Stack([Slider("x","discrete",0,10,0,[0],"Budget")])';
   await page.route('**/api/conversations/**', (route) =>
     route.fulfill({
-      json: route.request().url().includes('/panels/')
-        ? { panelRef: '2.call', ui, program: null, revision: 0 }
+      json: route.request().url().includes('/extensions/openui/resources/')
+        ? resource({ panelRef: '2.call', ui, program: null, revision: 0 })
         : {
             entries: [
               {
@@ -183,12 +186,16 @@ test('a native slider flush during runtime replacement preserves its committed b
   ];
   await page.route('**/api/conversations/**', (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/capabilities'))
+      return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
     if (path.endsWith('/state')) {
       state = route.request().postDataJSON().state;
       return route.fulfill({ json: { revision: ++revision } });
     }
-    if (path.includes('/panels/'))
-      return route.fulfill({ json: { panelRef: '2.call', ui, program: null, state, revision } });
+    if (path.includes('/extensions/openui/resources/'))
+      return route.fulfill({
+        json: resource({ panelRef: '2.call', ui, program: null, state, revision }),
+      });
     if (path.endsWith('/snapshot'))
       return route.fulfill({ json: { entries, pending: [], stopping: false } });
     return route.fulfill({ status: 202, json: { accepted: true } });

@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { resource } from './fixtures';
+import { test, expect } from './fixtures';
 
 for (const replaced of [false, true])
   test(`${replaced ? 'replacing the stream' : 'finishing an answer'} refreshes history without replacing the viewport, panel or composer`, async ({
@@ -49,9 +50,13 @@ for (const replaced of [false, true])
     const resumed = new Promise<void>((resolve) => (finishResumed = resolve));
     await page.route('**/api/conversations/**', async (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/capabilities'))
+        return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
       if (path.endsWith('/state')) return route.fulfill({ json: { revision: 1 } });
-      if (path.includes('/panels/'))
-        return route.fulfill({ json: { panelRef: '2.call', ui, program: null, revision: 0 } });
+      if (path.includes('/extensions/openui/resources/'))
+        return route.fulfill({
+          json: resource({ panelRef: '2.call', ui, program: null, revision: 0 }),
+        });
       if (path.endsWith('/snapshot')) {
         snapshots++;
         if (snapshots > 1) await refreshed;

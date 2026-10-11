@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { externalURL, actionParams } from '../../src/shared/ui-actions';
+import { externalURL, actionParams } from '../../src/extensions/openui/contracts';
 
 it('normalizes complete HTTP and HTTPS links without weakening the protocol boundary', () => {
   expect(externalURL('HTTPS://EXAMPLE.COM:443/watch?q=food#part')).toBe(

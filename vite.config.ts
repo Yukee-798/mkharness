@@ -17,7 +17,7 @@ export default defineConfig({
         ? {}
         : {
             '@openuidev/devtools': fileURLToPath(
-              new URL('./src/browser/openui-devtools.ts', import.meta.url),
+              new URL('./src/extensions/openui/devtools.ts', import.meta.url),
             ),
           }),
     },

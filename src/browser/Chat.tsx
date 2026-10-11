@@ -1,12 +1,5 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useRef,
-  createContext,
-  useContext,
-  type ReactNode,
-} from 'react';
+import { ExtensionContext, useExtensionContext } from './extension-context';
+import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -22,8 +15,7 @@ import { useAgUiRuntime, fromAgUiMessages } from '@assistant-ui/react-ag-ui';
 import type { EntryRecord } from '@earendil-works/pi-durable';
 import { toMessages } from '../shared/stream';
 import type { RunCommand } from '../shared/contracts';
-import { AttachAgent, partialUI, StreamReplaced } from './transport';
-import { Panel } from './Panel';
+import { AttachAgent, StreamReplaced } from './transport';
 import { ResourceDrafts } from './ResourceDrafts';
 import { request, ApiError } from './api';
 import { useQuery } from '@tanstack/react-query';
@@ -540,7 +532,9 @@ function Runtime({
   return (
     <AssistantRuntimeProvider runtime={runtime} config={extensions.config}>
       <ToolProgressContext value={activeRunId ? toolProgress : (snapshot.toolProgress ?? {})}>
-        <ChatContext value={{ id, userId, submit }}>
+        <ExtensionContext
+          value={{ id, userId, submit, activity: extensions.activity, toolkit: extensions.toolkit }}
+        >
           <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
             <ThreadPrimitive.Viewport
               data-slot="chat-viewport"
@@ -580,122 +574,52 @@ function Runtime({
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Viewport>
           </ThreadPrimitive.Root>
-        </ChatContext>
+        </ExtensionContext>
       </ToolProgressContext>
     </AssistantRuntimeProvider>
   );
 }
 
-const ChatContext = createContext<{
-  id: string;
-  userId: string;
-  submit: (text: string, source?: RunCommand['source']) => Promise<void>;
-} | null>(null);
 function Tool(part: ToolCallMessagePartProps) {
-  const { id, userId, submit } = useContext(ChatContext)!;
-  if (part.toolName === 'prepare_program') return null;
-  if (part.toolName === 'present_openui') {
-    const preview =
-      typeof part.args?.ui === 'string' ? part.args.ui : partialUI(part.argsText ?? '');
-    let result = part.result;
-    if (typeof result === 'string') {
-      try {
-        result = JSON.parse(result);
-      } catch {
-        result = undefined;
-      }
-    }
-    const reference =
-      result && typeof result === 'object' && 'panelRef' in result ? result.panelRef : undefined;
-    const panelRef = typeof reference === 'string' ? reference : undefined;
-    if (part.isError) return null;
-    return (
-      <>
-        {(panelRef || preview) && (
-          <Panel
-            key={panelRef ?? part.toolCallId}
-            conversationId={id}
-            userId={userId}
-            panelRef={panelRef}
-            preview={preview}
-            submit={submit}
-          />
-        )}
-      </>
-    );
-  }
   return <ToolActivity part={part} />;
 }
 function AssistantText(part: TextMessagePartProps) {
-  const internal = useAuiState((s) =>
-    s.message.content.some(
-      (p) =>
-        p.type === 'tool-call' &&
-        (p.toolName === 'prepare_program' || p.toolName === 'present_openui'),
-    ),
-  );
-  if (internal) return null;
   if (part.text === '' && part.status.type === 'running')
     return <TraceLine live label="正在思考…" icon={<Brain />} />;
-  if (part.text.startsWith('Program/UI repair limit reached'))
-    return <p role="alert">交互界面暂时无法生成。你可以重新发送需求再试一次。</p>;
-  if (part.text.startsWith('Model round limit reached'))
-    return <p role="alert">本次任务未能完成。你可以重新发送需求继续。</p>;
-  if (part.text.startsWith('remote_outcome_unknown'))
-    return <p role="alert">结果暂时无法确认。可以复查原任务，或明确选择重新执行。</p>;
   return <MarkdownText />;
 }
-const groupAssistantParts = groupPartByType({
-  reasoning: ['group-reasoning'],
-  'tool-call': ['group-tool'],
-  'tool-call:prepare_program': [],
-  'tool-call:present_openui': [],
-  'standalone-tool-call': [],
-});
 function Assistant() {
   const content = useAuiState((s) => s.message.content);
   const [reasoningOpen, setReasoningOpen] = useState<Record<number, boolean>>({});
-  const traceTail = useAuiState((s) => {
-    const internal = s.message.content.some(
-      (part) =>
-        part.type === 'tool-call' &&
-        (part.toolName === 'prepare_program' || part.toolName === 'present_openui'),
-    );
-    // Match AssistantText/Tool visibility so hidden publication parts leave no spacing.
-    const last = s.message.content.findLast((part) => {
-      if (part.type === 'text') return !internal && part.text !== '';
-      return (
-        part.type !== 'tool-call' ||
-        (part.toolName !== 'prepare_program' &&
-          (part.toolName !== 'present_openui' || !part.isError))
-      );
-    });
-    const hasContent = s.message.content.some(
-      (part) =>
-        (part.type === 'text' && !internal && part.text !== '') ||
-        (part.type === 'tool-call' && part.toolName === 'present_openui' && !part.isError),
-    );
-    return (
-      !hasContent &&
-      (last?.type === 'reasoning' ||
-        (last?.type === 'tool-call' && last.toolName !== 'present_openui'))
-    );
-  });
-  const generating = useAuiState(
-    (s) =>
-      s.message.isLast &&
-      s.thread.isRunning &&
-      s.message.content.some(
-        (part) =>
-          part.type === 'tool-call' &&
-          (part.toolName === 'prepare_program' || part.toolName === 'present_openui') &&
-          (part.result === undefined || part.isError),
-      ),
+  const { activity, toolkit } = useExtensionContext();
+  const groupAssistantParts = useMemo(
+    () =>
+      groupPartByType({
+        reasoning: ['group-reasoning'],
+        'tool-call': ['group-tool'],
+        'standalone-tool-call': [],
+        ...Object.fromEntries(
+          Object.entries(activity)
+            .filter(([, visibility]) => visibility === 'hidden')
+            .map(([name]) => [`tool-call:${name}`, []]),
+        ),
+      }),
+    [activity],
   );
+  const visible = content.filter(
+    (part) => part.type !== 'tool-call' || activity[part.toolName] !== 'hidden',
+  );
+  const traceTail =
+    visible.length > 0 &&
+    visible.every(
+      (part) =>
+        part.type === 'reasoning' ||
+        (part.type === 'tool-call' && toolkit[part.toolName]?.display !== 'standalone'),
+    );
   return (
     <MessagePrimitive.Root
       data-slot="assistant-message"
-      data-trace-tail={traceTail || generating}
+      data-trace-tail={traceTail}
       className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[trace-tail=true]:mb-2 has-[+[data-slot=assistant-message]]:mb-2"
     >
       {/* Both live parts and restored snapshots use the same reading order, while
@@ -713,9 +637,10 @@ function Assistant() {
               part.type === 'indicator'
                 ? 'reasoning'
                 : part.type === 'group-tool' ||
-                    (part.type === 'tool-call' && part.toolName !== 'present_openui')
+                    (part.type === 'tool-call' && toolkit[part.toolName]?.display !== 'standalone')
                   ? 'tools'
                   : 'content';
+            if (part.type === 'tool-call' && activity[part.toolName] === 'hidden') return <></>;
             // An empty fragment suppresses the native registered-UI fallback too.
             if (target !== section) return <></>;
             switch (part.type) {
@@ -779,7 +704,7 @@ function Assistant() {
                   />
                 );
               case 'indicator':
-                return generating ? null : <TraceLine live label="正在思考…" icon={<Brain />} />;
+                return <TraceLine live label="正在思考…" icon={<Brain />} />;
               default:
                 return null;
             }

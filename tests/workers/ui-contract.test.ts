@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { panelTools, validateUI } from '../../src/server/panel-tools';
+import { panelTools, validateUI } from '../../src/extensions/openui/tools';
 import { env } from 'cloudflare:test';
 import { USER_ACTION_CONTEXT } from '../../src/shared/contracts';
 
@@ -30,10 +30,12 @@ it('keeps native actions, dynamic row links and prose containing action syntax v
       true,
     ),
   ).resolves.toBeDefined();
-  const ui = panelTools(async () => []).sections!.find((section) => section.key === 'ui')!;
+  const ui = panelTools(async () => []).sections!.find(
+    (section) => section.key === 'openui-catalog',
+  )!;
   const prompt = await ui.render({} as any, {} as any);
   expect(prompt).toContain('new browser tab without an agent request');
-  expect(prompt).toContain('source.params (finite JSON, at most 16 KiB)');
+  expect(prompt).toContain('sourceContext.params (finite JSON, at most 16 KiB)');
 });
 
 it('retains action parameters in the committed model input for the source panel', async () => {
@@ -90,7 +92,9 @@ it('requires computation provenance for program-backed StateSync while preservin
 });
 
 it('supplies the native Query and binding grammar without replacing the entire Agent response format', async () => {
-  const ui = panelTools(async () => []).sections!.find((section) => section.key === 'ui')!;
+  const ui = panelTools(async () => []).sections!.find(
+    (section) => section.key === 'openui-catalog',
+  )!;
   const prompt = await ui.render({} as any, {} as any);
   expect(prompt).toContain('only the ui argument of present_openui');
   expect(prompt).not.toContain('Your ENTIRE response must be valid');

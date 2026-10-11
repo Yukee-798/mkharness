@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { toMessages } from '../../src/shared/stream';
 
 test('tool commits update live calls once; later reasoning and genuine repeated calls remain distinct', async ({

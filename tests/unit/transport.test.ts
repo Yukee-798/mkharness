@@ -1,5 +1,6 @@
+import { partialUI } from '../../src/extensions/openui/partial';
 import { it, expect, vi } from 'vitest';
-import { AttachAgent, partialUI } from '../../src/browser/transport';
+import { AttachAgent } from '../../src/browser/transport';
 it('only attaches with GET; abort detaches without POST or stop', async () => {
   const requests: RequestInit[] = [];
   vi.stubGlobal(

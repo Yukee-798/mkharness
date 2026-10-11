@@ -1,5 +1,5 @@
 import { it, expect, vi } from 'vitest';
-import { panelTools } from '../../src/server/panel-tools';
+import { panelTools } from '../../src/extensions/openui/tools';
 
 const prepare = panelTools(async () => []).tools!.find((tool) => tool.name === 'prepare_program')!;
 const invoke = (args: unknown, api = {} as any) => prepare.execute(args as any, api, {} as any);

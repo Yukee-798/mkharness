@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { validateUI } from '../../src/server/panel-tools';
+import { validateUI } from '../../src/extensions/openui/tools';
 it.each([0, -1, 1])(
   'rejects unsafe discrete slider step/range at publish (step=%s)',
   async (step) => {

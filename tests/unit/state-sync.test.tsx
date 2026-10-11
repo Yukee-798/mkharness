@@ -2,7 +2,7 @@
 import { it, expect } from 'vitest';
 import { render, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { Renderer } from '@openuidev/react-lang';
-import { library, PanelContext, type PanelGuard } from '../../src/shared/catalog';
+import { library, PanelContext, type PanelGuard } from '../../src/extensions/openui/catalog';
 const code = (sync: boolean) =>
   `$cost = "10"\nresult = Query("run_program",{cost:$cost},{next:0,ready:false})\nroot = Stack([Input("cost","Cost","number",null,$cost),Button("Preset",Action([@Set($cost,"30")])),Button("Reset",Action([@Reset($cost)]))${sync ? ',StateSync($cost,result.next,result.ready)' : ''}])`;
 it('keeps raw strings and native Set/Reset, including unfinished numeric edits', async () => {

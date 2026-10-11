@@ -98,33 +98,9 @@
   }
 }
 input::placeholder,
-textarea::placeholder,
-.generated-panel :is(input, textarea)::placeholder {
+textarea::placeholder {
   color: color-mix(in oklch, var(--muted-foreground) 65%, var(--background));
   opacity: 1;
-}
-/* Small appearance adjustments; native OpenUI state and actions remain intact. */
-/* OpenUI inline code uses body font tokens; keep it independent of prose weight. */
-.generated-panel :is(pre, code) {
-  font-weight: 400;
-}
-.generated-panel .openui-card-sunk {
-  box-shadow: none;
-}
-.generated-panel :is(.openui-input-medium, .openui-select-trigger-md, .openui-button-base-medium) {
-  min-height: 2.25rem;
-}
-.generated-panel :is(.openui-input, .openui-textarea) {
-  font-size: 1rem;
-}
-.generated-panel :is(.openui-button-base, .openui-select-trigger):focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-@media (min-width: 768px) {
-  .generated-panel :is(.openui-input, .openui-textarea) {
-    font-size: 0.875rem;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -19,7 +19,7 @@ import {
 // Share the root export with ThemeProvider; the genui-lib bundle has a separate context.
 import { openuiLibrary } from '@openuidev/react-ui';
 import { z } from 'zod';
-import { finiteJson, jsonEqual } from './compute';
+import { finiteJson, jsonEqual } from '../../shared/compute';
 import { validateSlider } from './slider';
 export type PanelGuard = {
   epoch: number;

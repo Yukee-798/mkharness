@@ -1,12 +1,12 @@
 import type { EntryRecord } from '@earendil-works/pi-durable';
 import type { ServerContribution } from '../../server/contributions';
-import { panelTools } from '../../server/panel-tools';
-import { uiInstructions } from '../../server/limits';
+import { panelTools } from './tools';
+import { uiInstructions } from './instructions';
 import { AppError } from '../../shared/contracts';
 import { finiteJson } from '../../shared/compute';
 import { successfulTool } from '../../shared/references';
-import { validateUI } from '../../server/panel-tools';
-import { actionParams } from '../../shared/ui-actions';
+import { validateUI } from './tools';
+import { actionParams } from './contracts';
 export function openuiContribution(
   entries: () => Promise<readonly EntryRecord[]>,
 ): ServerContribution {
@@ -17,7 +17,7 @@ export function openuiContribution(
     extension: {
       ...tools,
       name: 'openui',
-      sections: instructions.sections,
+      sections: [...(tools.sections ?? []), ...(instructions.sections ?? [])],
       hooks: instructions.hooks,
     },
     resources: {

@@ -1,3 +1,7 @@
+import { ThemeProvider } from '@openuidev/react-ui';
+import { openUITheme } from './theme';
+import '@openuidev/react-ui/index.css';
+import './styles.css';
 import {
   Component,
   useCallback,
@@ -8,16 +12,16 @@ import {
   type ReactNode,
 } from 'react';
 import { Renderer, type ActionEvent } from '@openuidev/react-lang';
-import { library, PanelContext, type PanelGuard } from '../shared/catalog';
-import type { Program, Json } from '../shared/compute';
-import { finiteJson, jsonEqual, canonicalJson } from '../shared/compute';
-import type { RawState, RunCommand } from '../shared/contracts';
-import { actionParams, externalURL, UI_ACTIONS } from '../shared/ui-actions';
-import { computeProgram } from './compute';
-import { request } from './api';
-import { type ResourceDraft, type SaveStatus } from './draft';
-import { useResourceDrafts } from './ResourceDrafts';
-import { Button } from './ui/button';
+import { library, PanelContext, type PanelGuard } from './catalog';
+import type { Program, Json } from '../../shared/compute';
+import { finiteJson, jsonEqual, canonicalJson } from '../../shared/compute';
+import type { RawState, RunCommand } from '../../shared/contracts';
+import { actionParams, externalURL, UI_ACTIONS } from './contracts';
+import { computeProgram } from '../../browser/compute';
+import { request } from '../../browser/api';
+import { type ResourceDraft, type SaveStatus } from '../../browser/draft';
+import { useResourceDrafts } from '../../browser/ResourceDrafts';
+import { Button } from '../../browser/ui/button';
 export type PanelBundle = {
   panelRef: string;
   ui: string;
@@ -242,42 +246,47 @@ export function Panel({
     }, 0);
   };
   return (
-    <section
-      className="generated-panel -mx-1 min-w-0 max-w-[calc(100%+0.5rem)] overflow-x-auto p-1 whitespace-normal"
-      aria-label="Interactive answer"
-      onChangeCapture={edit}
-      onClickCapture={edit}
-      onKeyDownCapture={edit}
-    >
-      <div inert={!bundle || undefined}>
-        <PanelContext value={context}>
-          <RenderBoundary key={bundle ? 'committed' : 'preview'}>
-            <Renderer
-              response={bundle?.ui ?? preview ?? null}
-              library={library}
-              isStreaming={!bundle}
-              initialState={bundle?.state}
-              onStateUpdate={bundle ? change : undefined}
-              onAction={bundle ? act : undefined}
-              onError={(errors) => {
-                if (bundle && errors.length) setError(errors.map((e) => e.message).join('; '));
-              }}
-              toolProvider={tools?.provider}
-              publishObservability={false}
-            />
-          </RenderBoundary>
-        </PanelContext>
-      </div>
-      {bundle && (status === 'error' || status === 'conflict') && (
-        <p className="save-status mt-3 text-xs leading-relaxed text-muted-foreground" role="status">
-          {status === 'conflict'
-            ? '另一页面已更新；当前草稿已保留，整页刷新前请先复制改动'
-            : '保存失败，当前改动仍保留'}
-        </p>
-      )}
-      {status === 'error' && <Button onClick={() => saver?.retry()}>重试保存</Button>}
-      {error && <p role="alert">{error}</p>}
-    </section>
+    <ThemeProvider lightTheme={openUITheme}>
+      <section
+        className="generated-panel -mx-1 min-w-0 max-w-[calc(100%+0.5rem)] overflow-x-auto p-1 whitespace-normal"
+        aria-label="Interactive answer"
+        onChangeCapture={edit}
+        onClickCapture={edit}
+        onKeyDownCapture={edit}
+      >
+        <div inert={!bundle || undefined}>
+          <PanelContext value={context}>
+            <RenderBoundary key={bundle ? 'committed' : 'preview'}>
+              <Renderer
+                response={bundle?.ui ?? preview ?? null}
+                library={library}
+                isStreaming={!bundle}
+                initialState={bundle?.state}
+                onStateUpdate={bundle ? change : undefined}
+                onAction={bundle ? act : undefined}
+                onError={(errors) => {
+                  if (bundle && errors.length) setError(errors.map((e) => e.message).join('; '));
+                }}
+                toolProvider={tools?.provider}
+                publishObservability={false}
+              />
+            </RenderBoundary>
+          </PanelContext>
+        </div>
+        {bundle && (status === 'error' || status === 'conflict') && (
+          <p
+            className="save-status mt-3 text-xs leading-relaxed text-muted-foreground"
+            role="status"
+          >
+            {status === 'conflict'
+              ? '另一页面已更新；当前草稿已保留，整页刷新前请先复制改动'
+              : '保存失败，当前改动仍保留'}
+          </p>
+        )}
+        {status === 'error' && <Button onClick={() => saver?.retry()}>重试保存</Button>}
+        {error && <p role="alert">{error}</p>}
+      </section>
+    </ThemeProvider>
   );
 }
 class RenderBoundary extends Component<{ children: ReactNode }, { error: string }> {

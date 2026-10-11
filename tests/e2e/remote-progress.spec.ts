@@ -1,10 +1,12 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 test('unknown outcomes restore without submission; explicit actions send only the original task reference', async ({
   page,
 }) => {
   const commands: any[] = [];
   await page.route('**/api/conversations/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/capabilities'))
+      return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
     if (path.endsWith('/snapshot'))
       return route.fulfill({
         json: {

@@ -1,3 +1,4 @@
+import { resource } from './fixtures';
 import { test, expect } from '@playwright/test';
 
 test('native links open safely during the click without submitting an agent request', async ({
@@ -17,8 +18,10 @@ test('native links open safely during the click without submitting an agent requ
       return null;
     };
   });
-  await page.route('**/api/conversations/test/panels/**', (route) =>
-    route.fulfill({ json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 } }),
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', (route) =>
+    route.fulfill({
+      json: resource({ panelRef: '2.same', ui, program: null, state: {}, revision: 0 }),
+    }),
   );
   await page.goto('/tests/browser/panel.html');
   await page.getByRole('region', { name: 'Interactive answer' }).first().getByText('观看').click();
@@ -37,8 +40,10 @@ test('native links open safely during the click without submitting an agent requ
 test('native assistant actions retain click-time context and inputs', async ({ page }) => {
   const ui =
     '$choice="A"\nroot=Stack([Input("choice","Choice","text",null,$choice),Button("Explain",Action([@ToAssistant("Explain this choice","Selected item: B")]))])';
-  await page.route('**/api/conversations/test/panels/**', (route) =>
-    route.fulfill({ json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 } }),
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', (route) =>
+    route.fulfill({
+      json: resource({ panelRef: '2.same', ui, program: null, state: {}, revision: 0 }),
+    }),
   );
   await page.goto('/tests/browser/panel.html');
   const panel = page.getByRole('region', { name: 'Interactive answer' }).first();
@@ -47,10 +52,14 @@ test('native assistant actions retain click-time context and inputs', async ({ p
   expect(await page.evaluate(() => (window as any).submissions[0])).toEqual({
     text: 'Explain this choice',
     source: {
-      panelRef: '2.same',
-      action: 'continue_analysis',
-      state: { $choice: 'B' },
-      params: { context: 'Selected item: B' },
+      action: 'extension_action',
+      extensionId: 'openui',
+      name: 'continue',
+      payload: {
+        ref: '2.same',
+        state: { $choice: 'B' },
+        params: { context: 'Selected item: B' },
+      },
     },
   });
 });
@@ -71,8 +80,10 @@ test('checks dynamic, row and legacy links on click while preserving local Set a
       return null;
     };
   });
-  await page.route('**/api/conversations/test/panels/**', (route) =>
-    route.fulfill({ json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 } }),
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', (route) =>
+    route.fulfill({
+      json: resource({ panelRef: '2.same', ui, program: null, state: {}, revision: 0 }),
+    }),
   );
   await page.goto('/tests/browser/panel.html');
   const panel = page.getByRole('region', { name: 'Interactive answer' }).first();
@@ -109,12 +120,12 @@ test('native select portals share the application theme and preserve keyboard se
 }) => {
   const ui =
     '$duration = "short"\nroot = Select("duration",[SelectItem("short","短期"),SelectItem("long","长期")],"选择周期",null,$duration)';
-  await page.route('**/api/conversations/test/panels/**', async (route) => {
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', async (route) => {
     if (route.request().method() === 'PATCH') {
       return route.fulfill({ json: { revision: 1 } });
     }
     return route.fulfill({
-      json: { panelRef: '2.same', ui, program: null, state: {}, revision: 0 },
+      json: resource({ panelRef: '2.same', ui, program: null, state: {}, revision: 0 }),
     });
   });
   await page.goto('/tests/browser/panel.html');
@@ -140,7 +151,7 @@ test('native clarification form validates, saves choices and submits only on exp
     '$notes = ""',
     'root = Form("clarification",Buttons([Button("按我的选择继续",Action([@ToAssistant("根据我的答案继续")]))]),[FormControl("希望怎样展示？（必选）",RadioGroup("format",[RadioItem("方案对比","并列比较选项","comparison"),RadioItem("执行步骤","按顺序解释","steps")],null,{required:true},$format)),FormControl("关心哪些方面？（可多选）",CheckBoxGroup("topics",[CheckBoxItem("预算","说明成本","cost"),CheckBoxItem("时间","说明进度","timing")],null,$topics)),FormControl("其他要求（选填）",Input("notes","补充要求","text",null,$notes))])',
   ].join('\n');
-  await page.route('**/api/conversations/test/panels/**', async (route) => {
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', async (route) => {
     const ref = route.request().url().includes('2.same') ? '2.same' : '8.same';
     if (route.request().method() === 'PATCH') {
       const { state, expectedRevision } = route.request().postDataJSON();
@@ -149,7 +160,7 @@ test('native clarification form validates, saves choices and submits only on exp
       return route.fulfill({ json: { revision } });
     }
     return route.fulfill({
-      json: { panelRef: ref, ui, program: null, revision: 0, ...saved.get(ref) },
+      json: resource({ panelRef: ref, ui, program: null, revision: 0, ...saved.get(ref) }),
     });
   });
   await page.goto('/tests/browser/panel.html');
@@ -176,12 +187,16 @@ test('native clarification form validates, saves choices and submits only on exp
   expect(await page.evaluate(() => (window as any).submissions[0])).toMatchObject({
     text: '根据我的答案继续',
     source: {
-      panelRef: '2.same',
-      action: 'continue_analysis',
-      state: {
-        $format: 'comparison',
-        $topics: { cost: true, timing: false },
-        $notes: '保留未知项，不代替我选择',
+      action: 'extension_action',
+      extensionId: 'openui',
+      name: 'continue',
+      payload: {
+        ref: '2.same',
+        state: {
+          $format: 'comparison',
+          $topics: { cost: true, timing: false },
+          $notes: '保留未知项，不代替我选择',
+        },
       },
     },
   });
@@ -193,13 +208,13 @@ test('native streamed panel restores raw edits, isolates panels and submits a cl
   const patches: any[] = [];
   const ui =
     '$cost = "10"\nresult = Query("run_program",{cost:$cost},{next:0,ready:false})\nroot = Stack([Input("cost","Cost","text",null,$cost),StateSync($cost,result.next,result.ready,{result:result,inputs:{cost:$cost}}),Button("Analyze",Action([@ToAssistant("Analyze inputs")]))])';
-  await page.route('**/api/conversations/test/panels/**', async (route) => {
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', async (route) => {
     if (route.request().method() === 'PATCH') {
       patches.push(route.request().postDataJSON());
       return route.fulfill({ json: { revision: patches.length } });
     }
     await route.fulfill({
-      json: {
+      json: resource({
         panelRef: route.request().url().includes('2.same') ? '2.same' : '8.same',
         ui,
         program: {
@@ -208,7 +223,7 @@ test('native streamed panel restores raw edits, isolates panels and submits a cl
         },
         state: { $cost: '1.' },
         revision: 0,
-      },
+      }),
     });
   });
   await page.goto('/tests/browser/panel.html');
@@ -220,7 +235,9 @@ test('native streamed panel restores raw edits, isolates panels and submits a cl
   await expect.poll(() => patches.some((p) => p.state.$cost === '')).toBe(true);
   await fields.nth(0).fill('12.');
   await page.getByText('Analyze', { exact: true }).first().click();
-  expect(await page.evaluate(() => (window as any).submissions[0].source.state.$cost)).toBe('12.');
+  expect(await page.evaluate(() => (window as any).submissions[0].source.payload.state.$cost)).toBe(
+    '12.',
+  );
   await expect(fields.nth(1)).toHaveValue('1.');
 });
 
@@ -229,12 +246,12 @@ test('StateSync uses the current cached Query result after an A to B to A input 
 }) => {
   const ui =
     '$choice = "A"\n$target = ""\nresult = Query("run_program",{choice:$choice},{next:"",ready:false})\ncache = Query("run_program",{choice:"A"},{next:"",ready:false})\nroot = Stack([Input("choice","Choice","text",null,$choice),Input("target","Target","text",null,$target),Text("text",cache.next),StateSync($target,result.next,result.ready,{result:result,inputs:{choice:$choice}})])';
-  await page.route('**/api/conversations/test/panels/**', async (route) =>
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', async (route) =>
     route.fulfill({
       json:
         route.request().method() === 'PATCH'
           ? { revision: 1 }
-          : {
+          : resource({
               panelRef: '2.same',
               ui,
               program: {
@@ -242,7 +259,7 @@ test('StateSync uses the current cached Query result after an A to B to A input 
                 data: null,
               },
               revision: 0,
-            },
+            }),
     }),
   );
   await page.goto('/tests/browser/panel.html');
