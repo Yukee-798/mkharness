@@ -218,9 +218,9 @@ StateSync($target,result.next,result.ready,{result:result,inputs:currentArgs})
 
 对应接口为 `PATCH /api/conversations/:id`（`{"title":"新名称"}`）和 `DELETE /api/conversations/:id`，沿用登录、同源和归属验证。删除意图写入现有 DO 元数据，复用任务调和机制恢复；等待工具结束后通过 Agent 的 `destroy()` 清理持久存储，不增加历史副本表。已有安装在更新后运行 `pnpm db:migrate`，部署环境执行对应的远端 D1 迁移。
 
-程序限制：代码 64 KiB，输入＋数据及输出分别 1 MiB，VM 堆 16 MiB，栈 256 KiB，interrupt 1024 次。浏览器开始实际执行后 500ms 超时会终止 Worker，加载另有 15s watchdog。后端使用 interrupt 预算，不能承诺等价的 500ms CPU 上限。每个任务最多 20 次模型调用、初次失败后最多两次修正。
+程序限制：代码 64 KiB，输入＋数据及输出分别 1 MiB，VM 堆 16 MiB，栈 256 KiB，interrupt 1024 次。浏览器开始实际执行后 500ms 超时会终止 Worker，加载另有 15s watchdog；输入使旧计算失效或组件卸载时主动取消并释放 Worker。后端使用 interrupt 预算，不能承诺等价的 500ms CPU 上限。每个运行默认最多 20 次模型调用、40 次通用工具调用；OpenUI 初次失败后最多两次修正。
 
-保存使用聊天内面板引用和 CAS revision。未保存输入和 409 冲突草稿在同一用户 Workspace 中保留，聊天切换或 runtime 恢复不会丢失；整页刷新或退出前请复制冲突改动。应用不会静默强制覆盖。历史程序引用从 Pi 的公开完整 entries 恢复，即使模型上下文已压缩。第一版没有附件、知识库、多用户共享、计费或任意代码沙箱工具。
+保存使用聊天内扩展资源引用和 CAS revision。未保存输入和 409 冲突草稿在同一用户 Workspace 中保留，聊天切换或 runtime 恢复不会丢失；整页刷新或退出前请复制冲突改动。应用不会静默强制覆盖。OpenUI 资源 handler 从本聊天 Pi 完整历史恢复程序引用，即使模型上下文已压缩。第一版没有附件、知识库、多用户共享、计费或任意代码沙箱工具。
 
 ## 验证
 
@@ -249,3 +249,5 @@ pnpm exec wrangler deploy --dry-run
 首次浏览器测试需 `pnpm exec playwright install chromium`。测试夹具替换模型 I/O，但 PiHarness / D1 / SQLite / workerd 真实运行；浏览器测试使用真实 QuickJS WASM、OpenUI 和 assistant-ui。workerd 测试显式配置 Miniflare bindings，不载入本地 `.dev.vars`。夹具入口只在测试配置中，不进入生产构建。原有研究消融仅为基线，产品验证记录在 [implementation.md](docs/validation/implementation.md)，真实模型与云端结果另列，未完成不会用模拟结果填充。基础层迁移与故障矩阵见 [foundation.md](docs/validation/foundation.md)，v0.1.0 架构与交互审查见 [framework-review.md](docs/validation/2026-10-11-framework-review.md)。浏览器验收使用独立端口 5174 和 `.wrangler/e2e` 本地存储，不改动产品开发端口 5173 或其 SQLite 数据。
 
 MIT；上游和借用组件归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+双端扩展整合后的独立 review 与根因修复见 [architecture-review.md](docs/validation/2026-10-12-architecture-review.md)，包含 SSE 初始化、原生输出预算、来源冻结、装配身份和本地计算生命周期的验证边界。

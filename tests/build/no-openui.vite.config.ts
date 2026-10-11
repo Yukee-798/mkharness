@@ -34,6 +34,6 @@ export default defineConfig({
   ...base,
   plugins: [...(base.plugins ?? []), removeOpenUI],
   build: {
-    outDir: '.superpowers/sdd/2026-10-12-dual-end-extensions-implementation/no-openui-build',
+    outDir: 'test-results/no-openui',
   },
 });
