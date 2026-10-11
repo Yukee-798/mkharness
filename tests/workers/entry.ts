@@ -74,6 +74,24 @@ export class ConversationAgent extends Base {
         ],
         tools: [
           defineTool({
+            name: 'progress_probe',
+            description: 'Test-only native progress seam',
+            parameters: Type.Object({ round: Type.Number() }),
+            replay: 'safe',
+            outputLimits: { maxBytes: 8, retain: 'tail' },
+            execute: async ({ round }, api, context) => {
+              api.output('abc');
+              await api.details({ round, phase: 'first', private: 'never public' }, context);
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              api.output('def');
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              api.output('ghijkl');
+              await api.details({ round, phase: 'last' }, context);
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              return { content: [{ type: 'text', text: `round ${round}` }] };
+            },
+          }),
+          defineTool({
             name: 'ignores_cancel',
             description: 'Test-only uncancellable bounded tool',
             parameters: Type.Object({}),
