@@ -1,5 +1,81 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { it, expect } from 'vitest';
+function events(body: string) {
+  return body
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => JSON.parse(line.slice(6)));
+}
+async function untilDone(read: () => Promise<{ status: string } | undefined>) {
+  for (let i = 0; i < 300; i++) {
+    if ((await read())?.status === 'done') return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Fixture did not complete');
+}
+it.each(['slow observer race', 'progress seam'])(
+  'does not close with an obsolete prefix when %s completes during observer initialization',
+  async (text) => {
+    const stub = env.CONVERSATIONS.getByName(crypto.randomUUID()),
+      runId = crypto.randomUUID();
+    await stub.submitRun({ runId, text });
+    const body = await runInDurableObject(stub, async (instance) => {
+      const projector = instance.progressProjector.bind(instance);
+      instance.progressProjector = async () => {
+        await untilDone(() => instance.submission(runId));
+        return projector();
+      };
+      try {
+        return await (await instance.observeRun(runId)).text();
+      } finally {
+        instance.progressProjector = projector;
+      }
+    });
+    const attached = events(body);
+    expect(attached.at(-1).type).toBe('RUN_FINISHED');
+    const history = attached.findLast((event) => event.type === 'MESSAGES_SNAPSHOT').messages;
+    expect(
+      history.some(
+        (message: any) => message.role === 'assistant' && message.content.includes(text),
+      ),
+    ).toBe(true);
+    if (text === 'progress seam')
+      expect(history.filter((message: any) => message.role === 'tool')).toHaveLength(2);
+  },
+);
+it('finishes an attachment when completion precedes watch acquisition after the initial pending read', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID()),
+    runId = crypto.randomUUID();
+  await stub.submitRun({ runId, text: 'slow before watch' });
+  const body = await runInDurableObject(stub, async (instance) => {
+    const read = instance.allEntries.bind(instance);
+    instance.allEntries = async () => {
+      const stale = await read();
+      await untilDone(() => instance.submission(runId));
+      return stale;
+    };
+    try {
+      const response = await instance.observeRun(runId);
+      const reader = response.body!.getReader();
+      const timer = setTimeout(() => void reader.cancel(), 2000);
+      const decoder = new TextDecoder();
+      let body = '';
+      try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) return body;
+          body += decoder.decode(chunk.value, { stream: true });
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } finally {
+      instance.allEntries = read;
+    }
+  });
+  expect(events(body).at(-1).type).toBe('RUN_FINISHED');
+  expect(body).toContain('slow before watch');
+});
 it('observes exactly one durable submission, detach does not cancel, and completion can be attached again', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID()),
     first = crypto.randomUUID(),

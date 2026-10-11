@@ -5,6 +5,7 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
   let changed = false,
     calls = 0;
   const authorization: (string | null)[] = [];
+  const fullResult = 'found\n' + ('x'.repeat(32) + '\n').repeat(2500);
   const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const request = new Request(input, init);
     if (request.url !== 'https://mcp.example.test/mcp') return new Response(null, { status: 404 });
@@ -37,7 +38,7 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
       };
     else if (rpc.method === 'tools/call') {
       calls++;
-      result = { content: [{ type: 'text', text: 'found' }], structuredContent: { value: 2 } };
+      result = { content: [{ type: 'text', text: fullResult }], structuredContent: { value: 2 } };
     } else result = {};
     return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
   });
@@ -60,6 +61,15 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
       }),
     ).toBe('function');
     expect(JSON.stringify(before.entries)).toContain('found');
+    const result = before.entries
+      .flatMap((entry: any) => entry.model ?? [])
+      .find(
+        (message: any) =>
+          message.role === 'toolResult' && message.toolName === 'mcp_reference_lookup',
+      );
+    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toBe(fullResult);
+    expect(result.content[1].text).toBe(JSON.stringify({ value: 2 }));
     expect(calls).toBe(1);
     changed = true;
     await runInDurableObject(stub, async (instance) => {
@@ -114,6 +124,11 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
     network.mockClear();
     stub = env.CONVERSATIONS.get(stub.id);
     const disabled = JSON.parse(await stub.snapshot());
+    expect(
+      disabled.entries
+        .flatMap((entry: any) => entry.model ?? [])
+        .find((message: any) => message.role === 'toolResult' && !message.isError).content[0].text,
+    ).toBe(fullResult);
     expect(
       await runInDurableObject(stub, (instance) => Object.keys(instance.mcp.mcpConnections)),
     ).toEqual([]);

@@ -23,13 +23,18 @@ export type ServerContribution = {
     terminal: boolean;
   }) => JsonValue;
 };
-export function collectContributions(contributions: readonly ServerContribution[]) {
+export function validateContributionIds(ids: readonly string[]) {
   const seen = new Set<string>();
-  for (const contribution of contributions) {
-    if (!/^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(contribution.id))
+  for (const id of ids) {
+    if (!/^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(id))
       throw new AppError(503, 'invalid_extension_id');
-    if (seen.has(contribution.id))
-      throw new AppError(503, 'duplicate_extension_id', 'duplicate extension ID');
+    if (seen.has(id)) throw new AppError(503, 'duplicate_extension_id', 'duplicate extension ID');
+    seen.add(id);
+  }
+}
+export function collectContributions(contributions: readonly ServerContribution[]) {
+  validateContributionIds(contributions.map((contribution) => contribution.id));
+  for (const contribution of contributions) {
     if (
       (contribution.resources &&
         (typeof contribution.resources.read !== 'function' ||
@@ -42,7 +47,6 @@ export function collectContributions(contributions: readonly ServerContribution[
       )
     )
       throw new AppError(503, 'invalid_extension_handler');
-    seen.add(contribution.id);
   }
   validateExtensions(
     contributions.flatMap((contribution) =>

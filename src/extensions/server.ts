@@ -1,5 +1,6 @@
 import type { EntryRecord } from '@earendil-works/pi-durable';
 import type { ServerContribution } from '../server/contributions';
+import { validateContributionIds } from '../server/contributions';
 type Context = { env: Env; entries: () => Promise<readonly EntryRecord[]> };
 type Definition = {
   id: string;
@@ -46,7 +47,10 @@ export const definitions: readonly Definition[] = [
     },
   },
 ];
-export const enabledDefinitions = (env: Env) =>
-  definitions.filter((definition) => definition.enabled(env));
+export const enabledDefinitions = (env: Env) => {
+  const enabled = definitions.filter((definition) => definition.enabled(env));
+  validateContributionIds(enabled.map((definition) => definition.id));
+  return enabled;
+};
 export const extensionIds = (env: Env) =>
   enabledDefinitions(env).map((definition) => definition.id);

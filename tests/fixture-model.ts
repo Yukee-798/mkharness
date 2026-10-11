@@ -84,6 +84,20 @@ export function fixtureModels(contextWindow = model.contextWindow) {
           },
         },
       ];
+    if (text?.includes('large_compute') && last?.role === 'user')
+      content = [
+        {
+          type: 'toolCall',
+          id: 'same-call',
+          name: 'prepare_program',
+          arguments: {
+            code: 'export function compute(){return {value:"x".repeat(65536)}}',
+            initialInputs: {},
+            data: null,
+            cases: [{ inputs: {}, expected: { value: 'x'.repeat(65536) } }],
+          },
+        },
+      ];
     if (text?.includes('panel')) {
       if (last?.role === 'user')
         content = [

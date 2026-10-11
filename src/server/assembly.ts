@@ -2,6 +2,7 @@ import type { Extension, EntryRecord } from '@earendil-works/pi-durable';
 import { runLimits, toolBudget } from './limits';
 import { collectContributions } from './contributions';
 import { enabledDefinitions } from '../extensions/server';
+import { AppError } from '../shared/contracts';
 
 export async function applicationContributions(
   env: Env,
@@ -9,7 +10,12 @@ export async function applicationContributions(
 ) {
   return collectContributions(
     await Promise.all(
-      enabledDefinitions(env).map((definition) => definition.create({ env, entries })),
+      enabledDefinitions(env).map(async (definition) => {
+        const contribution = await definition.create({ env, entries });
+        if (contribution.id !== definition.id)
+          throw new AppError(503, 'extension_identity_mismatch');
+        return contribution;
+      }),
     ),
   );
 }

@@ -1,6 +1,17 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { it, expect } from 'vitest';
 import { fixtureModels } from '../fixture-model';
+it('commits a bounded large compute result as complete JSON in native Pi history', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const snapshot = await generate(stub, 'large_compute');
+  const prepared = snapshot.entries
+    .flatMap((entry: any) => entry.model ?? [])
+    .find(
+      (message: any) => message.role === 'toolResult' && message.toolName === 'prepare_program',
+    );
+  expect(prepared.isError).toBe(false);
+  expect(JSON.parse(prepared.content[0].text).initial).toEqual({ value: 'x'.repeat(65536) });
+});
 async function generate(stub: ReturnType<typeof env.CONVERSATIONS.getByName>, text = 'panel') {
   await stub.submitRun({ runId: crypto.randomUUID(), text });
   for (let i = 0; i < 600; i++) {

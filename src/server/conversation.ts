@@ -379,7 +379,7 @@ export class ConversationAgent extends Agent<Env> {
             )?.actions;
             if (!action || !Object.hasOwn(action, source.name))
               throw new AppError(404, 'extension_action_unavailable');
-            sourceContext = await action[source.name]!.normalize(source.payload, {
+            sourceContext = await action[source.name]!.normalize(structuredClone(source.payload), {
               entries: () => this.allEntries(),
             });
             try {
@@ -467,8 +467,11 @@ export class ConversationAgent extends Agent<Env> {
     const command = stored.request;
     let text = command.text;
     const context =
-      stored.sourceContext ??
-      (command.source?.action !== 'extension_action' ? command.source : undefined);
+      stored.sourceContext !== undefined
+        ? stored.sourceContext
+        : command.source?.action !== 'extension_action'
+          ? command.source
+          : undefined;
     if (context !== undefined) text += USER_ACTION_CONTEXT + '\n' + JSON.stringify(context);
     await this.harness.submit(text, {
       session: '1',

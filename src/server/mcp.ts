@@ -3,6 +3,7 @@ import { defineDoc, defineTool, type Extension } from '@earendil-works/pi-durabl
 import { Type } from '@earendil-works/pi-ai';
 import { AppError } from '../shared/contracts';
 import { canonicalJson, finiteJson, jsonText, type Json } from '../shared/compute';
+import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
 
 export type MCPConfig = {
   serverId: string;
@@ -425,6 +426,7 @@ export async function buildMcp(
         description: binding.description,
         parameters: Type.Unsafe<Record<string, Json>>(binding.schema),
         replay: binding.replay,
+        outputLimits: JSON_TOOL_OUTPUT_LIMITS,
         execute: async (args, _api, context) => {
           const signal = context.abortSignal ?? new AbortController().signal;
           if (availability.has(binding.name)) return failure(availability.get(binding.name)!);

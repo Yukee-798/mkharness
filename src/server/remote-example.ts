@@ -13,6 +13,7 @@ import {
 import { AppError, type RunCommand } from '../shared/contracts';
 import { canonicalJson, jsonText, finiteJson, type Json } from '../shared/compute';
 import { boundedText } from './web';
+import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
 
 export type RemoteIntent = {
   taskId: number;
@@ -496,6 +497,7 @@ export function remoteExample(
     tools: [
       defineTool({
         name: 'example_generate',
+        outputLimits: JSON_TOOL_OUTPUT_LIMITS,
         description:
           'Run the configured asynchronous example service and wait for its final JSON result.',
         parameters: Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 32000 }) }),
@@ -584,6 +586,7 @@ export function remoteExample(
       }),
       defineTool({
         name: 'example_recheck',
+        outputLimits: JSON_TOOL_OUTPUT_LIMITS,
         description:
           'Read the original remote operation only when the user explicitly requests rechecking it. Never submits a new operation.',
         parameters: Type.Object({}),

@@ -87,6 +87,40 @@ async function setup(mode: string, waitMs = 5000) {
   });
   return stub;
 }
+it('commits the entire bounded remote result to Pi history and retains it after reconstruction', async () => {
+  const value = { text: 'x'.repeat(64 * 1024), tail: 'complete-result' };
+  let submits = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === 'POST') {
+      submits++;
+      return Response.json({ id: 'large-result' });
+    }
+    return Response.json({ status: 'completed', result: value });
+  });
+  let stub = await setup('key');
+  const result = async () => {
+    const snapshot = JSON.parse(await stub.snapshot());
+    return snapshot.entries
+      .flatMap((entry: any) => entry.model ?? [])
+      .find(
+        (message: any) => message.role === 'toolResult' && message.toolName === 'example_generate',
+      );
+  };
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect((await result()).isError).toBe(false);
+    expect(JSON.parse((await result()).content[0].text)).toEqual({ ok: true, value });
+    await abortAllDurableObjects();
+    stub = env.CONVERSATIONS.get(stub.id);
+    expect(JSON.parse((await result()).content[0].text)).toEqual({ ok: true, value });
+    expect(submits).toBe(1);
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});
 it.each(['key', 'lookup', 'none'] as const)(
   'accepted-without-ID gap survives eviction (%s recovery)',
   async (mode) => {

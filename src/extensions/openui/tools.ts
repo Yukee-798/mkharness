@@ -14,6 +14,7 @@ import { jsonText, jsonEqual, finiteJson, type Program, type Json } from '../../
 import { computeProgram } from '../../server/compute';
 import { validateSlider } from './slider';
 import { UI_ACTION_RULE, validateUIActions } from './contracts';
+import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/tool-output';
 function difference(
   expected: Json | undefined,
   actual: Json | undefined,
@@ -112,6 +113,8 @@ export function panelTools(
 ): Extension {
   const prepare = defineTool({
     name: 'prepare_program',
+    // The bounded compute result plus its small, generated reference envelope.
+    outputLimits: { ...JSON_TOOL_OUTPUT_LIMITS, maxBytes: JSON_TOOL_OUTPUT_LIMITS.maxBytes + 1024 },
     description:
       'Validate a generated synchronous ES module compute(inputs,data), initial inputs and finite JSON test cases. No imports, host APIs, clock or randomness. Each expected value is the entire output, not a partial subset. Returns programRef and initial result only on success; on mismatch returns the case index, first difference and a bounded actual output for diagnosis.',
     parameters: Type.Object({
@@ -156,7 +159,15 @@ export function panelTools(
         }
         const programRef = await ref(api, context);
         return {
-          content: [{ type: 'text', text: JSON.stringify({ programRef, initial: initial.value }) }],
+          content: [
+            {
+              type: 'text',
+              text: jsonText(
+                { programRef, initial: initial.value },
+                JSON_TOOL_OUTPUT_LIMITS.maxBytes + 1024,
+              ),
+            },
+          ],
           details: { ref: programRef, initial: initial.value },
         };
       } catch (error) {

@@ -13,22 +13,36 @@ export async function observeRun(
 ): Promise<Response> {
   const root = await owner.root(),
     pi = await owner.harness.pi();
-  const historyEntries = await owner.allEntries();
-  const watch = await watchEvents(pi, root.id, BG);
-  const progress = await restoreToolProgress(pi, watch.snapshot, historyEntries).catch(
-    async (error) => {
+  let record = await owner.submission(runId);
+  if (!record) return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
+  let historyEntries = await owner.allEntries();
+  let watch = await watchEvents(pi, root.id, BG);
+  let progress: Awaited<ReturnType<typeof restoreToolProgress>>;
+  let projector: Awaited<ReturnType<ConversationAgent['progressProjector']>>;
+  try {
+    projector = await owner.progressProjector();
+    const latest = await owner.submission(runId);
+    if (!latest) {
       await watch.stop();
-      throw error;
-    },
-  );
-  const projector = await owner.progressProjector().catch(async (error) => {
+      return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
+    }
+    if (
+      record.status !== 'done' &&
+      record.status !== 'unanswered' &&
+      (latest.status === 'done' || latest.status === 'unanswered')
+    ) {
+      // A terminal receipt may be newer than this watch's prefix. Acquire a fresh
+      // prefix after that receipt so final entries cannot be lost when we close.
+      // A still-pending receipt instead relies on the existing watch's queued events.
+      await watch.stop();
+      historyEntries = await owner.allEntries();
+      watch = await watchEvents(pi, root.id, BG);
+    }
+    record = latest;
+    progress = await restoreToolProgress(pi, watch.snapshot, historyEntries);
+  } catch (error) {
     await watch.stop();
     throw error;
-  });
-  let record = await owner.submission(runId);
-  if (!record) {
-    await watch.stop();
-    return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
   }
   const entries = new Map(historyEntries.map((e) => [Number(e.id), e]));
   let committedRemote: Record<string, RemoteIntent> | undefined;
@@ -48,7 +62,14 @@ export async function observeRun(
       }
     }
   });
-  const initialRemote = (await pi.snapshot(RemoteIntents, root.id, BG))?.operations ?? {};
+  const initialRemote =
+    (
+      await pi.snapshot(RemoteIntents, root.id, BG).catch(async (error) => {
+        unsubscribe();
+        await watch.stop();
+        throw error;
+      })
+    )?.operations ?? {};
   const fold = new StreamFold();
   // A committed snapshot must update the draft already visible in this observation.
   // Pi entry ids remain authoritative in storage and on the next attachment.
@@ -177,7 +198,6 @@ export async function observeRun(
             if (event.type === 'submission' && event.record.id === record!.id) {
               record = event.record;
               state();
-              if (terminal()) return;
             } else if (
               event.type === 'tool_execution_start' ||
               event.type === 'tool_execution_update' ||
@@ -235,6 +255,8 @@ export async function observeRun(
               history(entry);
             }
           }
+          // Process every result in the atomic publication before closing on its receipt.
+          terminal();
         } catch {
           emit({
             type: EventType.RUN_ERROR,
