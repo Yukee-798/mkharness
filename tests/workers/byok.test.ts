@@ -58,6 +58,45 @@ it('reads completed history after its model is removed and accepts a remaining m
   await settle(stub);
   expect((await stub.submission(next)).status).toBe('done');
 });
+it('settles a host acceptance gap with no_model after catalog removal while retaining history and Stop', async () => {
+  const { store, stub: original } = await fixture();
+  await store.save('fixture', { apiKey: 'key-original', expectedCurrentId: null });
+  await runInDurableObject(original, (instance) => {
+    const probe = instance as unknown as { harness: PiHarness; reconcile(): Promise<void> };
+    probe.reconcile = async () => {};
+    probe.harness.submit = async () => {
+      throw new AppError(503, 'fixture_before_native_acceptance');
+    };
+  });
+  const runId = crypto.randomUUID();
+  expect(
+    await original.submitRun({
+      runId,
+      text: 'pending on removed model',
+      config: { provider: 'fixture', modelId: 'fixture-pro', thinkingLevel: 'high' },
+    }),
+  ).toMatchObject({ error: { code: 'fixture_before_native_acceptance' } });
+  await runInDurableObject(original, (_instance, state) => {
+    state.storage.sql.exec('CREATE TABLE test_removed_model(id TEXT)');
+    state.storage.sql.exec('INSERT INTO test_removed_model VALUES(?)', 'fixture-pro');
+  });
+  await abortAllDurableObjects();
+  const stub = (env as any).BYOK_PROBES.get(original.id);
+  await expect
+    .poll(async () => (await stub.submission(runId))?.status, { timeout: 6000 })
+    .toBe('unanswered');
+  expect(await stub.submission(runId)).toMatchObject({ reason: 'no_model' });
+  expect(JSON.stringify(await settle(stub))).toContain('pending on removed model');
+  expect(await stub.stopConversation()).toMatchObject({ stopping: true });
+  await expect.poll(async () => JSON.parse(await stub.snapshot()).stopping).toBe(false);
+  const next = crypto.randomUUID();
+  expect(await stub.submitRun({ runId: next, text: 'remaining model' })).toMatchObject({
+    accepted: true,
+  });
+  await settle(stub);
+  expect(await stub.submission(next)).toMatchObject({ status: 'done' });
+  expect((await stub.calls()).every((call: any) => call.model !== 'fixture-pro')).toBe(true);
+});
 it('withdraws an idle follower on cold start even when its model was removed', async () => {
   const { store, stub: original } = await fixture();
   await store.save('fixture', { apiKey: 'key-original', expectedCurrentId: null });
@@ -172,7 +211,7 @@ it('reconciles an already completed native receipt without its removed model or 
   expect(after.entries).toEqual(snapshot.entries);
   expect((await stub.submission(request.runId)).status).toBe('done');
 });
-it('freezes real D1 key versions through queue, duplicate acceptance and DO reconstruction', async () => {
+it('restores prepared D1 credentials while queued messages use the latest accepted configuration', async () => {
   const { store, stub: original } = await fixture();
   let stub = original;
   const first = await store.save('fixture', {
@@ -186,6 +225,7 @@ it('freezes real D1 key versions through queue, duplicate acceptance and DO reco
     config: { provider: 'fixture', modelId: 'fixture', thinkingLevel: 'low' as const },
   };
   expect(await stub.submitRun(a)).toMatchObject({ accepted: true });
+  await expect.poll(async () => (await stub.calls()).length).toBe(1);
   const second = await store.save('fixture', {
     apiKey: 'key-second',
     baseUrl: 'https://second.example.com/v1',
@@ -197,11 +237,13 @@ it('freezes real D1 key versions through queue, duplicate acceptance and DO reco
     config: { provider: 'fixture', modelId: 'fixture-pro', thinkingLevel: 'high' as const },
   };
   expect(await stub.submitRun(b)).toMatchObject({ accepted: true });
-  await store.save('fixture', {
+  const third = await store.save('fixture', {
     apiKey: 'key-third',
     baseUrl: 'https://third.example.com/v1',
     expectedCurrentId: second.currentId,
   });
+  const c = { runId: crypto.randomUUID(), text: 'third', config: b.config };
+  expect(await stub.submitRun(c)).toMatchObject({ accepted: true });
   expect(await stub.submitRun(b)).toMatchObject({ accepted: true });
   await abortAllDurableObjects();
   stub = (env as any).BYOK_PROBES.get(stub.id);
@@ -212,16 +254,17 @@ it('freezes real D1 key versions through queue, duplicate acceptance and DO reco
   expect(records.map((r: any) => JSON.parse(r.payload).execution.credentialRef.id)).toEqual([
     first.currentId,
     second.currentId,
+    third.currentId,
   ]);
   const calls = await stub.calls();
   expect(
     calls.every((c: any) =>
       c.model === 'fixture'
         ? c.version === 'first' && c.base_url === 'https://first.example.com/v1'
-        : c.version === 'second' && c.base_url === 'https://second.example.com/v1',
+        : c.version === 'third' && c.base_url === 'https://third.example.com/v1',
     ),
   ).toBe(true);
-  expect(calls.some((c: any) => c.model === 'fixture-pro' && c.version === 'second')).toBe(true);
+  expect(calls.some((c: any) => c.model === 'fixture-pro' && c.version === 'third')).toBe(true);
   expect(JSON.stringify(snapshot)).not.toMatch(/key-first|key-second|key-third|mkharness-bound/);
   expect(JSON.stringify(records)).not.toMatch(/key-first|key-second|key-third/);
 });
@@ -246,7 +289,7 @@ it('rejects missing credentials and forged client credentials before saving a re
     await stub.submitRun({ runId: crypto.randomUUID(), text: 'hello', apiKey: 'forged' }),
   ).toMatchObject({ error: { code: 'invalid_request' } });
 });
-it('inherits real D1 credentials into blocking and overlapping background compaction', async () => {
+it('uses real D1 credential snapshots for blocking and overlapping background compaction', async () => {
   const { store } = await fixture();
   const first = await store.save('fixture', {
     apiKey: 'CANARY-NONSECRET-k1',
@@ -314,4 +357,164 @@ it('inherits real D1 credentials into blocking and overlapping background compac
     keyMatches: true,
     thinking: 'high',
   });
+});
+
+it.each([false, true])(
+  'restores a committed real D1 credential checkpoint without fallback (revoked=%s)',
+  async (revoked) => {
+    const { store, stub: original } = await fixture();
+    const first = await store.save('fixture', {
+      apiKey: 'key-first',
+      baseUrl: 'https://first.example.com/v1',
+      expectedCurrentId: null,
+    });
+    let entered = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await runInDurableObject(original, (instance) => {
+      const probe = instance as unknown as { credentials(): Promise<CredentialAccess> };
+      const originalCredentials = probe.credentials.bind(instance);
+      let once = true;
+      probe.credentials = async () => {
+        const credentials = await originalCredentials();
+        return {
+          select: credentials.select.bind(credentials),
+          resolve: async (...args: Parameters<typeof credentials.resolve>) => {
+            if (once) {
+              once = false;
+              entered = true;
+              await gate;
+            }
+            return credentials.resolve(...args);
+          },
+        };
+      };
+    });
+    const a = crypto.randomUUID(),
+      b = crypto.randomUUID();
+    try {
+      await original.submitRun({ runId: a, text: 'prepared first' });
+      await expect.poll(() => entered).toBe(true); // auth resolves after native request checkpoint
+      const second = await store.save('fixture', {
+        apiKey: 'key-second',
+        baseUrl: 'https://second.example.com/v1',
+        expectedCurrentId: first.currentId,
+      });
+      await original.submitRun({
+        runId: b,
+        text: 'queued second',
+        config: { provider: 'fixture', modelId: 'fixture-pro', thinkingLevel: 'high' },
+      });
+      if (revoked) {
+        await store.remove('fixture', second.currentId);
+        await store.save('fixture', { apiKey: 'key-third', expectedCurrentId: null });
+      }
+      await abortAllDurableObjects();
+      const stub = (env as any).BYOK_PROBES.get(original.id);
+      await settle(stub);
+      const calls = await stub.calls();
+      if (revoked) {
+        expect(calls).toEqual([]);
+        expect(await stub.submission(a)).toMatchObject({
+          status: 'unanswered',
+          reason: 'model_error',
+        });
+      } else {
+        expect(calls).toEqual([
+          { model: 'fixture', version: 'first', base_url: 'https://first.example.com/v1' },
+          { model: 'fixture-pro', version: 'second', base_url: 'https://second.example.com/v1' },
+        ]);
+        expect(await stub.submission(a)).toMatchObject({ status: 'done' });
+        expect(await stub.submission(b)).toMatchObject({ status: 'done' });
+      }
+    } finally {
+      release();
+    }
+  },
+);
+
+it('rolls a configure/submit acceptance gap forward before a newer configuration update', async () => {
+  const { store, stub } = await fixture();
+  const first = await store.save('fixture', { apiKey: 'key-first', expectedCurrentId: null });
+  await runInDurableObject(stub, (instance) => {
+    const probe = instance as unknown as { harness: PiHarness; reconcile(): Promise<void> };
+    probe.reconcile = async () => {};
+    const submit = probe.harness.submit.bind(probe.harness);
+    let once = true;
+    probe.harness.submit = async (...args: Parameters<typeof submit>) => {
+      if (once) {
+        once = false;
+        throw new AppError(503, 'fixture_configure_submit_gap');
+      }
+      return submit(...args);
+    };
+  });
+  const a = { runId: crypto.randomUUID(), text: 'older configuration' };
+  expect(await stub.submitRun(a)).toMatchObject({
+    error: { code: 'fixture_configure_submit_gap' },
+  });
+  await store.save('fixture', { apiKey: 'key-second', expectedCurrentId: first.currentId });
+  const b = {
+    runId: crypto.randomUUID(),
+    text: 'newer configuration',
+    config: { provider: 'fixture', modelId: 'fixture-pro', thinkingLevel: 'high' as const },
+  };
+  expect(await stub.submitRun(b)).toMatchObject({ accepted: true });
+  expect(await stub.submitRun(a)).toMatchObject({ accepted: true });
+  await settle(stub);
+  expect(
+    await stub.submitRun({
+      runId: crypto.randomUUID(),
+      text: 'latest unchanged',
+      config: b.config,
+    }),
+  ).toMatchObject({ accepted: true });
+  await settle(stub);
+  const calls = await stub.calls();
+  expect(calls.at(-1)).toMatchObject({ model: 'fixture-pro', version: 'second' });
+  expect(
+    await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec('SELECT accepted FROM app_requests ORDER BY rowid').toArray(),
+    ),
+  ).toEqual([{ accepted: 1 }, { accepted: 1 }, { accepted: 1 }]);
+});
+
+it('restores history after Stop withdraws a configured request before native acceptance', async () => {
+  const { store, stub: original } = await fixture();
+  const first = await store.save('fixture', { apiKey: 'key-first', expectedCurrentId: null });
+  const completed = crypto.randomUUID();
+  await original.submitRun({ runId: completed, text: 'completed history' });
+  await settle(original);
+  await store.save('fixture', { apiKey: 'key-second', expectedCurrentId: first.currentId });
+  await runInDurableObject(original, (instance) => {
+    const probe = instance as unknown as { harness: PiHarness; reconcile(): Promise<void> };
+    probe.reconcile = async () => {};
+    probe.harness.submit = async () => {
+      throw new AppError(503, 'fixture_configure_submit_gap');
+    };
+  });
+  const withdrawn = crypto.randomUUID();
+  expect(
+    await original.submitRun({ runId: withdrawn, text: 'withdraw before acceptance' }),
+  ).toMatchObject({ error: { code: 'fixture_configure_submit_gap' } });
+  await original.stopConversation();
+  await expect.poll(async () => (await settle(original)).stopping).toBe(false);
+  await store.remove('fixture', (await store.metadata('fixture')).currentId);
+  await abortAllDurableObjects();
+  const restored = (env as any).BYOK_PROBES.get(original.id);
+  expect(JSON.stringify(await settle(restored))).toContain('completed history');
+  expect((await restored.submission(completed)).status).toBe('done');
+  expect(
+    await restored.submitRun({ runId: withdrawn, text: 'withdraw before acceptance' }),
+  ).toMatchObject({ error: { code: 'request_withdrawn' } });
+  await store.save('fixture', { apiKey: 'key-third', expectedCurrentId: null });
+  const next = crypto.randomUUID();
+  expect(await restored.submitRun({ runId: next, text: 'after stopped gap' })).toMatchObject({
+    accepted: true,
+  });
+  await settle(restored);
+  expect(await restored.calls()).toEqual([
+    expect.objectContaining({ version: 'first' }),
+    expect.objectContaining({ version: 'third' }),
+  ]);
 });

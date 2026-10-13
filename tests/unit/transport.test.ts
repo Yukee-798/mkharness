@@ -220,3 +220,50 @@ it('cloned observations retain committed identities across runs without acceptin
     vi.unstubAllGlobals();
   }
 });
+
+it('uses the existing attach to deliver scoped runtime issues and their clearance through clones', async () => {
+  const issues = vi.fn();
+  const states = [
+    { runId: 'foreign', runtimeIssues: [{ taskId: 99, code: 'compaction_failed' }] },
+    { runId: 'r', runtimeIssues: [{ taskId: 7, code: 'compaction_failed' }] },
+    { runId: 'r', runtimeIssues: [] },
+  ];
+  const events = [
+    { type: 'RUN_STARTED', threadId: 'c', runId: 'r' },
+    ...states.map((snapshot) => ({ type: 'STATE_SNAPSHOT', snapshot })),
+    { type: 'RUN_FINISHED', threadId: 'c', runId: 'r' },
+  ];
+  const network = vi.fn(
+    async () =>
+      new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+  );
+  vi.stubGlobal('fetch', network);
+  try {
+    const agent = new AttachAgent(
+      'c',
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      new Map(),
+      () => {},
+      () => {},
+      issues,
+    );
+    await new Promise<void>((resolve, reject) =>
+      agent
+        .clone()
+        .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
+        .subscribe({ complete: resolve, error: reject }),
+    );
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(issues.mock.calls).toEqual([
+      ['r', [{ taskId: 7, code: 'compaction_failed' }]],
+      ['r', []],
+    ]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

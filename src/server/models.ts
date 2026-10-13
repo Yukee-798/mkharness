@@ -90,7 +90,7 @@ export function applicationThinkingLevel(env: {
     throw new AppError(503, 'invalid_thinking_level', 'Invalid MODEL_THINKING_LEVEL');
   return level as ModelThinkingLevel;
 }
-/** Catalog registration is independent of credentials. Only task-bound providers may authenticate. */
+/** Catalog registration is independent of credentials. Only immutable credential aliases may authenticate. */
 export function applicationModels(env: ModelEnvironment): Models {
   const models = createModels({
     authContext: { env: async () => undefined, fileExists: async () => false },
@@ -100,9 +100,9 @@ export function applicationModels(env: ModelEnvironment): Models {
       ...definition.factory(),
       auth: {
         apiKey: {
-          name: 'Task-bound credential',
+          name: 'Step-bound credential',
           resolve: async () => {
-            throw new AppError(503, 'execution_binding_required', '模型调用缺少提交时的执行配置');
+            throw new AppError(503, 'execution_binding_required', '模型调用缺少步骤凭据绑定');
           },
         },
       },

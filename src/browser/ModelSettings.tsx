@@ -150,8 +150,8 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
         </p>
       )}
       <p className="text-xs leading-relaxed text-muted-foreground">
-        修改 Base URL 或 Key
-        只影响新请求。旧版本最多保留七天供已提交任务恢复；移除会撤销全部版本。更换浏览器或清除
+        保存后，下次提交消息时应用新配置，并影响该会话尚未准备的模型调用（含排队消息和压缩）。
+        已保存的步骤快照继续使用原版本；旧版本最多保留七天供恢复。移除会撤销全部版本。更换浏览器或清除
         Cookie 后无法找回访客身份。部署者可以解密 Key。
       </p>
       <div className="flex gap-2">

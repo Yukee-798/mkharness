@@ -1,33 +1,42 @@
-diff --git a/dist/harness/pi/index.d.ts b/dist/harness/pi/index.d.ts
-index 32a6fabf879e83f56e80761e7162216f887e3ff4..7a20e09a1d1283a6be5152d877d7d83067e954c1 100644
---- a/dist/harness/pi/index.d.ts
-+++ b/dist/harness/pi/index.d.ts
-@@ -59,6 +59,8 @@ type PiSubmitOptions = {
-   /** Default: the root session. */ readonly session?: PiSessionId /** Idempotency key. Submitting the same id twice returns the same receipt. */;
-   readonly operationId?: string;
-   readonly whenBusy?: PiWhenBusy;
-+  /** Frozen per submission before prepare; forwarded to native Pi. */
-+  readonly execution?: import("@earendil-works/pi-durable").SubmissionExecution;
- };
- type PiSessionOptions = {
-   /** Default: the root session. */ readonly session?: PiSessionId;
 diff --git a/dist/harness/pi/index.js b/dist/harness/pi/index.js
-index 9fceb9c0621a5a06202e235877184deb45d1d029..cf9a35f91ff03e44d21d2eee66ff904346f8d411 100644
 --- a/dist/harness/pi/index.js
 +++ b/dist/harness/pi/index.js
-@@ -416,7 +416,8 @@ var PiHarness = class extends LifecycleCapability {
- 				type: "input",
- 				content: input,
- 				whenBusy: options.whenBusy ?? "followUp",
--				requestId: operationId
-+				requestId: operationId,
-+				execution: options.execution
- 			}, BG);
- 		} finally {
- 			const left = (_classPrivateFieldGet2(_admitting, this).get(session) ?? 1) - 1;
-@@ -869,5 +870,3 @@ async function skills(sources) {
+@@ -534,10 +535,18 @@ async function _doOpen() {
+ 	});
+ 	await pi.root(BG, { agent: this.agentDefaults() });
+ 	pi.resume();
+-	return {
+-		pi,
+-		storage
+-	};
++	const handle = { pi, storage };
++	// Pi 1.2 closes a failed Session itself, Storage included. Invalidate only
++	// its adopted cache entry; never dispose an opening factory or start a replacement.
++	void pi.closed.then((end) => {
++		if (end.reason !== "failed") return;
++		const opening = _classPrivateFieldGet2(_opening, this);
++		void opening?.then((current) => {
++			if (current === handle && _classPrivateFieldGet2(_opening, this) === opening)
++				_classPrivateFieldSet2(_opening, this, void 0);
++		}, () => {});
++	});
++	return handle;
+ }
+ async function _findSubmission(id, operationId, context) {
+ 	const { pi, storage } = await _assertClassBrand(_PiHarness_brand, this, _open).call(this);
+@@ -692,7 +701,7 @@ function skillsFingerprint(sources) {
+ 	return sources.map((source) => `${source.id}:${source.fingerprint}`).join("|");
+ }
+ function textResult(text) {
+-	return { content: [{
++	return { output: [{
+ 		type: "text",
+ 		text
+ 	}] };
+@@ -869,5 +878,3 @@ async function skills(sources) {
  }
  //#endregion
  export { PiHarness, PiSession, PiSessions, ROOT_SESSION, openPiSessionStore, skills };
 -
 -//# sourceMappingURL=index.js.map
+\ No newline at end of file

@@ -1,18 +1,8 @@
-import type { Storage, DocumentRecord } from '@earendil-works/pi-durable';
-
-const context: Parameters<Storage['close']>[0] = {
-  abortSignal: undefined,
-  value: () => undefined,
-  toString: () => '[Pi storage validation]',
-};
+import type { Storage } from '@earendil-works/pi-durable';
 
 export class RuntimeStorageError extends Error {
-  constructor(
-    readonly code: 'runtime_superseded' | 'runtime_storage_invalid',
-    readonly documentId?: number,
-    options?: ErrorOptions,
-  ) {
-    super(code, options);
+  constructor(readonly code: 'runtime_superseded') {
+    super(code);
     this.name = 'RuntimeStorageError';
   }
 }
@@ -54,39 +44,4 @@ export function claimPiStorage(
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-}
-
-/** Restore before enabling scheduling, so invalid data cannot enter Pi's retry loop. */
-export async function validatePiStorage(storage: Storage): Promise<void> {
-  const scopes: DocumentRecord['scope'][] = [{ kind: 'session' }];
-  let cursor;
-  do {
-    const page = await storage.scanConversations({}, 100, cursor, context);
-    scopes.push(
-      ...page.items.map((record) => ({ kind: 'conversation' as const, conversationId: record.id })),
-    );
-    cursor = page.next;
-  } while (cursor);
-  for (const status of ['pending', 'running', 'waiting', 'completing'] as const) {
-    cursor = undefined;
-    do {
-      const page = await storage.scanTasks({ status }, 100, cursor, context);
-      scopes.push(...page.items.map((record) => ({ kind: 'task' as const, taskId: record.id })));
-      cursor = page.next;
-    } while (cursor);
-  }
-  for (const scope of scopes) {
-    cursor = undefined;
-    do {
-      const page = await storage.scanDocuments({ scope, at: 'current' }, 100, cursor, context);
-      for (const record of page.items) {
-        try {
-          await storage.document(record.id, 'current', context);
-        } catch (cause) {
-          throw new RuntimeStorageError('runtime_storage_invalid', Number(record.id), { cause });
-        }
-      }
-      cursor = page.next;
-    } while (cursor);
-  }
 }

@@ -554,7 +554,7 @@ export function remoteExample(
           const result = settled.state.outcome.result;
           return {
             isError: !result?.ok,
-            content: [
+            output: [
               { type: 'text', text: jsonText(result ?? { ok: false, code: 'remote_task_failed' }) },
             ],
             details: { remoteTaskId: Number(api.taskId) },
@@ -590,7 +590,7 @@ export function remoteExample(
           if (!remoteId)
             return {
               isError: true,
-              content: [{ type: 'text', text: 'remote_outcome_unknown' }],
+              output: [{ type: 'text', text: 'remote_outcome_unknown' }],
               details: { remoteTaskId: originalId },
             };
           const response = remoteObservation(
@@ -610,7 +610,7 @@ export function remoteExample(
             if (response.status !== 'pending') current.status = response.status;
           }, context);
           return {
-            content: [
+            output: [
               {
                 type: 'text',
                 text: jsonText(response),

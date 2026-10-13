@@ -1,5 +1,7 @@
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import { Harness } from '@earendil-works/pi-durable';
+import { BG } from '../../src/server/conversation';
 import type { LifecycleProbe } from './lifecycle-entry';
 
 const probes = (env as unknown as { LIFECYCLE_PROBES: DurableObjectNamespace<LifecycleProbe> })
@@ -149,4 +151,92 @@ it('joins application deletion before closing and deleting real storage once', a
     { phase: 'delete', closed: 1 },
     { phase: 'remaining', closed: 0 },
   ]);
+});
+
+it('releases a failed native Session only after close and reopens from the same SQLite', async () => {
+  const stub = probes.getByName(crypto.randomUUID());
+  await stub.submitRun({ runId: crypto.randomUUID(), text: 'skill activation' });
+  const before = await settle(stub);
+  await runInDurableObject(stub, async (instance) => {
+    const pi = await instance.harness.pi();
+    const storage = await instance.harness.storage();
+    const read = vi
+      .spyOn(storage, 'scanConversations')
+      .mockRejectedValueOnce(new Error('fixture storage failure'));
+    await expect(pi.commit((tx) => tx.scanConversations({}, 1), {} as any)).rejects.toThrow(
+      'fixture storage failure',
+    );
+    expect(await pi.closed).toMatchObject({ reason: 'failed' });
+    await expect(pi.commit((tx) => tx.scanConversations({}, 1), {} as any)).rejects.toMatchObject({
+      name: 'SessionFailed',
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+    read.mockRestore();
+    await pause();
+    expect(instance.probe().opens).toBe(1); // Invalidation must not eagerly reconstruct.
+    // PiHarness releases only the adopted failed handle after native close.
+    for (let i = 0; i < 100 && instance.probe().opens === 1; i++) {
+      await instance.root();
+      await pause();
+    }
+    const restored = await instance.harness.pi();
+    expect(restored).not.toBe(pi);
+    expect(instance.probe().opens).toBe(2);
+    expect(JSON.parse(await instance.snapshot()).entries).toEqual(before.entries);
+    expect(instance.probe().counts).toEqual([
+      { name: 'activate_skill', n: 1 },
+      { name: 'read_skill_resource', n: 1 },
+    ]);
+  });
+});
+
+it('does not release an opening handle when its Session fails before factory adoption', async () => {
+  const stub = probes.getByName(crypto.randomUUID());
+  await stub.submitRun({ runId: crypto.randomUUID(), text: 'skill activation' });
+  await settle(stub);
+  await runInDurableObject(stub, async (instance) => {
+    await instance.harness.dispose();
+    let reportFailure!: () => void, finishFactory!: () => void;
+    const failed = new Promise<void>((resolve) => (reportFailure = resolve));
+    const barrier = new Promise<void>((resolve) => (finishFactory = resolve));
+    const open = Harness.open.bind(Harness);
+    const opening = vi.spyOn(Harness, 'open').mockImplementationOnce(async (...args) => {
+      const pi = await open(...args);
+      const conversation = pi.conversation.bind(pi);
+      pi.conversation = async (...input) => {
+        pi.conversation = conversation;
+        const read = vi
+          .spyOn(args[0], 'scanConversations')
+          .mockRejectedValueOnce(new Error('fixture initialization failure'));
+        try {
+          await pi.commit((tx) => tx.scanConversations({}, 1), BG);
+        } catch (error) {
+          await pi.closed;
+          read.mockRestore();
+          reportFailure();
+          await barrier;
+          throw error;
+        }
+        return conversation(...input);
+      };
+      return pi;
+    });
+    const first = instance.harness.pi().catch((error: Error) => error);
+    await failed;
+    const second = instance.harness.pi().catch((error: Error) => error);
+    try {
+      await pause();
+      expect(instance.probe().opens).toBe(2);
+    } finally {
+      finishFactory();
+      await Promise.all([first, second]);
+      opening.mockRestore();
+    }
+    expect(await first).toBeInstanceOf(Error);
+    expect(await second).toBeInstanceOf(Error);
+    expect(instance.probe().opens).toBe(2);
+    const replacement = await instance.harness.pi();
+    expect(await instance.harness.pi()).toBe(replacement);
+    expect(instance.probe().opens).toBe(3);
+  });
 });

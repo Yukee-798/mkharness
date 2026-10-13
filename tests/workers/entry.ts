@@ -27,7 +27,7 @@ const progressProbe = defineTool({
     api.output('ghijkl');
     await api.details({ round, phase: 'last' }, context);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    return { content: [{ type: 'text', text: `round ${round}` }] };
+    return { output: [{ type: 'text', text: `round ${round}` }] };
   },
 });
 export class ConversationAgent extends Base {
@@ -58,7 +58,7 @@ export class ConversationAgent extends Base {
       return [
         {
           serverId: 'reference',
-          endpoint: 'https://mcp.example.test/mcp',
+          endpoint: 'https://mcp.example.test/mcp?conversation=' + this.ctx.id.toString(),
           credential: sql.exec("SELECT key FROM test_mcp WHERE key='credential-probe'").toArray()
             .length
             ? 'MCP_FIXTURE_TOKEN'
@@ -162,7 +162,7 @@ export class ConversationAgent extends Base {
             replay: 'safe',
             execute: async () => {
               await new Promise((r) => setTimeout(r, 800));
-              return { content: [{ type: 'text' as const, text: 'completed' }] };
+              return { output: [{ type: 'text' as const, text: 'completed' }] };
             },
           }),
         ],
@@ -211,7 +211,7 @@ export class ConversationAgent extends Base {
                           body: JSON.stringify(args),
                         });
                         return {
-                          content: [{ type: 'text' as const, text: 'guardless negative control' }],
+                          output: [{ type: 'text' as const, text: 'guardless negative control' }],
                         };
                       },
                     }

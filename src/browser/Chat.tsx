@@ -34,6 +34,7 @@ import { TooltipIconButton } from './tooltip-icon-button';
 import { ToolActivity } from './tool-activity';
 import { useExtensionConfig } from './extension-config';
 import { ToolProgressContext } from './tool-progress';
+import type { RuntimeIssue } from '../shared/runtime-issues';
 import type { ToolProgressMap } from '../shared/tool-progress';
 import type { ExtensionState } from '../shared/extension-state';
 import { AssistantFooter } from './assistant-footer';
@@ -59,7 +60,7 @@ export type Snapshot = {
   modelCatalog?: ModelCatalog;
   selection?: ModelSelection;
   remote?: RemoteProgress[];
-  runtimeIssues?: { taskId: number; code: string }[];
+  runtimeIssues?: RuntimeIssue[];
 };
 export async function loadSnapshot(id: string, signal?: AbortSignal) {
   const first = await request<Snapshot>(`/conversations/${id}/snapshot`, { signal });
@@ -257,11 +258,6 @@ export function Chat({
   const ComposerRoot = snapshot ? ComposerPrimitive.Root : 'form';
   const footer = (
     <div className="space-y-3">
-      {!!snapshot?.runtimeIssues?.length && (
-        <Alert>
-          <AlertDescription>部分任务无法恢复，请联系应用维护者。</AlertDescription>
-        </Alert>
-      )}
       {remote
         .filter((o) =>
           [
@@ -543,6 +539,7 @@ function Runtime({
   footer: ReactNode;
 }) {
   const extensions = useExtensionConfig(userId);
+  const [runtimeIssues, setRuntimeIssues] = useState<RuntimeIssue[]>(snapshot.runtimeIssues ?? []);
   const [toolProgress, setToolProgress] = useState<ToolProgressMap>(snapshot.toolProgress ?? {});
   const [extensionState, setExtensionState] = useState<ExtensionState>(
     snapshot.extensionState ?? {},
@@ -585,6 +582,17 @@ function Runtime({
           const pending = callbacks.current.snapshot.pending;
           const active = pending.find((item) => item.status === 'running') ?? pending[0];
           if (active?.operationId === runId) setExtensionState(value);
+        },
+        (runId, value) => {
+          const pending = callbacks.current.snapshot.pending;
+          const active = pending.find((item) => item.status === 'running') ?? pending[0];
+          if (active?.operationId === runId)
+            setRuntimeIssues([
+              ...(callbacks.current.snapshot.runtimeIssues ?? []).filter(
+                (issue) => issue.code !== 'compaction_failed',
+              ),
+              ...value,
+            ]);
         },
       ),
     [id, messageIds],
@@ -671,6 +679,17 @@ function Runtime({
                       >
                         重试加载
                       </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {(activeRunId ? runtimeIssues : (snapshot.runtimeIssues ?? [])).length > 0 && (
+                  <Alert>
+                    <AlertDescription>
+                      {(activeRunId ? runtimeIssues : (snapshot.runtimeIssues ?? [])).some(
+                        (issue) => issue.code === 'compaction_failed',
+                      )
+                        ? '上下文压缩失败，部分任务可能无法继续。请检查模型配置后再发送请求。'
+                        : '部分任务无法恢复，请联系应用维护者。'}
                     </AlertDescription>
                   </Alert>
                 )}

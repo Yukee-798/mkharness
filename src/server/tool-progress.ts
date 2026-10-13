@@ -29,10 +29,12 @@ export async function restoreToolProgress(
       const task =
         restoredTasks?.find((task) => task.id === slot.taskId) ??
         (await pi.getTask(slot.taskId, BG));
-      const input = task?.input as { assistant?: number; callId?: string } | undefined;
+      const input = task?.input as
+        { kind?: string; assistant?: number; callId?: string } | undefined;
       if (
         task?.kind !== 'pi.tool' ||
-        input?.callId !== slot.callId ||
+        input?.kind !== 'model' ||
+        input.callId !== slot.callId ||
         !input.assistant ||
         (assistant !== undefined && assistant !== input.assistant)
       )
@@ -64,8 +66,8 @@ export async function restoreToolProgress(
         task.state.status === 'terminal' &&
         task.state.outcome.status !== 'completed'
       ) {
-        const input = task.input as { assistant?: number; callId?: string };
-        if (input.assistant && typeof input.callId === 'string')
+        const input = task.input as { kind?: string; assistant?: number; callId?: string };
+        if (input.kind === 'model' && input.assistant && typeof input.callId === 'string')
           fold.end(`${input.assistant}.${encodeURIComponent(input.callId)}`, false);
       }
   };

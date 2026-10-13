@@ -10,7 +10,6 @@ import {
   hook,
   AssistantEntry,
   UserEntry,
-  type SubmissionExecution,
 } from '@earendil-works/pi-durable';
 import { Type, createModels } from '@earendil-works/pi-ai';
 import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
@@ -46,6 +45,8 @@ export class BindingProbe extends Agent<any> {
   gateRelease?: () => void;
   compactRelease?: () => void;
   prepareRelease?: () => void;
+  requestRelease?: () => void;
+  summaryRelease?: () => void;
   constructor(ctx: DurableObjectState, env: any) {
     super(ctx, env);
     ctx.storage.sql.exec(
@@ -125,7 +126,7 @@ export class BindingProbe extends Agent<any> {
                 this.log('tool-enter', {});
                 if (!(await ctx.storage.get('release-tool'))) await this.waitGate('tool', context);
                 this.log('tool-done', {});
-                return { content: [{ type: 'text', text: 'tool complete' }] };
+                return { output: [{ type: 'text', text: 'tool complete' }] };
               },
             },
           ],
@@ -144,6 +145,10 @@ export class BindingProbe extends Agent<any> {
           ],
           hooks: [
             hook(GenerationTask, {
+              beforeRequest: async (_input, api, context) => {
+                this.log('request-ready', { taskId: api.taskId });
+                if (await ctx.storage.get('gate-request')) await this.waitGate('request', context);
+              },
               onYield: (message) =>
                 message.content.some(
                   (part) => part.type === 'text' && part.text === 'answer yield-A',
@@ -181,11 +186,13 @@ export class BindingProbe extends Agent<any> {
       JSON.stringify(data),
     );
   }
-  async waitGate(which: 'tool' | 'compact' | 'prepare', context: any) {
+  async waitGate(which: 'tool' | 'compact' | 'prepare' | 'request' | 'summary', context: any) {
     await new Promise<void>((resolve) => {
       if (which === 'tool') this.gateRelease = resolve;
       else if (which === 'compact') this.compactRelease = resolve;
-      else this.prepareRelease = resolve;
+      else if (which === 'prepare') this.prepareRelease = resolve;
+      else if (which === 'request') this.requestRelease = resolve;
+      else this.summaryRelease = resolve;
       if (context.abortSignal?.aborted) resolve();
       else context.abortSignal?.addEventListener('abort', resolve, { once: true });
     });
@@ -224,12 +231,24 @@ export class BindingProbe extends Agent<any> {
         )
         .one().n,
     );
+    const summaryAttempt = Number(
+      this.ctx.storage.sql
+        .exec(
+          "SELECT COUNT(*) AS n FROM probe_log WHERE event='provider' AND json_extract(data,'$.summary')=1",
+        )
+        .one().n,
+    );
+    const retrySummary =
+      this.ctx.storage.sql.exec("SELECT seq FROM probe_log WHERE event='retry-summary'").toArray()
+        .length > 0;
     const injected =
-      !summary && attempt === 1 && text?.includes('retry-A')
+      summary && summaryAttempt === 1 && retrySummary
         ? '429 rate limit'
-        : !summary && attempt === 1 && text?.includes('overflow-A')
-          ? 'maximum context length exceeded'
-          : undefined;
+        : !summary && attempt === 1 && text?.includes('retry-A')
+          ? '429 rate limit'
+          : !summary && attempt === 1 && text?.includes('overflow-A')
+            ? 'maximum context length exceeded'
+            : undefined;
     const events = new AssistantMessageEventStream();
     const message: any = {
       role: 'assistant',
@@ -255,7 +274,13 @@ export class BindingProbe extends Agent<any> {
       else events.push({ type: 'done', reason: tool ? 'toolUse' : 'stop', message });
       events.end(message);
     };
-    setTimeout(done, 15);
+    if (summary)
+      void (async () => {
+        if (await this.ctx.storage.get('gate-summary'))
+          await this.waitGate('summary', { abortSignal: options.signal });
+        done();
+      })();
+    else setTimeout(done, 15);
     return events;
   }
   async useD1Credentials(
@@ -277,26 +302,17 @@ export class BindingProbe extends Agent<any> {
   }
   async mode(name: string, value = true) {
     if (name === 'retry-enabled') this.probeSettings.retry.enabled = value;
+    if (name === 'retry-summary') this.log('retry-summary', {});
+    if (name === 'long-retry') this.probeSettings.retry.baseDelayMs = value ? 1000 : 10;
     if (name === 'all-followups') this.probeSettings.followUpMode = value ? 'all' : 'one-at-a-time';
     await this.ctx.storage.put(name, value);
   }
-  async submit(id: string, text: string, version: string, setModel = false) {
-    const bindings = (await this.ctx.storage.get<Record<string, Binding>>('bindings')) ?? {};
-    if (!bindings[id]) {
-      bindings[id] = ref(version);
-      await this.ctx.storage.put('bindings', bindings);
-    }
-    if (setModel) await this.configure(bindings[id]);
-    const b = bindings[id];
-    const execution: SubmissionExecution = {
-      model: { provider: b.provider, modelId: b.modelId },
-      thinkingLevel: b.thinkingLevel,
-    };
-    return this.harness.submit(text, {
-      operationId: id,
-      whenBusy: 'followUp',
-      execution,
-    });
+  async submit(id: string, text: string, version: string, _setModel = false) {
+    const root = await (await this.harness.pi()).root(BG);
+    if (await root.commit((tx) => tx.submissionByRequest(root.id, id), BG))
+      return { operationId: id, accepted: false };
+    await this.configure(ref(version));
+    return this.harness.submit(text, { operationId: id, whenBusy: 'followUp' });
   }
   async submitDraft(draft: any) {
     const root = await (await this.harness.pi()).root(BG);
@@ -307,10 +323,16 @@ export class BindingProbe extends Agent<any> {
       return { error: (error as Error).message };
     }
   }
-  async release(which: 'tool' | 'compact') {
+  async release(which: 'tool' | 'compact' | 'request' | 'summary') {
     if (which === 'tool') {
       await this.ctx.storage.put('release-tool', true);
       this.gateRelease?.();
+    } else if (which === 'request') {
+      await this.ctx.storage.put('gate-request', false);
+      this.requestRelease?.();
+    } else if (which === 'summary') {
+      await this.ctx.storage.put('gate-summary', false);
+      this.summaryRelease?.();
     } else {
       await this.ctx.storage.put('gate-compact', false);
       this.compactRelease?.();
@@ -362,15 +384,8 @@ export class BindingProbe extends Agent<any> {
     }, BG);
   }
   async compact(version = 'k1') {
-    const pi = await this.harness.pi();
-    const root = await pi.root(BG);
-    const b = ref(version);
-    return root.compact('probe manual', BG, {
-      execution: {
-        model: { provider: b.provider, modelId: b.modelId },
-        thinkingLevel: b.thinkingLevel,
-      },
-    });
+    await this.configure(ref(version));
+    return (await (await this.harness.pi()).root(BG)).compact('probe manual', BG);
   }
   async stop() {
     return this.harness.abort();
@@ -423,10 +438,6 @@ export class BindingProbe extends Agent<any> {
           CompactionTask,
           {
             reason: 'manual',
-            execution: {
-              model: { provider: 'canary-k1', modelId: 'small' },
-              thinkingLevel: 'high',
-            },
           },
           { ownership: { kind: 'conversation' }, background: true },
         ),

@@ -9,7 +9,10 @@ import { durableReload } from './config/durable-reload';
 // Miniflare's local trace store has no retention policy. Keep console diagnostics,
 // but only collect persistent spans/logs when explicitly requested for debugging.
 process.env.X_LOCAL_OBSERVABILITY ??= 'false';
+const browserTests = process.env.AGENT_E2E_FIXTURES === '1';
 export default defineConfig({
+  // Exercise bundled assets in E2E without mixing test fixtures into deploy output.
+  ...(browserTests ? { build: { outDir: '.wrangler/e2e-build' } } : {}),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

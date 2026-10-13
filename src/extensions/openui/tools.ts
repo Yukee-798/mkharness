@@ -67,6 +67,7 @@ async function ref(api: ToolExecutionApi, context: Parameters<Harness['close']>[
     !input ||
     typeof input !== 'object' ||
     Array.isArray(input) ||
+    input.kind !== 'model' ||
     typeof input.assistant !== 'number'
   )
     throw new Error('Missing Pi calling entry');
@@ -113,6 +114,7 @@ export function panelTools(
 ): Extension {
   const prepare = defineTool({
     name: 'prepare_program',
+    callers: ['model'],
     // The bounded compute result plus its small, generated reference envelope.
     outputLimits: { ...JSON_TOOL_OUTPUT_LIMITS, maxBytes: JSON_TOOL_OUTPUT_LIMITS.maxBytes + 1024 },
     description:
@@ -154,12 +156,12 @@ export function panelTools(
               },
               actualOutput: preview(computed.value, 2048),
             };
-            return { isError: true, content: [{ type: 'text', text: jsonText(diagnostic, 8192) }] };
+            return { isError: true, output: [{ type: 'text', text: jsonText(diagnostic, 8192) }] };
           }
         }
         const programRef = await ref(api, context);
         return {
-          content: [
+          output: [
             {
               type: 'text',
               text: jsonText(
@@ -173,7 +175,7 @@ export function panelTools(
       } catch (error) {
         return {
           isError: true,
-          content: [
+          output: [
             { type: 'text', text: error instanceof Error ? error.message : 'Invalid program' },
           ],
         };
@@ -182,6 +184,7 @@ export function panelTools(
   });
   const present = defineTool({
     name: 'present_openui',
+    callers: ['model'],
     description:
       'Display the final answer or clarification questions using complete OpenUI Lang and the supplied component catalog. Call this tool alone after all necessary research and computation. Include useful next steps in the displayed content. Success commits the answer and ends this reply without another model round; validation failure permits repair. Printing UI code in chat does not render it. Static content and forms need no programRef. Optional programRef must refer to a committed successful prepare_program in this chat. Use native Query/Set/Reset and ToAssistant for explicit user submission.',
     parameters: Type.Object({
@@ -196,7 +199,7 @@ export function panelTools(
         await validateUI(args.ui, !!args.programRef);
         const panelRef = await ref(api, context);
         return {
-          content: [{ type: 'text', text: JSON.stringify({ panelRef, ready: true }) }],
+          output: [{ type: 'text', text: JSON.stringify({ panelRef, ready: true }) }],
           details: { ref: panelRef },
           // Pi commits the result before ending this run and placing queued inputs.
           control: { terminate: true },
@@ -204,7 +207,7 @@ export function panelTools(
       } catch (error) {
         return {
           isError: true,
-          content: [{ type: 'text', text: error instanceof Error ? error.message : 'Invalid UI' }],
+          output: [{ type: 'text', text: error instanceof Error ? error.message : 'Invalid UI' }],
         };
       }
     },

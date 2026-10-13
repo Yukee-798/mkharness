@@ -199,7 +199,7 @@ async function bounded<T>(work: Promise<T>, ms: number): Promise<T> {
 }
 const failure = (code: string) => ({
   isError: true,
-  content: [{ type: 'text' as const, text: JSON.stringify({ error: { code } }) }],
+  output: [{ type: 'text' as const, text: JSON.stringify({ error: { code } }) }],
 });
 function sameDefinition(
   binding: MCPBinding,
@@ -238,7 +238,7 @@ function convertResult(raw: unknown) {
     throw new AppError(503, 'mcp_unsupported_content');
   return {
     isError: value.isError === true,
-    content: [
+    output: [
       ...blocks.map((block) => ({
         type: 'text' as const,
         text: (block as Record<string, Json>).text as string,

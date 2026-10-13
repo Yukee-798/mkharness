@@ -47,9 +47,7 @@ export function exampleExtension(): Extension {
         parameters: Type.Object({ text: Type.String({ maxLength: 32000 }) }),
         replay: 'safe',
         execute: async ({ text }) => ({
-          content: [
-            { type: 'text', text: JSON.stringify({ characters: Array.from(text).length }) },
-          ],
+          output: [{ type: 'text', text: JSON.stringify({ characters: Array.from(text).length }) }],
         }),
       }),
     ],

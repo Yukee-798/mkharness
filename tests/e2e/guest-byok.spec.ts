@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-test('native anonymous identity, empty hero, metadata-only settings and browser isolation', async ({
+test('native anonymous identity survives reload, shares tabs and isolates browsers', async ({
   page,
   context,
   browser,
@@ -14,6 +14,41 @@ test('native anonymous identity, empty hero, metadata-only settings and browser 
   expect(calls.filter((p) => p === 'POST /api/auth/sign-in/anonymous')).toHaveLength(1);
   expect(calls.some((p) => p === 'POST /api/conversations' || p.endsWith('/events'))).toBe(false);
   const first = await (await context.request.get('/api/auth/get-session')).json();
+  await page.reload();
+  await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
+  const restored = await (await context.request.get('/api/auth/get-session')).json();
+  expect(restored.user.id).toBe(first.user.id);
+  const sharedTab = await context.newPage();
+  const sharedCalls: string[] = [];
+  sharedTab.on('request', (r) => sharedCalls.push(new URL(r.url()).pathname));
+  await sharedTab.goto('/');
+  await expect(sharedTab.getByLabel('消息', { exact: true })).toBeVisible();
+  expect(sharedCalls.filter((p) => p === '/api/auth/sign-in/anonymous')).toHaveLength(0);
+  expect((await (await context.request.get('/api/auth/get-session')).json()).user.id).toBe(
+    first.user.id,
+  );
+  await sharedTab.close();
+  const other = await browser.newContext();
+  try {
+    const tab = await other.newPage();
+    await tab.goto('/');
+    await expect(tab.getByLabel('消息', { exact: true })).toBeVisible();
+    const another = await (await other.request.get('/api/auth/get-session')).json();
+    expect(another.user.id).not.toBe(first.user.id);
+  } finally {
+    await other.close();
+  }
+});
+test('metadata-only settings, credential preflight and saved Base URL survive reload', async ({
+  page,
+  context,
+}) => {
+  const calls: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/')) calls.push(r.method() + ' ' + new URL(r.url()).pathname);
+  });
+  await page.goto('/');
+  await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
   const settings = await (await context.request.get('/api/settings/models')).json();
   const selected = settings.modelCatalog.models.find((m: any) => m.provider === 'deepseek');
   expect(selected).toBeTruthy();
@@ -50,25 +85,10 @@ test('native anonymous identity, empty hero, metadata-only settings and browser 
   await page.getByRole('button', { name: '关闭' }).click();
   await page.reload();
   await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
-  const restored = await (await context.request.get('/api/auth/get-session')).json();
-  expect(restored.user.id).toBe(first.user.id);
-  const sharedTab = await context.newPage();
-  const sharedCalls: string[] = [];
-  sharedTab.on('request', (r) => sharedCalls.push(new URL(r.url()).pathname));
-  await sharedTab.goto('/');
-  await expect(sharedTab.getByLabel('消息', { exact: true })).toBeVisible();
-  expect(sharedCalls.filter((p) => p === '/api/auth/sign-in/anonymous')).toHaveLength(0);
-  expect((await (await context.request.get('/api/auth/get-session')).json()).user.id).toBe(
-    first.user.id,
+  const persisted = await (await context.request.get('/api/settings/models')).json();
+  expect(persisted.credentials.find((c: any) => c.provider === 'deepseek').baseUrl).toBe(
+    'https://custom.example.com/v1',
   );
-  await sharedTab.close();
-  const other = await browser.newContext();
-  const tab = await other.newPage();
-  await tab.goto('/');
-  await expect(tab.getByLabel('消息', { exact: true })).toBeVisible();
-  const another = await (await other.request.get('/api/auth/get-session')).json();
-  expect(another.user.id).not.toBe(first.user.id);
-  await other.close();
 });
 test('first submission retains conversation and run identity after an uncertain receipt', async ({
   page,

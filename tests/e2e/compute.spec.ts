@@ -8,7 +8,7 @@ test('cancels an obsolete real Worker and starts a fresh calculation', async ({ 
     let terminated = 0;
     window.Worker = class extends Original {
       constructor(_url: URL | string, options?: WorkerOptions) {
-        super(new URL('/tests/browser/stalled.worker.ts', location.origin), options);
+        super(new URL('/tests/browser/stalled.worker.js', location.origin), options);
         this.addEventListener('message', (event) => {
           if (event.data.type === 'started') controller.abort();
         });
@@ -72,7 +72,7 @@ test('terminates an unresponsive real Worker after execution starts', async ({ p
     const Original = window.Worker;
     window.Worker = class extends Original {
       constructor(_url: URL | string, options?: WorkerOptions) {
-        super(new URL('/tests/browser/stalled.worker.ts', location.origin), options);
+        super(new URL('/tests/browser/stalled.worker.js', location.origin), options);
       }
     };
     try {

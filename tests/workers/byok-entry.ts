@@ -30,6 +30,10 @@ export class BYOKProbe extends ConversationAgent {
     return models;
   }
   calls() {
-    return this.ctx.storage.sql.exec('SELECT * FROM test_byok').toArray();
+    return this.ctx.storage.sql
+      .exec("SELECT name FROM sqlite_master WHERE name='test_byok'")
+      .toArray().length
+      ? this.ctx.storage.sql.exec('SELECT * FROM test_byok').toArray()
+      : [];
   }
 }

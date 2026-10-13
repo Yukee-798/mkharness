@@ -9,7 +9,8 @@ export function projectTiming({ entries, tasks, submissions }: ProjectionContext
   const replies: TimingState['replies'] = {};
   for (const task of tasks) {
     if (task.kind !== 'pi.tool' || !Number.isFinite(task.startedAt)) continue;
-    const input = task.input as { assistant?: number; callId?: string };
+    const input = task.input as { kind?: string; assistant?: number; callId?: string };
+    if (input.kind !== 'model') continue;
     const entry = history.get(input.assistant ?? -1);
     // Use native task/entry identity, not tool name, arguments or timestamps to match calls.
     if (

@@ -1,4 +1,9 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import {
+  env,
+  runInDurableObject,
+  abortAllDurableObjects,
+  runDurableObjectAlarm,
+} from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
 import { RemoteIntents } from '../../src/server/remote-intents';
 import { BG } from '../../src/server/conversation';
@@ -133,8 +138,11 @@ it.each(['lost-receipt', 'invalid-result', 'stop-during-call', 'stop-before-resu
       expect(reads).toBe(1);
       expect(mutations).toBe(1);
     } finally {
-      await abortAllDurableObjects();
-      network.mockRestore();
+      try {
+        await stub.destroy();
+      } finally {
+        network.mockRestore();
+      }
     }
   },
 );
@@ -143,11 +151,23 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
   let changed = false,
     calls = 0;
   const authorization: (string | null)[] = [];
+  const foreign: { conversation: string | null; authenticated: boolean }[] = [];
+  let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  let unrelated: typeof stub | undefined;
+  const endpoint = 'https://mcp.example.test/mcp?conversation=' + stub.id.toString();
   const fullResult = 'found\n' + ('x'.repeat(32) + '\n').repeat(2500);
   const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const request = new Request(input, init);
-    if (request.url !== 'https://mcp.example.test/mcp') return new Response(null, { status: 404 });
-    authorization.push(request.headers.get('Authorization'));
+    const url = new URL(request.url);
+    if (url.origin !== 'https://mcp.example.test' || url.pathname !== '/mcp')
+      return new Response(null, { status: 404 });
+    const current = request.url === endpoint;
+    if (current) authorization.push(request.headers.get('Authorization'));
+    else
+      foreign.push({
+        conversation: url.searchParams.get('conversation'),
+        authenticated: request.headers.has('Authorization'),
+      });
     if (request.method === 'GET') return new Response(null, { status: 405 });
     if (request.method === 'DELETE') return new Response(null, { status: 204 });
     const rpc = (await request.json()) as any;
@@ -175,12 +195,11 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
         ],
       };
     else if (rpc.method === 'tools/call') {
-      calls++;
+      if (current) calls++;
       result = { content: [{ type: 'text', text: fullResult }], structuredContent: { value: 2 } };
     } else result = {};
     return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
   });
-  let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   try {
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec('CREATE TABLE test_mcp (key TEXT)');
@@ -210,8 +229,30 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
     expect(result.content[0].text).toBe(fullResult);
     expect(result.content[1].text).toBe(JSON.stringify({ value: 2 }));
     expect(calls).toBe(1);
+    // A different, unauthenticated DO can wake while this probe observes traffic.
+    // abortAllDurableObjects preserves its SQLite and alarms; it is not test cleanup.
+    unrelated = env.CONVERSATIONS.getByName(crypto.randomUUID());
+    await runInDurableObject(unrelated, (_instance, state) => {
+      state.storage.sql.exec('CREATE TABLE test_mcp (key TEXT)');
+    });
+    await unrelated.snapshot();
+    await runInDurableObject(unrelated, (_instance, state) =>
+      state.storage.setAlarm(Date.now() + 60000),
+    );
+    await abortAllDurableObjects();
+    unrelated = env.CONVERSATIONS.get(unrelated.id);
+    stub = env.CONVERSATIONS.get(stub.id);
+    foreign.length = 0;
+    expect(await runDurableObjectAlarm(unrelated)).toBe(true);
+    expect(foreign).toContainEqual({
+      conversation: unrelated.id.toString(),
+      authenticated: false,
+    });
+    await stub.snapshot();
     expect(authorization.length).toBeGreaterThan(0);
-    expect(authorization.every((header) => header === 'Bearer mcp-fixture-secret')).toBe(true);
+    expect(authorization.map((header) => header === 'Bearer mcp-fixture-secret')).toEqual(
+      authorization.map(() => true),
+    );
     expect(
       await runInDurableObject(stub, (instance) => JSON.stringify(instance.mcp.listServers())),
     ).not.toContain('mcp-fixture-secret');
@@ -221,7 +262,9 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
     stub = env.CONVERSATIONS.get(stub.id);
     expect(JSON.parse(await stub.snapshot()).capabilityIssues).toEqual([]);
     expect(authorization.length).toBeGreaterThan(0);
-    expect(authorization.every((header) => header === 'Bearer mcp-fixture-secret')).toBe(true);
+    expect(authorization.map((header) => header === 'Bearer mcp-fixture-secret')).toEqual(
+      authorization.map(() => true),
+    );
     expect(
       await runInDurableObject(stub, (instance) => JSON.stringify(instance.mcp.listServers())),
     ).not.toContain('mcp-fixture-secret');
@@ -244,7 +287,7 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
       // The SDK itself encodes a prior deployment's credential in its persisted row.
       state.storage.sql.exec("DELETE FROM test_mcp WHERE key='credential-probe'");
       await instance.mcp.registerServer('reference', {
-        url: 'https://mcp.example.test/mcp',
+        url: endpoint,
         name: 'reference',
         transport: {
           type: 'streamable-http',
@@ -291,8 +334,12 @@ it('SDK 0.28 Streamable HTTP discovery, Pi calls and pinned schemas survive reco
     expect(disabled.capabilityIssues).toEqual([]);
     expect(network).not.toHaveBeenCalled();
   } finally {
-    await abortAllDurableObjects();
-    network.mockRestore();
+    try {
+      if (unrelated) await env.CONVERSATIONS.get(unrelated.id).destroy();
+      await env.CONVERSATIONS.get(stub.id).destroy();
+    } finally {
+      network.mockRestore();
+    }
   }
 });
 
@@ -357,7 +404,10 @@ it('a temporary outage on reconstruction recovers on a later call with the same 
     expect(JSON.stringify(recovered.entries)).toContain('fixture result 2');
     expect(recovered.capabilityIssues).toEqual([]);
   } finally {
-    await abortAllDurableObjects();
-    network.mockRestore();
+    try {
+      await stub.destroy();
+    } finally {
+      network.mockRestore();
+    }
   }
 });

@@ -5,6 +5,7 @@ import type { ConversationAgent } from './conversation';
 import { BG } from './conversation';
 import { RemoteIntents, type RemoteIntent } from './remote-example';
 import { remoteProgress } from '../shared/remote-progress';
+import { compactionIssues } from '../shared/runtime-issues';
 import { restoreToolProgress } from './tool-progress';
 export async function observeRun(
   owner: ConversationAgent,
@@ -24,6 +25,8 @@ export async function observeRun(
   });
   const entries = new Map<number, EntryRecord>();
   let committedRemote: Record<string, RemoteIntent> | undefined;
+  let compactionFailure = watch.snapshot.compactionFailure;
+  let runtimeChanged = false;
   let remoteRevision = 0;
   let sendState: (() => void) | undefined;
   let stateScheduled = false;
@@ -31,6 +34,18 @@ export async function observeRun(
   const unsubscribe = pi.subscribeCommits((publication) => {
     const projectionChanged = extensionProjection.accept(publication.changes);
     for (const change of publication.changes) {
+      if (
+        change.type === 'document' &&
+        change.conversationId === root.id &&
+        change.record.kind === 'pi.live'
+      ) {
+        const next = (change.value as { compactionFailure?: typeof compactionFailure } | null)
+          ?.compactionFailure;
+        if (next?.taskId !== compactionFailure?.taskId) {
+          compactionFailure = next;
+          runtimeChanged = true;
+        }
+      }
       if (
         change.type === 'document' &&
         change.conversationId === root.id &&
@@ -44,12 +59,12 @@ export async function observeRun(
     }
     // Keep commit listeners short. Coalesce changes and serialize optional public
     // projections outside Pi's synchronous adoption callback, using the same SSE.
-    if ((projectionChanged || remoteChanged) && !stateScheduled) {
+    if ((projectionChanged || remoteChanged || runtimeChanged) && !stateScheduled) {
       stateScheduled = true;
       queueMicrotask(() => {
         stateScheduled = false;
         if (!sendState) return;
-        if (remoteChanged || extensionProjection.hasChanges()) sendState?.();
+        if (remoteChanged || runtimeChanged || extensionProjection.hasChanges()) sendState?.();
       });
     }
   });
@@ -70,6 +85,7 @@ export async function observeRun(
       // pending work instead continues through the watch's queued events.
       await watch.stop();
       watch = await watchEvents(pi, root.id, BG);
+      compactionFailure = watch.snapshot.compactionFailure;
       facts = await extensionProjection.restore(true);
     }
     record = latest;
@@ -139,12 +155,14 @@ export async function observeRun(
       };
       const state = () => {
         remoteChanged = false;
+        runtimeChanged = false;
         emit({
           type: EventType.STATE_SNAPSHOT,
           snapshot: {
             runId,
             status: record!.status,
             stopping: owner.stopping,
+            runtimeIssues: compactionIssues(compactionFailure),
             messageIds: Object.fromEntries(liveMessageIds),
             toolProgress: Object.fromEntries(
               Object.entries(progress.project(projector)).map(([id, value]) => {
@@ -288,12 +306,12 @@ export async function observeRun(
           close();
         }
       });
-      void watch.closed.then(() => {
+      void watch.closed.then((end) => {
         if (!ended) {
           emit({
             type: EventType.RUN_ERROR,
             message: 'Observation ended. Reconnect to restore progress.',
-            code: 'stream_closed',
+            code: end.reason === 'session_failed' ? 'runtime_storage_failed' : 'stream_closed',
           } as BaseEvent);
           close();
         }

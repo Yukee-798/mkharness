@@ -24,7 +24,7 @@ it('uses canonical native receipts, excludes queue time and never sums parallel 
     {
       id: 10,
       kind: 'pi.tool',
-      input: { assistant: 2, callId: 'same' },
+      input: { kind: 'model', assistant: 2, callId: 'same' },
       startedAt: 110,
       endedAt: 180,
       state: { status: 'terminal' },
@@ -32,7 +32,7 @@ it('uses canonical native receipts, excludes queue time and never sums parallel 
     {
       id: 20,
       kind: 'pi.tool',
-      input: { assistant: 4, callId: 'same' },
+      input: { kind: 'model', assistant: 4, callId: 'same' },
       startedAt: 115,
       endedAt: 190,
       state: { status: 'terminal' },
@@ -41,7 +41,7 @@ it('uses canonical native receipts, excludes queue time and never sums parallel 
     {
       id: 40,
       kind: 'pi.tool',
-      input: { assistant: 999, callId: 'same' },
+      input: { kind: 'model', assistant: 999, callId: 'same' },
       startedAt: 105,
       endedAt: 195,
       state: { status: 'terminal' },
@@ -84,13 +84,13 @@ it('does not invent completion or duration without native timestamps', () => {
       {
         id: 1,
         kind: 'pi.tool',
-        input: { assistant: 2, callId: 'a' },
+        input: { kind: 'model', assistant: 2, callId: 'a' },
         state: { status: 'terminal' },
       },
       {
         id: 2,
         kind: 'pi.tool',
-        input: { assistant: 2, callId: 'b' },
+        input: { kind: 'model', assistant: 2, callId: 'b' },
         startedAt: 100,
         state: { status: 'waiting' },
       },

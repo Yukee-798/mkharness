@@ -1,6 +1,29 @@
 import { it, expect, vi } from 'vitest';
-import { createWebReader, publicAddress, searchWeb } from '../../src/server/web';
+import { createWebReader, publicAddress, searchWeb, webTools } from '../../src/server/web';
 const resolve = async () => ['93.184.216.34'];
+it.each([undefined, '', '   ', '\t\n'])('omits search when its key is %j', (key) => {
+  expect(webTools(key).tools?.map((tool) => tool.name)).toEqual(['read_web']);
+});
+it('registers search only with a non-empty key and retains the public page reader', () => {
+  expect(webTools('  fixture-key  ').tools?.map((tool) => tool.name)).toEqual([
+    'read_web',
+    'search_web',
+  ]);
+});
+it('rejects blank keys before network work and trims a configured key', async () => {
+  const fetcher = vi.fn(async () => Response.json({ results: [] }));
+  await expect(searchWeb('hello', ' \t\n', fetcher)).rejects.toThrow('not configured');
+  expect(fetcher).not.toHaveBeenCalled();
+  await expect(searchWeb('hello', '  fixture-key  ', fetcher)).resolves.toMatchObject({
+    results: [],
+  });
+  expect(fetcher).toHaveBeenCalledWith(
+    'https://api.tavily.com/search',
+    expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer fixture-key' }),
+    }),
+  );
+});
 it('rejects private, mapped, local, credential and non-web URLs before any request', async () => {
   const fetcher = vi.fn();
   const read = createWebReader({ fetcher, resolve });

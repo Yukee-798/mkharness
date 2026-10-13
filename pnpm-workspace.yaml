@@ -17,6 +17,10 @@ minimumReleaseAgeExclude:
   - 'assistant-stream@0.3.49'
   - '@assistant-ui/react-markdown@0.14.20'
   - lucide-react@1.54.0
+  - '@earendil-works/chord@1.2.0'
+  - '@earendil-works/pi-ai@1.2.0'
+  - '@earendil-works/pi-codemode@1.2.0'
+  - '@earendil-works/pi-durable@1.2.0'
+  - '@earendil-works/pi-telemetry@1.2.0'
 patchedDependencies:
-  '@earendil-works/pi-durable@1.1.0': patches/@earendil-works__pi-durable@1.1.0.patch
   agents@0.28.0: patches/agents@0.28.0.patch

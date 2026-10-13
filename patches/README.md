@@ -1,36 +1,30 @@
-# Temporary task execution binding
+# Independent SDK defect fixes
 
-These patches add a missing public capability to the locked SDK versions. They do not establish an upstream bug or replace Pi's scheduler. The earlier lifecycle/closing patch remains removed.
+Pi Durable 1.2.0 is installed **without a patch**. Model selection uses native `Conversation.configure()` / `AgentDoc` and generation/compaction checkpoints. MkHarness does not add per-submission execution fields or override private runtime methods.
 
-| Package                            | Responsibility                                                                                                                                                    |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@earendil-works/pi-durable@1.1.0` | Optional `SubmissionExecution`, input admission, native queue/run/task persistence, bound task agent resolution, generation successors and compaction inheritance |
-| `agents@0.28.0`                    | Forward `PiSubmitOptions.execution` to native Pi; no lifecycle changes                                                                                            |
+The remaining `agents@0.28.0` patch has two independent, reproduced responsibilities:
 
-```ts
-await harness.submit(text, {
-  session: '1',
-  operationId: runId,
-  whenBusy: 'followUp',
-  execution: {
-    model: { provider, modelId },
-    thinkingLevel,
-  },
-});
-```
+| Fix                                                                           | Evidence and removal gate                                                                                                                                             |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skills bridge returns `output`, replacing its obsolete `content` field        | Real native activation/resource-read history in the Skills and lifecycle workerd tests. Remove when the upstream bridge implements the Pi 1.2 public result contract. |
+| Release a failed, adopted PiHarness cache entry after Pi's Session has closed | Public workerd lifecycle tests reproduce a permanently cached failed Session and the opening/adoption race. Remove when unpatched upstream passes the same tests.     |
 
-The application freezes provider/model/effort in `app_requests` before enqueue. Pi then commits the binding with admission: queued input uses `pi.inbox`, active generation uses its task input and `pi.live.run` control state. Successors copy that run's binding; automatic compaction copies its originating generation's model and effort. There is no new application task, credential or result table.
+The cache fix waits for both native close and factory adoption, and checks handle identity before clearing the cache. It never starts another runtime, cancels healthy work, or clears an in-progress factory. The earlier general closing patch and per-task binding enhancement are removed.
 
-The bound native `runtime.agent()` view resolves before sections, hooks, context-window checks and model checkpoint creation. Model transport wrappers may reject a call but must not substitute model/effort after prepare.
+## Native step configuration
 
-Bound inputs use `followUp` or `reject`, never `steer`. Queue mode `all` groups only consecutive selected inputs with identical bindings. Valid retries with the same request ID keep the original submission; malformed bindings and bound steering reject before deduplication. Unbound generations resolve the SDK session defaults. Automatic compaction pins the originating generation's resolved model and effort, including an unbound generation; manual compaction without execution uses session defaults.
+A new message admission freezes its configuration update and immutable credential reference in the existing `app_requests` receipt. The host serial admission line applies older unfinished admissions first, checks the native request-ID receipt, then uses public `configure` and `PiHarness.submit`. These are **two durable commits**, not a claimed atomic native operation. A lost acknowledgement rolls forward from the saved receipt without rereading credentials or source state. An already accepted duplicate never reapplies its older configuration.
 
-Manual compaction can explicitly bind with `conversation.compact(instructions, context, { execution })`. Without an explicit binding, manual compaction retains native session defaults. Task input fields do not accept raw credential material. An immutable provider ID plus the native auth resolver can identify a credential version; all referenced versions must be registered on reconstruction. Missing bound models/credentials must fail, not fall back to a default. Real encrypted credential storage, credential rotation/revocation and BYOK UI are not implemented by this patch. Current deployment API keys remain deployment configuration.
+The configuration receipt is not a task binding. `pi.agent` owns the current conversation configuration. Generation `prepare` resolves it before prompt rendering and context-window checking and stores model/effort/options in its request checkpoint. A later tool successor or queued input prepares using current configuration. A native generation retry which returns to `prepare` also selects current configuration; restoring an existing request/poll checkpoint retains that checkpoint's model.
 
-Only distribution JavaScript and declarations are patched. Modified files drop references to stale source maps so errors report real distribution offsets. These are package patches, not application overrides of private methods. `pnpm install --frozen-lockfile` must apply both; do not upgrade either package independently without replaying the regression tests.
+Compaction independently selects current configuration, then persists its summary request. It does not inherit the triggering run's credentials. Interrupted summary requests and summary retries retain that summary checkpoint.
 
-Run `pnpm typecheck`, `pnpm test:workers`, `pnpm test:hmr` and the browser model-selection/recovery tests when changing or removing these patches. The public regression coverage is in [task-binding tests](../tests/workers/task-binding.test.ts), [credential recovery tests](../tests/workers/byok.test.ts), and [execution-model tests](../tests/unit/execution-models.test.ts).
+Saving a Key in account settings alone does not configure running conversations. The next newly accepted message selects that immutable version and updates only its conversation. Credential aliases reference encrypted D1 versions, not mutable current-key slots. Cold start reinstalls aliases required by the native agent and unfinished request/summary checkpoints. Invalid/revoked/expired credentials and changed deployment-key fingerprints fail explicitly; no fallback to newer or deployment credentials.
 
-Remove the patches when an official public per-submission binding and compaction-inheritance interface passes the same tests. Do not carry the earlier closing patch forward. This v0.1 change requires provider in stored execution records; provider-less local test records are incompatible. No automatic migration or database reset is performed.
+Interruption after a provider accepted a request but before Pi committed its response can cause a repeated model request/billing. Step checkpoints do not imply exactly-once provider calls. Remote tool intents, reconciliation and unknown-outcome protection remain separate.
 
-Removal must also verify existing persistence, not just fresh submissions. The original SDK can read a patched pending `pi.generation` version 1 record while ignoring its execution binding, silently selecting the current defaults. Queued bound inputs can remain in `pi.inbox` even when no generation task is active; raising only the generation task version would not protect those inputs. Drain all active, queued and background work before a deployment that changes the contract, or use an official explicit migration that preserves all bindings. Do not downgrade running data without such evidence. Check the persisted binding invariants against [task-binding tests](../tests/workers/task-binding.test.ts) and [recovery tests](../tests/workers/recovery.test.ts) before removing either patch.
+## Verification and deployment
+
+Run `pnpm typecheck`, `pnpm test:workers`, `pnpm test:hmr` and browser recovery tests after changing these fixes. The native step contract is exercised in [step configuration tests](../tests/workers/task-binding.test.ts), [real D1 credential tests](../tests/workers/byok.test.ts), and [credential alias tests](../tests/unit/execution-models.test.ts).
+
+This changes execution semantics. Finish or explicitly discard local active/queued/background work created under the former patched contract before switching. No historical compatibility shim, task migration or automatic database reset is included. Do not downgrade a live production workload which still depends on per-task binding.

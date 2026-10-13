@@ -10,16 +10,13 @@ import { AppError, type StoredRequest } from '../shared/contracts';
 import { modelEndpointFetch } from './model-endpoint';
 import type { ModelCredentials } from './model-credentials';
 import {
-  InboxDoc,
-  LiveDoc,
+  AgentDoc,
   ROOT_CONVERSATION_ID,
   GenerationTask,
   CompactionTask,
   type Session,
   type ModelRef,
-  type GenerationInput,
   type GenerationCheckpoint,
-  type CompactionInput,
   type CompactionCheckpoint,
   type Cursor,
 } from '@earendil-works/pi-durable';
@@ -93,21 +90,8 @@ export async function restoreExecutionModels(
     if (ref) refs.push(ref);
   };
   // Factory is still paused: snapshots neither create documents nor schedule tasks.
-  const live = await session.snapshot(LiveDoc, ROOT_CONVERSATION_ID, context);
-  add(live?.run?.execution?.model);
-  // Idle followers are withdrawn before resume; their old models cannot block that cancellation.
-  if (live?.run)
-    for (const item of (await session.snapshot(InboxDoc, ROOT_CONVERSATION_ID, context))?.items ??
-      [])
-      if (item.mode !== 'write') add(item.execution?.model);
-  const nativeAccepted = new Set<string>();
+  add((await session.snapshot(AgentDoc, ROOT_CONVERSATION_ID, context))?.model);
   await session.commit(async (tx) => {
-    for (const { stored, accepted } of requests)
-      if (
-        accepted === 0 &&
-        (await tx.submissionByRequest(ROOT_CONVERSATION_ID, stored.request.runId))
-      )
-        nativeAccepted.add(stored.request.runId);
     for (const status of ['pending', 'running', 'waiting'] as const) {
       let cursor: Cursor | undefined;
       do {
@@ -122,7 +106,6 @@ export async function restoreExecutionModels(
             task.kind !== CompactionTask.definition.name
           )
             continue;
-          add((task.input as GenerationInput | CompactionInput).execution?.model);
           const checkpoint = task.state.checkpoint as
             GenerationCheckpoint | CompactionCheckpoint | undefined;
           if (checkpoint && 'model' in checkpoint) add(checkpoint.model);
@@ -134,8 +117,7 @@ export async function restoreExecutionModels(
   const bindings = new Map<string, StoredRequest['execution']>();
   for (const { stored, accepted } of requests) {
     const execution = stored.execution;
-    if (accepted === 0 && !nativeAccepted.has(stored.request.runId))
-      await bindExecution(models, execution, credentials);
+    if (accepted === 0) await bindStoredExecution(models, execution, credentials);
     bindings.set(
       JSON.stringify([await executionProviderId(execution), execution.modelId]),
       execution,
@@ -143,12 +125,23 @@ export async function restoreExecutionModels(
   }
   for (const ref of refs) {
     const execution = bindings.get(JSON.stringify([ref.provider, ref.modelId]));
-    if (execution) await bindExecution(models, execution, credentials);
+    if (execution) await bindStoredExecution(models, execution, credentials);
     else if (ref.provider.startsWith('mkharness-bound-'))
-      throw new AppError(503, 'execution_binding_missing', '原任务的模型绑定缺失');
+      throw new AppError(503, 'execution_binding_missing', '模型步骤的凭据绑定缺失');
   }
 }
-/** Native model identity carries immutable credential ownership through prepare, queue and compaction. */
+/** Stored work has already passed admission. Let Pi settle an unavailable model
+ * without making the entire conversation (including Stop and history) unavailable. */
+export async function bindStoredExecution(
+  models: MutableModels,
+  execution: StoredRequest['execution'],
+  credentials: () => Promise<CredentialAccess>,
+) {
+  return models.getModel(execution.provider, execution.modelId)
+    ? bindExecution(models, execution, credentials)
+    : executionProviderId(execution);
+}
+/** Native model identity carries immutable credential ownership through native prepare and compaction checkpoints. */
 export async function bindExecution(
   models: MutableModels,
   execution: StoredRequest['execution'],
@@ -209,10 +202,10 @@ export async function bindExecution(
     getAllModels: undefined,
     auth: {
       apiKey: {
-        name: 'Frozen task credential',
+        name: 'Immutable step credential',
         resolve: async () => ({
           auth: await (await credentials()).resolve(execution.provider, execution.credentialRef),
-          source: 'task-bound',
+          source: 'step-bound',
         }),
       },
     },

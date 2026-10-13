@@ -82,14 +82,17 @@ it('restores an older no-result failure even after more than one page of later r
       for (let i = 0; i < 101; i++) {
         const id = await tx.createTask(
           ToolTask,
-          { assistant: 1 as any, callId: 'fixture-receipt' },
+          { kind: 'model', assistant: 1 as any, callId: 'fixture-receipt' },
           { ownership: { kind: 'conversation' } },
         );
         const fixture = tx as any;
         const record = fixture.stagedTasks().find((task: any) => task.id === id)!;
         fixture.setTask({
           ...record,
-          state: { status: 'terminal', outcome: { status: 'completed', result: { entryId: 1 } } },
+          state: {
+            status: 'terminal',
+            outcome: { status: 'completed', result: { kind: 'model', entryId: 1 } },
+          },
         });
       }
     }, BG);

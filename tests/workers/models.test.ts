@@ -97,7 +97,7 @@ async function settle(stub: ReturnType<typeof env.CONVERSATIONS.getByName>) {
   }
   throw new Error('Model selection queue did not settle');
 }
-it('keeps per-request model and effort across a busy queue, retries and SQLite-preserving restart', async () => {
+it('keeps a prepared request and uses current config for a busy queue across SQLite-preserving restart', async () => {
   let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   await runInDurableObject(stub, (_instance, state) => {
     state.storage.sql.exec('CREATE TABLE test_model_prepare(model TEXT,thinking TEXT)');
@@ -136,7 +136,7 @@ it('keeps per-request model and effort across a busy queue, retries and SQLite-p
     .filter((m: any) => m.role === 'assistant');
   expect(messages.map((m: any) => [m.model, m.thinkingLevel])).toEqual([
     ['fixture', 'low'],
-    ['fixture-pro', 'high'],
+    ['fixture', 'off'],
     ['fixture', 'off'],
   ]);
   expect(
@@ -145,7 +145,7 @@ it('keeps per-request model and effort across a busy queue, retries and SQLite-p
     ),
   ).toEqual([
     { model: 'fixture', thinking: 'low' },
-    { model: 'fixture-pro', thinking: 'high' },
+    { model: 'fixture', thinking: 'off' },
     { model: 'fixture', thinking: 'off' },
   ]);
   expect(snapshot.selection).toEqual(commands[2].config);

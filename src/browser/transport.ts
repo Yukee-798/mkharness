@@ -11,6 +11,7 @@ import { Observable } from 'rxjs';
 import type { RemoteProgress } from '../shared/remote-progress';
 import { aliasMessages, messageAliases } from '../shared/stream';
 import type { ToolProgressMap } from '../shared/tool-progress';
+import type { RuntimeIssue } from '../shared/runtime-issues';
 import type { ExtensionState } from '../shared/extension-state';
 export class StreamReplaced extends Error {}
 /** The only run path is GET attach. HTTP submission belongs to the composer. */
@@ -24,6 +25,7 @@ export class AttachAgent extends AbstractAgent {
     private messageIds = new Map<string, string>(),
     private toolProgress: (runId: string, value: ToolProgressMap) => void = () => {},
     private extensionState: (runId: string, value: ExtensionState) => void = () => {},
+    private runtimeIssues: (runId: string, value: RuntimeIssue[]) => void = () => {},
   ) {
     super({ threadId: conversationId });
   }
@@ -37,6 +39,7 @@ export class AttachAgent extends AbstractAgent {
       this.messageIds,
       this.toolProgress,
       this.extensionState,
+      this.runtimeIssues,
     );
   }
   run(input: RunAgentInput) {
@@ -74,12 +77,15 @@ export class AttachAgent extends AbstractAgent {
                   messageIds?: Record<string, string>;
                   toolProgress?: ToolProgressMap;
                   extensionState?: ExtensionState;
+                  runtimeIssues?: RuntimeIssue[];
                 };
               }
             ).snapshot;
             if (state?.runId === runId && state.messageIds)
               for (const [canonicalId, liveId] of Object.entries(state.messageIds))
                 if (!this.messageIds.has(canonicalId)) this.messageIds.set(canonicalId, liveId);
+            if (state?.runId === runId && Array.isArray(state.runtimeIssues))
+              this.runtimeIssues(runId, state.runtimeIssues);
             if (state?.runId === runId && state.extensionState)
               this.extensionState(runId, state.extensionState);
             if (state?.runId === runId && state.toolProgress) {

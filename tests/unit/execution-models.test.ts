@@ -38,13 +38,16 @@ it('restores a background compaction binding without resolving unrelated complet
   const root = await pi.root(context, {
     agent: { model: { provider: 'fixture', modelId: 'fixture' } },
   });
+  await root.configure(
+    { model: { provider: alias, modelId: 'fixture' }, thinkingLevel: 'low' },
+    context,
+  );
   await root.commit(
     (tx) =>
       tx.createTask(
         CompactionTask,
         {
           reason: 'manual',
-          execution: { model: { provider: alias, modelId: 'fixture' }, thinkingLevel: 'low' },
         },
         { background: true, ownership: { kind: 'conversation' } },
       ),
@@ -62,7 +65,7 @@ it('restores a background compaction binding without resolving unrelated complet
   expect(await rebuilt.getAuth(alias)).toMatchObject({ auth: { apiKey: 'original-key' } });
   await pi.close(context);
 });
-it('refuses an unaccepted removed model rather than inheriting a newer model', async () => {
+it('restores a host acceptance gap without substituting a removed model or blocking startup', async () => {
   const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
   await expect(
     restoreExecutionModels(
@@ -83,7 +86,72 @@ it('refuses an unaccepted removed model rather than inheriting a newer model', a
       }),
       context,
     ),
-  ).rejects.toMatchObject({ code: 'execution_model_unavailable' });
+  ).resolves.toBeUndefined();
+});
+it('lets native pending work fail on a removed model without preventing history recovery', async () => {
+  const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
+  const credentials = async () => ({
+    select: async () => execution.credentialRef,
+    resolve: async () => ({ apiKey: 'original-key' }),
+  });
+  const original = executionModels(fixtureModels());
+  const alias = await bindExecution(original, execution, credentials);
+  const storage = new MemoryStorage();
+  const pi = await Harness.open(storage, { models: original, registry: createRegistry() }, context);
+  const root = await pi.root(context, {
+    agent: { model: { provider: 'fixture', modelId: 'fixture-pro' } },
+  });
+  await root.configure({ model: { provider: alias, modelId: 'fixture' } }, context);
+  const taskId = await root.commit(
+    (tx) =>
+      tx.createTask(
+        CompactionTask,
+        {
+          reason: 'manual',
+        },
+        { ownership: { kind: 'conversation' } },
+      ),
+    context,
+  );
+  const base = fixtureModels(),
+    provider = base.getProvider('fixture')!;
+  base.setProvider({
+    ...provider,
+    getModels: () => provider.getModels().filter((m) => m.id !== 'fixture'),
+  });
+  const rebuilt = executionModels(base);
+  await expect(
+    restoreExecutionModels(
+      createSession(storage),
+      rebuilt,
+      [
+        {
+          accepted: 1,
+          stored: {
+            request: { runId: crypto.randomUUID(), text: 'accepted before catalog change' },
+            execution,
+          },
+        },
+      ],
+      credentials,
+      context,
+    ),
+  ).resolves.toBeUndefined();
+  expect(rebuilt.getModel(alias, 'fixture')).toBeUndefined();
+  const restored = await Harness.open(
+    storage,
+    { models: rebuilt, registry: createRegistry() },
+    context,
+  );
+  restored.resume();
+  await expect
+    .poll(async () => (await restored.getTask(taskId, context))?.state)
+    .toMatchObject({
+      status: 'terminal',
+      outcome: { status: 'failed' },
+    });
+  expect(await restored.conversation(root.id, context)).toBeDefined();
+  await Promise.all([pi.close(context), restored.close(context)]);
 });
 it('validates a second model even when its credential alias is already installed', async () => {
   const models = executionModels(fixtureModels());

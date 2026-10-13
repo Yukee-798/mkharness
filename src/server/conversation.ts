@@ -50,7 +50,7 @@ import { createExtensionProjection } from './extension-state';
 import { applicationModels, applicationModelCatalog, validateModelSelection } from './models';
 import { ModelCredentials } from './model-credentials';
 import {
-  bindExecution,
+  bindStoredExecution,
   executionModels,
   restoreExecutionModels,
   type CredentialAccess,
@@ -58,7 +58,8 @@ import {
 import type { ModelSelection } from '../shared/model-selection';
 import { remoteProgress } from '../shared/remote-progress';
 import { mcpIntentUnresolved } from './remote-intents';
-import { claimPiStorage, validatePiStorage, RuntimeStorageError } from './pi-storage';
+import { claimPiStorage, RuntimeStorageError } from './pi-storage';
+import { compactionIssues } from '../shared/runtime-issues';
 import { withdrawIdleInputs } from './queue-recovery';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
@@ -125,27 +126,12 @@ export class ConversationAgent extends Agent<Env> {
             console.error(JSON.stringify({ stage: 'pi', error: 'runtime_close_failed' }));
           });
         });
-        // Materialize recovery documents before Harness.open/resume can schedule tasks.
-        // Invalid persistence fails this conversation's startup instead of starving the worker.
-        try {
-          await validatePiStorage(storage);
-        } catch (error) {
-          console.error(
-            JSON.stringify({
-              stage: 'pi',
-              error: 'runtime_storage_invalid',
-              documentId: error instanceof RuntimeStorageError ? error.documentId : undefined,
-            }),
-          );
-          throw error;
-        }
         const registry = createRegistry();
         // A read-only bootstrap snapshot avoids calling the not-yet-open Harness from its factory.
-        const saved = await createSession(storage).snapshot(
-          MCPBindings,
-          ROOT_CONVERSATION_ID,
-          context,
-        );
+        // Bootstrap readers share Storage with the eventual Harness. They must not
+        // close it or retain document caches/timers after initialization.
+        const bootstrap = createSession(storage, { documentRetentionMs: 0 });
+        const saved = await bootstrap.snapshot(MCPBindings, ROOT_CONVERSATION_ID, context);
         const configs = this.mcpConfiguration();
         if (configs.length || saved?.bindings.length)
           this.mcpPrepared = await buildMcp(
@@ -164,10 +150,13 @@ export class ConversationAgent extends Agent<Env> {
         for (const extension of extensions) registry.install(extension);
         const models = executionModels(this.models());
         await restoreExecutionModels(
-          createSession(storage),
+          bootstrap,
           models,
           this.rows<{ payload: string; accepted: number }>(
-            'SELECT payload,accepted FROM app_requests WHERE accepted<>-1',
+            // A withdrawn submission can still own AgentDoc's current configuration
+            // when configure committed before submit. Keep its immutable binding
+            // metadata available without enqueueing it or resolving its credential.
+            'SELECT payload,accepted FROM app_requests',
           ).map((record) => ({
             stored: storedRequestSchema.parse(JSON.parse(record.payload)),
             accepted: record.accepted,
@@ -428,6 +417,9 @@ export class ConversationAgent extends Agent<Env> {
       if (record?.accepted === -1) throw new AppError(409, 'request_withdrawn');
       let stored = record ? storedRequestSchema.parse(JSON.parse(record.payload)) : undefined;
       if (!stored) {
+        // Roll older host admissions forward first. A lost acknowledgement must never
+        // reapply an older configuration after a newer message has been accepted.
+        await this.enqueueUnaccepted();
         await this.root();
         await withdrawIdleInputs(await this.harness.pi(), BG);
         let sourceContext;
@@ -466,7 +458,7 @@ export class ConversationAgent extends Agent<Env> {
               throw new AppError(409, 'remote_retry_unnecessary');
           }
         }
-        // Freeze provider as well as the UI choice, including the host/Pi acceptance gap.
+        // Freeze this configuration update and source context across the host/Pi acceptance gap.
         const selection = this.selection(command.config);
         const execution = {
           ...selection,
@@ -551,17 +543,23 @@ export class ConversationAgent extends Agent<Env> {
           ? command.source
           : undefined;
     if (context !== undefined) text += USER_ACTION_CONTEXT + '\n' + JSON.stringify(context);
-    const provider = await bindExecution(this.runtimeModels!, stored.execution, () =>
+    const provider = await bindStoredExecution(this.runtimeModels!, stored.execution, () =>
       this.credentials(),
+    );
+    // Public native configure is a separate durable commit. The host admission line
+    // orders updates, while the saved request rolls a configure/submit gap forward.
+    // A native receipt above prevents duplicate retries from changing configuration.
+    await root.configure(
+      {
+        model: { provider, modelId: stored.execution.modelId },
+        thinkingLevel: stored.execution.thinkingLevel,
+      },
+      BG,
     );
     await this.harness.submit(text, {
       session: '1',
       operationId: command.runId,
       whenBusy: 'followUp',
-      execution: {
-        model: { provider, modelId: stored.execution.modelId },
-        thinkingLevel: stored.execution.thinkingLevel,
-      },
     });
     this.ctx.storage.sql.exec('UPDATE app_requests SET accepted=1 WHERE id=?', command.runId);
   }
@@ -577,13 +575,16 @@ export class ConversationAgent extends Agent<Env> {
     await this.serial(async () => {
       if (this.deleting || this.stopping) return;
       await withdrawIdleInputs(await this.harness.pi(), BG);
-      for (const record of this.rows<{ id: string; payload: string }>(
-        'SELECT id,payload FROM app_requests WHERE accepted=0 ORDER BY rowid',
-      )) {
-        if (this.stopping) break;
-        await this.enqueue(storedRequestSchema.parse(JSON.parse(record.payload)));
-      }
+      await this.enqueueUnaccepted();
     });
+  }
+  private async enqueueUnaccepted() {
+    for (const record of this.rows<{ id: string; payload: string }>(
+      'SELECT id,payload FROM app_requests WHERE accepted=0 ORDER BY rowid',
+    )) {
+      if (this.stopping) break;
+      await this.enqueue(storedRequestSchema.parse(JSON.parse(record.payload)));
+    }
   }
   async stopConversation() {
     return this.serial(async () => {
@@ -777,11 +778,12 @@ export class ConversationAgent extends Agent<Env> {
         ),
       BG,
     );
-    let toolProgress, extensionState, firstHistory;
+    let toolProgress, extensionState, firstHistory, compactionFailure;
     if (!cursor) {
       const projection = await this.extensionProjection();
       const watch = await watchEvents(pi, ROOT_CONVERSATION_ID, BG);
       try {
+        compactionFailure = watch.snapshot.compactionFailure;
         const facts = await projection.restore(true);
         firstHistory = facts.page;
         toolProgress = (
@@ -828,9 +830,12 @@ export class ConversationAgent extends Agent<Env> {
         (await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG))?.operations ?? {},
       ),
       capabilityIssues: this.mcpPrepared?.diagnostics ?? [],
-      runtimeIssues: terminalTasks.items
-        .filter((t) => t.state.status === 'terminal' && t.state.outcome.status === 'orphaned')
-        .map((t) => ({ taskId: Number(t.id), code: 'task_definition_unavailable' })),
+      runtimeIssues: [
+        ...terminalTasks.items
+          .filter((t) => t.state.status === 'terminal' && t.state.outcome.status === 'orphaned')
+          .map((t) => ({ taskId: Number(t.id), code: 'task_definition_unavailable' })),
+        ...compactionIssues(compactionFailure),
+      ],
       tools: inspection.tasks
         .filter((t) => t.record.kind === 'pi.tool')
         .map((t) => ({ taskId: Number(t.record.id) })),

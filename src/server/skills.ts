@@ -78,11 +78,11 @@ export async function staticSkills(sources: SkillSource[]): Promise<Extension> {
         execute: async (args, api, context) => {
           const result = await original.execute(args, api, context);
           try {
-            jsonText(result.content ?? []);
+            jsonText(result.output ?? []);
           } catch {
-            return { isError: true, content: [{ type: 'text', text: 'skill_output_too_large' }] };
+            return { isError: true, output: [{ type: 'text', text: 'skill_output_too_large' }] };
           }
-          const missing = (result.content ?? []).some(
+          const missing = (result.output ?? []).some(
             (c) => c.type === 'text' && /^Skill (resource )?not found:/.test(c.text),
           );
           return missing ? { ...result, isError: true } : result;

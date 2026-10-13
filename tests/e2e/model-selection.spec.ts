@@ -17,7 +17,7 @@ const catalog = {
   ],
   defaultSelection: { provider: 'deepseek', modelId: 'flash', thinkingLevel: 'low' },
 };
-test('model and effort apply to new HTTP submissions, preserve busy work and restore after reload', async ({
+test('model and effort apply on new HTTP submissions and restore selection without submitting on reload', async ({
   page,
 }) => {
   const commands: any[] = [];

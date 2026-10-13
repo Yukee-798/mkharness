@@ -4,7 +4,7 @@ import { panelTools } from '../../src/extensions/openui/tools';
 const prepare = panelTools(async () => []).tools!.find((tool) => tool.name === 'prepare_program')!;
 const invoke = (args: unknown, api = {} as any) => prepare.execute(args as any, api, {} as any);
 const diagnostic = (result: Awaited<ReturnType<typeof invoke>>) =>
-  JSON.parse((result.content![0] as { text: string }).text);
+  JSON.parse((result.output![0] as { text: string }).text);
 
 it('returns the failing case and actual score while refusing to publish a mismatched program', async () => {
   // Minimized from the real recipe trace: 40 + 30 + 20 + 15 = 105, not 125.
@@ -23,7 +23,7 @@ it('returns the failing case and actual score while refusing to publish a mismat
       },
     ],
   };
-  const getTask = vi.fn(async () => ({ input: { assistant: 17 } }));
+  const getTask = vi.fn(async () => ({ input: { kind: 'model', assistant: 17 } }));
   const api = { getTask, taskId: '1', callId: 'prepare' };
   const failed = await invoke(args, api);
   expect(failed.isError).toBe(true);
@@ -82,6 +82,6 @@ it('bounds diagnostic output even for large Unicode and escaped strings', async 
   expect(diagnostic(failed).difference.actual.truncated).toBe(true);
   expect(diagnostic(failed).actualOutput.truncated).toBe(true);
   expect(
-    new TextEncoder().encode((failed.content![0] as { text: string }).text).length,
+    new TextEncoder().encode((failed.output![0] as { text: string }).text).length,
   ).toBeLessThanOrEqual(8192);
 });

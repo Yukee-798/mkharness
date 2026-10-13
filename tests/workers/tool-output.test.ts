@@ -4,6 +4,50 @@ import { webTools } from '../../src/server/web';
 import { staticSkills } from '../../src/server/skills';
 import { fixtureModels } from '../fixture-model';
 import { BG } from '../../src/server/conversation';
+import { applicationExtensions } from '../../src/server/assembly';
+
+it.each([
+  { key: undefined, enabled: false },
+  { key: ' \t\n', enabled: false },
+  { key: 'fixture-key', enabled: true },
+])('native model tool catalog respects search configuration: %j', async ({ key, enabled }) => {
+  const registry = createRegistry();
+  for (const extension of await applicationExtensions(
+    { ENABLE_GENERATIVE_UI: '0', TAVILY_API_KEY: key } as any,
+    async () => [],
+  ))
+    registry.install(extension);
+  const names = registry
+    .snapshot()
+    .tools()
+    .map(({ tool }) => tool.name);
+  expect(names).toContain('read_web');
+  expect(names.includes('search_web')).toBe(enabled);
+  const models = fixtureModels();
+  const provider = models.getProvider('fixture')!;
+  let offered: string[] | undefined;
+  models.setProvider({
+    ...provider,
+    streamSimple: (model, context, options) => {
+      offered = context.messages.flatMap((message) =>
+        message.role === 'system' ? (message.toolsAdded ?? []).map((tool) => tool.name) : [],
+      );
+      return provider.streamSimple(model, context, options);
+    },
+  });
+  const pi = await Harness.open(new MemoryStorage(), { models, registry }, BG);
+  try {
+    const root = await pi.root(BG, {
+      agent: { model: { provider: 'fixture', modelId: 'fixture' } },
+    });
+    await root.submit({ type: 'input', content: 'configured tool catalog' }, BG);
+    await root.waitForIdle(BG);
+    expect(offered).toContain('read_web');
+    expect(offered?.includes('search_web')).toBe(enabled);
+  } finally {
+    await pi.close(BG);
+  }
+});
 
 it.each([true, false])(
   'native Pi retains accepted large Web and Skill output (budget bridge=%s)',

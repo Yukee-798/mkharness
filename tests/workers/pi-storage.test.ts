@@ -6,9 +6,9 @@ import {
   ROOT_CONVERSATION_ID,
 } from '@earendil-works/pi-durable';
 import { openPiSessionStore } from 'agents/harness/pi';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { BG } from '../../src/server/conversation';
-import { claimPiStorage, validatePiStorage } from '../../src/server/pi-storage';
+import { claimPiStorage } from '../../src/server/pi-storage';
 
 const Probe = defineDoc({
   kind: 'test.writer-probe',
@@ -41,7 +41,7 @@ it('fences a replaced writer before it persists a stale cached delta, preserving
   });
 });
 
-it('rejects a malformed live document before scheduling, without altering committed history', async () => {
+it('native recovery fails once on malformed persistence without rereading or altering history', async () => {
   const target = env.CONVERSATIONS.getByName(crypto.randomUUID());
   await runInDurableObject(target, async (instance, state) => {
     await instance.root();
@@ -70,9 +70,18 @@ it('rejects a malformed live document before scheduling, without altering commit
       ],
       BG,
     );
-    await expect(validatePiStorage(storage)).rejects.toMatchObject({
-      code: 'runtime_storage_invalid',
+    const closed = vi.fn();
+    const read = vi.spyOn(storage, 'document');
+    const session = createSession(storage);
+    session.subscribeClose(closed);
+    await expect(session.snapshot(LiveDoc, ROOT_CONVERSATION_ID, BG)).rejects.toThrow();
+    expect(await session.closed).toMatchObject({ reason: 'failed' });
+    const reads = read.mock.calls.length;
+    await expect(session.snapshot(LiveDoc, ROOT_CONVERSATION_ID, BG)).rejects.toMatchObject({
+      name: 'SessionFailed',
     });
+    expect(read).toHaveBeenCalledTimes(reads);
+    expect(closed).toHaveBeenCalledTimes(1);
     expect(state.storage.sql.exec('SELECT count(*) AS n FROM pi_entries').one().n).toBe(before);
     await storage.close(BG);
   });
