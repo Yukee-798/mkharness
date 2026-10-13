@@ -3,6 +3,7 @@ import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import { Wrench, CircleMinus, XCircle, AlertCircle } from 'lucide-react';
 import { ToolCall } from './tool-call';
 import { useToolProgress } from './tool-progress';
+import { ToolTitleMeta } from './extension-ui';
 export function ToolActivity({
   part,
   labels,
@@ -40,6 +41,7 @@ export function ToolActivity({
       label={label}
       activeLabel={name.active}
       query={query}
+      titleMeta={<ToolTitleMeta part={part} />}
       request={part.argsText ?? ''}
       result={typeof result === 'string' ? result : (JSON.stringify(result, null, 2) ?? '')}
       progress={

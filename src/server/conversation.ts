@@ -10,6 +10,7 @@ import {
   type Cursor,
   type Extension,
   type EntryRecord,
+  type TaskId,
 } from '@earendil-works/pi-durable';
 import type { Models } from '@earendil-works/pi-ai/models';
 import {
@@ -22,7 +23,8 @@ import {
 } from '../shared/contracts';
 import { jsonText, canonicalJson } from '../shared/compute';
 import { applicationContributions } from './assembly';
-import type { ServerContribution } from './contributions';
+import type { ServerContribution, ReadContext } from './contributions';
+import { readSuccessfulTool } from './history';
 import {
   MCPBindings,
   buildMcp,
@@ -44,15 +46,20 @@ import { withRunLimits, runLimits, toolBudget } from './limits';
 import { observeRun } from './observe';
 import { browserEntries } from '../shared/stream';
 import { restoreToolProgress, toolProjector } from './tool-progress';
+import { createExtensionProjection } from './extension-state';
+import { applicationModels, applicationModelCatalog, validateModelSelection } from './models';
+import { ModelCredentials } from './model-credentials';
 import {
-  applicationModels,
-  applicationThinkingLevel,
-  applicationModelCatalog,
-  validateModelSelection,
-} from './models';
+  bindExecution,
+  executionModels,
+  restoreExecutionModels,
+  type CredentialAccess,
+} from './execution-models';
 import type { ModelSelection } from '../shared/model-selection';
 import { remoteProgress } from '../shared/remote-progress';
+import { mcpIntentUnresolved } from './remote-intents';
 import { claimPiStorage, validatePiStorage, RuntimeStorageError } from './pi-storage';
+import { withdrawIdleInputs } from './queue-recovery';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
   value: () => undefined,
@@ -80,6 +87,7 @@ class RequestRecovery extends LifecycleCapability {
 }
 export class ConversationAgent extends Agent<Env> {
   readonly harness: PiHarness;
+  private runtimeModels?: ReturnType<typeof executionModels>;
   private admission: Promise<unknown> = Promise.resolve();
   private recovery: RequestRecovery;
   private stopWork?: Promise<void>;
@@ -145,17 +153,36 @@ export class ConversationAgent extends Agent<Env> {
             configs,
             this.env as unknown as Record<string, unknown>,
             saved?.bindings,
+            async () => {
+              const stored = await this.runningRequest();
+              if (!stored) throw new AppError(409, 'mcp_run_context_missing');
+              return stored.request;
+            },
           );
         const extensions = await this.extensions();
         validateExtensions(extensions);
         for (const extension of extensions) registry.install(extension);
+        const models = executionModels(this.models());
+        await restoreExecutionModels(
+          createSession(storage),
+          models,
+          this.rows<{ payload: string; accepted: number }>(
+            'SELECT payload,accepted FROM app_requests WHERE accepted<>-1',
+          ).map((record) => ({
+            stored: storedRequestSchema.parse(JSON.parse(record.payload)),
+            accepted: record.accepted,
+          })),
+          () => this.credentials(),
+          context,
+        );
+        this.runtimeModels = models;
         const pi = await Harness.open(
           storage,
           {
             models: withRunLimits(
-              this.models(),
+              models,
               () => this.allEntries(),
-              () => this.modelDispatch(),
+              (entries) => this.assertModelAllowed(entries),
               toolBudget(this.env as unknown as Record<string, unknown>),
             ),
             registry,
@@ -184,6 +211,23 @@ export class ConversationAgent extends Agent<Env> {
           await pi.close(BG);
           throw new RuntimeStorageError('runtime_superseded');
         }
+        const unsubscribe = pi.subscribeCommits(({ changes }) => {
+          if (
+            changes.some(
+              (change) =>
+                change.type === 'submission' &&
+                change.value.conversationId === ROOT_CONVERSATION_ID &&
+                change.value.status === 'unanswered' &&
+                ['model_error', 'no_model', 'faulted', 'orphaned'].includes(change.value.reason),
+            )
+          )
+            queueMicrotask(() => {
+              if (!this.deleting && !this.stopping && !runtime.superseded)
+                this.ctx.waitUntil(this.recovery.schedule());
+            });
+        });
+        pi.subscribeClose(unsubscribe);
+        await withdrawIdleInputs(pi, context);
         const existing = await pi.conversation(ROOT_CONVERSATION_ID, context);
         if (existing && this.mcpPrepared?.bindings.length)
           await existing.commit(async (tx) => {
@@ -212,8 +256,12 @@ export class ConversationAgent extends Agent<Env> {
   protected models(): Models {
     return applicationModels(this.env);
   }
-  private thinkingLevel() {
-    return applicationThinkingLevel(this.env as Env & { MODEL_THINKING_LEVEL?: string });
+  protected async credentials(): Promise<CredentialAccess> {
+    const owner = await this.env.DB.prepare('SELECT owner FROM conversations WHERE id=?')
+      .bind(this.name)
+      .first<string>('owner');
+    if (!owner) throw new AppError(404, 'not_found');
+    return new ModelCredentials(this.env, owner);
   }
   private modelCatalog() {
     return applicationModelCatalog(
@@ -242,23 +290,33 @@ export class ConversationAgent extends Agent<Env> {
     const stored = row ? storedRequestSchema.parse(JSON.parse(row.payload)) : undefined;
     return stored;
   }
-  private async modelDispatch() {
+  private async assertModelAllowed(entries: readonly EntryRecord[]) {
     const stored = await this.runningRequest();
-    const doc = await (await this.harness.pi()).snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
-    if (
-      !remoteModelAllowed(doc?.operations ?? {}, stored?.request) ||
-      remoteRunBlocked(await this.allEntries())
-    )
+    const pi = await this.harness.pi();
+    const doc = await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
+    if (!remoteModelAllowed(doc?.operations ?? {}, stored?.request) || remoteRunBlocked(entries))
       throw new AppError(409, 'remote_outcome_unknown');
-    const selection = stored?.execution ?? this.selection();
-    const model = this.models().getModel(this.env.MODEL_PROVIDER, selection.modelId);
-    if (!model)
-      throw new AppError(
-        503,
-        'unknown_model',
-        'Submitted model is absent from the installed Pi catalog',
+    const current = entries.slice(entries.findLastIndex((entry) => entry.kind === 'pi.user'));
+    const attempted = current
+      .flatMap((entry) => entry.model ?? [])
+      .flatMap((message) =>
+        message.role === 'assistant'
+          ? message.content.filter((part) => part.type === 'toolCall').map((part) => part.name)
+          : [],
       );
-    return { model, thinkingLevel: selection.thinkingLevel };
+    for (const intent of Object.values(doc?.mcp ?? {}))
+      if (
+        (!stored ||
+          intent.runId === stored.request.runId ||
+          this.mcpPrepared?.bindings.some(
+            (binding) =>
+              binding.replay === 'unsafe' &&
+              attempted.includes(binding.name) &&
+              (binding.serverId === intent.serverId || binding.endpoint === intent.endpoint),
+          )) &&
+        mcpIntentUnresolved(intent, await pi.getTask(intent.taskId as TaskId, BG))
+      )
+        throw new AppError(409, 'remote_outcome_unknown');
   }
   protected mcpConfiguration(): MCPConfig[] {
     return mcpConfiguration(this.env as unknown as Record<string, unknown>);
@@ -329,10 +387,11 @@ export class ConversationAgent extends Agent<Env> {
     if (this.deleting) throw new AppError(404, 'not_found');
     const pi = await this.harness.pi();
     if (this.deleting) throw new AppError(404, 'not_found');
+    const selection = this.modelCatalog().defaultSelection;
     return pi.root(BG, {
       agent: {
-        model: { provider: this.env.MODEL_PROVIDER, modelId: this.env.MODEL_ID },
-        thinkingLevel: this.thinkingLevel(),
+        model: { provider: selection.provider, modelId: selection.modelId },
+        thinkingLevel: selection.thinkingLevel,
       },
     });
   }
@@ -370,6 +429,7 @@ export class ConversationAgent extends Agent<Env> {
       let stored = record ? storedRequestSchema.parse(JSON.parse(record.payload)) : undefined;
       if (!stored) {
         await this.root();
+        await withdrawIdleInputs(await this.harness.pi(), BG);
         let sourceContext;
         if (command.source) {
           if (command.source.action === 'extension_action') {
@@ -379,9 +439,10 @@ export class ConversationAgent extends Agent<Env> {
             )?.actions;
             if (!action || !Object.hasOwn(action, source.name))
               throw new AppError(404, 'extension_action_unavailable');
-            sourceContext = await action[source.name]!.normalize(structuredClone(source.payload), {
-              entries: () => this.allEntries(),
-            });
+            sourceContext = await action[source.name]!.normalize(
+              structuredClone(source.payload),
+              this.readContext(),
+            );
             try {
               jsonText(sourceContext);
             } catch {
@@ -405,7 +466,12 @@ export class ConversationAgent extends Agent<Env> {
               throw new AppError(409, 'remote_retry_unnecessary');
           }
         }
-        const execution = this.selection(command.config); // Validate and freeze settings before admission.
+        // Freeze provider as well as the UI choice, including the host/Pi acceptance gap.
+        const selection = this.selection(command.config);
+        const execution = {
+          ...selection,
+          credentialRef: await (await this.credentials()).select(selection.provider),
+        };
         const pending = await this.harness.pending({ session: '1' });
         if (!pending.length) await this.pruneCompletedRemote(command);
         if (pending.filter((p) => p.status === 'queued').length >= 10)
@@ -455,16 +521,28 @@ export class ConversationAgent extends Agent<Env> {
     const completed = Object.values(saved.operations).filter(
       (o) => o.status === 'completed' && published.has(o.taskId) && o.taskId !== referenced,
     );
-    if (completed.length)
+    const completedMcp: number[] = [];
+    for (const intent of Object.values(saved.mcp ?? {}))
+      if (!mcpIntentUnresolved(intent, await pi.getTask(intent.taskId as TaskId, BG)))
+        completedMcp.push(intent.taskId);
+    if (completed.length || completedMcp.length)
       await pi.commit(async (tx) => {
         const doc = await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID);
         for (const operation of completed)
           if (doc.operations[operation.taskId]?.status === 'completed')
             delete doc.operations[operation.taskId];
+        for (const taskId of completedMcp) delete doc.mcp?.[taskId];
       }, BG);
   }
   private async enqueue(stored: StoredRequest) {
     const command = stored.request;
+    const root = await this.root();
+    // Native acceptance survives a lost host acknowledgement. Reconcile that receipt before
+    // requiring credentials or submitting: terminal work must not depend on its former model.
+    if (await root.commit((tx) => tx.submissionByRequest(root.id, command.runId), BG)) {
+      this.ctx.storage.sql.exec('UPDATE app_requests SET accepted=1 WHERE id=?', command.runId);
+      return;
+    }
     let text = command.text;
     const context =
       stored.sourceContext !== undefined
@@ -473,10 +551,17 @@ export class ConversationAgent extends Agent<Env> {
           ? command.source
           : undefined;
     if (context !== undefined) text += USER_ACTION_CONTEXT + '\n' + JSON.stringify(context);
+    const provider = await bindExecution(this.runtimeModels!, stored.execution, () =>
+      this.credentials(),
+    );
     await this.harness.submit(text, {
       session: '1',
       operationId: command.runId,
       whenBusy: 'followUp',
+      execution: {
+        model: { provider, modelId: stored.execution.modelId },
+        thinkingLevel: stored.execution.thinkingLevel,
+      },
     });
     this.ctx.storage.sql.exec('UPDATE app_requests SET accepted=1 WHERE id=?', command.runId);
   }
@@ -491,6 +576,7 @@ export class ConversationAgent extends Agent<Env> {
     }
     await this.serial(async () => {
       if (this.deleting || this.stopping) return;
+      await withdrawIdleInputs(await this.harness.pi(), BG);
       for (const record of this.rows<{ id: string; payload: string }>(
         'SELECT id,payload FROM app_requests WHERE accepted=0 ORDER BY rowid',
       )) {
@@ -551,7 +637,7 @@ export class ConversationAgent extends Agent<Env> {
       (contribution) => contribution.id === extensionId,
     )?.resources;
     if (!handler) throw new AppError(404, 'resource_not_found');
-    const value = await handler.read(ref, { entries: () => this.allEntries() });
+    const value = await handler.read(ref, this.readContext());
     try {
       // Resource data may combine independently bounded content/program components.
       // Saved and initial state retain their separate 1 MiB budget.
@@ -637,6 +723,13 @@ export class ConversationAgent extends Agent<Env> {
     const root = await this.root();
     return root.entries({ order: 'ascending' }, 100, cursor, BG);
   }
+  private readContext(): ReadContext {
+    return {
+      entries: () => this.allEntries(),
+      successfulTool: async (ref, name) =>
+        readSuccessfulTool(await this.harness.pi(), ref, name, BG),
+    };
+  }
   async allEntries(): Promise<EntryRecord[]> {
     const all: EntryRecord[] = [];
     let cursor: Cursor | undefined;
@@ -653,6 +746,16 @@ export class ConversationAgent extends Agent<Env> {
   }
   async progressProjector() {
     return toolProjector(await this.contributions());
+  }
+  async extensionProjection() {
+    return createExtensionProjection(
+      await this.harness.pi(),
+      await this.contributions(),
+      this.rows<{ id: string }>('SELECT id FROM app_requests WHERE accepted<>-1').map(
+        (row) => row.id,
+      ),
+      BG,
+    );
   }
   async snapshot(rawCursor?: string): Promise<string> {
     if (this.deleting) return JSON.stringify({ error: { status: 404, code: 'not_found' } });
@@ -674,19 +777,22 @@ export class ConversationAgent extends Agent<Env> {
         ),
       BG,
     );
-    let toolProgress;
+    let toolProgress, extensionState, firstHistory;
     if (!cursor) {
-      const entries = await this.allEntries();
+      const projection = await this.extensionProjection();
       const watch = await watchEvents(pi, ROOT_CONVERSATION_ID, BG);
       try {
-        toolProgress = (await restoreToolProgress(pi, watch.snapshot, entries)).project(
-          await this.progressProjector(),
-        );
+        const facts = await projection.restore(true);
+        firstHistory = facts.page;
+        toolProgress = (
+          await restoreToolProgress(pi, watch.snapshot, facts.entries, facts.tasks)
+        ).project(await this.progressProjector());
+        extensionState = projection.project();
       } finally {
         await watch.stop();
       }
     }
-    const history = await this.history(cursor);
+    const history = firstHistory ?? (await this.history(cursor));
     const modelCatalog = this.modelCatalog();
     const lastRequest = this.rows<{ payload: string }>(
       'SELECT payload FROM app_requests WHERE accepted<>-1 ORDER BY rowid DESC LIMIT 1',
@@ -694,9 +800,17 @@ export class ConversationAgent extends Agent<Env> {
     const previousRequest = lastRequest
       ? storedRequestSchema.parse(JSON.parse(lastRequest.payload))
       : undefined;
-    const previous = previousRequest?.execution as ModelSelection | undefined;
+    const previous: ModelSelection | undefined = previousRequest
+      ? {
+          provider: previousRequest.execution.provider,
+          modelId: previousRequest.execution.modelId,
+          thinkingLevel: previousRequest.execution.thinkingLevel,
+        }
+      : undefined;
     // A removed model/effort falls back for the next message, without rewriting earlier requests.
-    const option = modelCatalog.models.find((m) => m.id === previous?.modelId);
+    const option = modelCatalog.models.find(
+      (m) => m.id === previous?.modelId && m.provider === previous?.provider,
+    );
     const selection =
       previous && option?.thinkingLevels.includes(previous.thinkingLevel)
         ? previous
@@ -705,6 +819,7 @@ export class ConversationAgent extends Agent<Env> {
       entries: browserEntries(history.items),
       cursor: history.next,
       toolProgress,
+      extensionState,
       pending,
       stopping: this.stopping,
       modelCatalog,

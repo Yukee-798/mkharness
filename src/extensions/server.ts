@@ -4,15 +4,21 @@ import { validateContributionIds } from '../server/contributions';
 type Context = { env: Env; entries: () => Promise<readonly EntryRecord[]> };
 type Definition = {
   id: string;
-  enabled: (env: Env) => boolean;
+  enabled?: (env: Env) => boolean;
   create: (context: Context) => Promise<ServerContribution>;
 };
 
 /** The only server activation list. Listing IDs never executes a factory. */
 export const definitions: readonly Definition[] = [
   {
+    id: 'timing',
+    create: async () => {
+      const { timingContribution } = await import('./timing/server');
+      return timingContribution();
+    },
+  },
+  {
     id: 'web',
-    enabled: () => true,
     create: async ({ env }) => {
       const { webTools } = await import('../server/web');
       return {
@@ -31,8 +37,6 @@ export const definitions: readonly Definition[] = [
   },
   {
     id: 'example',
-    enabled: (env) =>
-      (env as Env & { ENABLE_EXAMPLE_EXTENSION?: string }).ENABLE_EXAMPLE_EXTENSION === '1',
     create: async () => {
       const { exampleExtension } = await import('../server/extensions');
       return { id: 'example', extension: exampleExtension() };
@@ -48,7 +52,7 @@ export const definitions: readonly Definition[] = [
   },
 ];
 export const enabledDefinitions = (env: Env) => {
-  const enabled = definitions.filter((definition) => definition.enabled(env));
+  const enabled = definitions.filter((definition) => definition.enabled?.(env) ?? true);
   validateContributionIds(enabled.map((definition) => definition.id));
   return enabled;
 };

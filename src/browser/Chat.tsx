@@ -19,7 +19,7 @@ import { AttachAgent, StreamReplaced } from './transport';
 import { ResourceDrafts } from './ResourceDrafts';
 import { request, ApiError } from './api';
 import { useQuery } from '@tanstack/react-query';
-import { userKeys } from './queries';
+import { userKeys, modelSettingsOptions } from './queries';
 import { createSubmitter } from './submission';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -35,6 +35,8 @@ import { ToolActivity } from './tool-activity';
 import { useExtensionConfig } from './extension-config';
 import { ToolProgressContext } from './tool-progress';
 import type { ToolProgressMap } from '../shared/tool-progress';
+import type { ExtensionState } from '../shared/extension-state';
+import { AssistantFooter } from './assistant-footer';
 import { ToolGroupRoot, ToolGroupContent } from './tool-group';
 import { DisclosureTrigger, disclosureContentClass, TraceLine } from './trace';
 import {
@@ -50,6 +52,7 @@ import {
 export type Snapshot = {
   entries: EntryRecord[];
   toolProgress?: ToolProgressMap;
+  extensionState?: ExtensionState;
   cursor?: unknown;
   pending: { operationId: string; status: 'running' | 'queued' }[];
   stopping: boolean;
@@ -76,11 +79,15 @@ export function Chat({
   userId,
   onDirectoryChange,
   onUnavailable,
+  onCreated,
+  onSettings,
 }: {
   id: string;
   userId: string;
   onDirectoryChange?: () => void;
   onUnavailable?: () => void;
+  onCreated?: (id: string) => void;
+  onSettings?: (provider?: string) => void;
 }) {
   const unavailable = useRef(onUnavailable);
   unavailable.current = onUnavailable;
@@ -88,7 +95,10 @@ export function Chat({
     queryKey: userKeys(userId).snapshot(id),
     queryFn: ({ signal }) => loadSnapshot(id, signal),
     retry: false,
+    enabled: !!id,
   });
+  const settings = useQuery(modelSettingsOptions(userId));
+  const createdId = useRef(id);
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
     [restoration, setRestoration] = useState(0),
@@ -97,10 +107,12 @@ export function Chat({
     [accepted, setAccepted] = useState<string[]>([]),
     [sending, setSending] = useState(false);
   const retries = useRef(0);
+  const draftVersion = useRef(0);
   const [selection, setSelection] = useState<ModelSelection>();
   const [remote, setRemote] = useState<RemoteProgress[]>([]);
   const [remoteSending, setRemoteSending] = useState(false);
-  const selected = selection ?? snapshot?.selection ?? snapshot?.modelCatalog?.defaultSelection;
+  const catalog = settings.data?.modelCatalog ?? snapshot?.modelCatalog;
+  const selected = selection ?? snapshot?.selection ?? catalog?.defaultSelection;
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [connection, setConnection] = useState<'reconnecting' | 'recovered'>();
   useEffect(() => () => clearTimeout(reconnectTimer.current), []);
@@ -116,6 +128,8 @@ export function Chat({
     // explicit restoration own their history; background reads must not interrupt either one.
     if (
       restoredRevision.current !== revision ||
+      !id ||
+      !query.isSuccess ||
       !query.data ||
       snapshot?.pending.length ||
       snapshot === query.data
@@ -123,12 +137,14 @@ export function Chat({
       return;
     setSnapshot(query.data);
     setRemote(query.data.remote ?? []);
-  }, [revision, query.data, snapshot]);
+  }, [id, revision, query.data, query.isSuccess, snapshot]);
   useEffect(() => {
     if (revision === 0) return;
     let active = true;
-    void refetchSnapshot().then(({ data: s }) => {
-      if (!active || !s) return;
+    void refetchSnapshot().then(({ data: s, isSuccess }) => {
+      // A failed Query refetch retains cached data. Only a successful read may restore
+      // history and attach; otherwise cached pending work can form a terminal SSE loop.
+      if (!active || !isSuccess || !s) return;
       restoredRevision.current = revision;
       setSnapshot(s);
       setRestoration(revision);
@@ -146,17 +162,46 @@ export function Chat({
     if (!e) return;
     setConnection(undefined);
     if (e instanceof ApiError && e.status === 404 && unavailable.current) unavailable.current();
-    else setError(e.message);
   }, [query.error]);
+  // Query owns read errors; keep submission/action errors separate so a successful
+  // refetch clears stale read failures without hiding an unconfirmed submission.
+  const visibleError = error || query.error?.message;
   const send = useMemo(
     () =>
-      createSubmitter((command) =>
-        request(`/conversations/${id}/runs`, { method: 'POST', body: JSON.stringify(command) }),
-      ),
-    [id],
+      createSubmitter(async (command) => {
+        if (!createdId.current)
+          createdId.current = (
+            await request<{ id: string }>('/conversations', { method: 'POST' })
+          ).id;
+        return request(`/conversations/${createdId.current}/runs`, {
+          method: 'POST',
+          body: JSON.stringify(command),
+        });
+      }),
+    [],
   );
   const submit = async (message: string, source?: RunCommand['source']) => {
-    await send(message, source, selected);
+    if (
+      !createdId.current &&
+      (!selected ||
+        !settings.data ||
+        settings.data.credentials.find((c) => c.provider === selected.provider)?.effectiveSource ===
+          'none')
+    ) {
+      onSettings?.(selected?.provider);
+      throw new Error('请先配置所选供应商的 API Key');
+    }
+    try {
+      await send(message, source, selected);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'credential_required')
+        onSettings?.(selected?.provider);
+      throw e;
+    }
+    if (!id) {
+      onCreated?.(createdId.current);
+      return;
+    }
     onDirectoryChange?.();
     setAccepted((a) => [...a, message]);
     retries.current = 0;
@@ -203,6 +248,7 @@ export function Chat({
   }, [snapshot]);
   // The wrapper uses assistant-ui focus behavior; submission deliberately stays HTTP-only.
   // Calling runtime.send/abort here would replace the live subscription or cancel a durable task.
+  const composerReady = !id || !!snapshot;
   const ComposerRoot = snapshot ? ComposerPrimitive.Root : 'form';
   const footer = (
     <div className="space-y-3">
@@ -313,10 +359,10 @@ export function Chat({
           )}
         </div>
       )}
-      {error && (
+      {visibleError && (
         <Alert variant="destructive">
           <AlertDescription>
-            {error}
+            {visibleError}
             <Button
               variant="outline"
               size="sm"
@@ -336,11 +382,12 @@ export function Chat({
         className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!text.trim() || sending || snapshot?.stopping) return;
+          if (!composerReady || !text.trim() || sending || snapshot?.stopping) return;
+          const submittedVersion = draftVersion.current;
           setSending(true);
           try {
             await submit(text);
-            setText('');
+            if (draftVersion.current === submittedVersion) setText('');
           } catch (e) {
             setError((e as Error).message);
           } finally {
@@ -354,11 +401,14 @@ export function Chat({
         <Textarea
           id="message"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            draftVersion.current++;
+            setText(e.target.value);
+          }}
           rows={2}
           placeholder="描述你的问题，或说说你想完成什么"
           className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
-          disabled={snapshot?.stopping}
+          disabled={!composerReady || snapshot?.stopping}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -368,12 +418,12 @@ export function Chat({
         />
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
-            {snapshot?.modelCatalog && selected ? (
+            {catalog && selected ? (
               <ModelPicker
-                catalog={snapshot.modelCatalog}
+                catalog={catalog}
                 value={selected}
                 onChange={setSelection}
-                disabled={sending || snapshot.stopping}
+                disabled={sending || snapshot?.stopping}
               />
             ) : (
               <span className="px-1 text-[11px] text-muted-foreground">Shift + Enter 换行</span>
@@ -405,7 +455,13 @@ export function Chat({
               size="icon"
               className="rounded-full"
               aria-label={sending ? '提交中…' : '发送'}
-              disabled={!text.trim() || sending || snapshot?.stopping}
+              disabled={
+                !composerReady ||
+                !text.trim() ||
+                sending ||
+                snapshot?.stopping ||
+                (!id && settings.isPending)
+              }
             >
               {sending ? (
                 <LoaderCircle className="size-4 motion-safe:animate-spin" />
@@ -435,6 +491,19 @@ export function Chat({
             progress={setRemote}
             footer={footer}
           />
+        ) : !id ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 py-10">
+            <div className="w-full max-w-3xl space-y-8">
+              <div className="text-center">
+                <MessageSquare className="mx-auto mb-5 size-8 text-muted-foreground" />
+                <h1 className="text-2xl font-semibold tracking-tight">今天想解决什么问题？</h1>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  直接提问，或描述你想完成的内容。
+                </p>
+              </div>
+              {footer}
+            </div>
+          </div>
         ) : (
           <>
             <ChatLoading />
@@ -470,6 +539,9 @@ function Runtime({
 }) {
   const extensions = useExtensionConfig(userId);
   const [toolProgress, setToolProgress] = useState<ToolProgressMap>(snapshot.toolProgress ?? {});
+  const [extensionState, setExtensionState] = useState<ExtensionState>(
+    snapshot.extensionState ?? {},
+  );
   // Commit aliases belong to this runtime only. Fresh mounts restore canonical Pi IDs.
   const messageIds = useMemo(() => new Map<string, string>(), []);
   const history = useMemo(() => {
@@ -504,6 +576,11 @@ function Runtime({
           const active = pending.find((item) => item.status === 'running') ?? pending[0];
           if (active?.operationId === runId) setToolProgress(value);
         },
+        (runId, value) => {
+          const pending = callbacks.current.snapshot.pending;
+          const active = pending.find((item) => item.status === 'running') ?? pending[0];
+          if (active?.operationId === runId) setExtensionState(value);
+        },
       ),
     [id, messageIds],
   );
@@ -531,7 +608,16 @@ function Runtime({
     <AssistantRuntimeProvider runtime={runtime} config={extensions.config}>
       <ToolProgressContext value={activeRunId ? toolProgress : (snapshot.toolProgress ?? {})}>
         <ExtensionContext
-          value={{ id, userId, submit, activity: extensions.activity, toolkit: extensions.toolkit }}
+          value={{
+            id,
+            userId,
+            submit,
+            activity: extensions.activity,
+            toolkit: extensions.toolkit,
+            ui: extensions.ui,
+            state: activeRunId ? extensionState : (snapshot.extensionState ?? {}),
+            messageIds,
+          }}
         >
           <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
             <ThreadPrimitive.Viewport
@@ -568,6 +654,21 @@ function Runtime({
                     <ArrowDown className="size-4" />
                   </TooltipIconButton>
                 </ThreadPrimitive.ScrollToBottom>
+                {extensions.unavailable && (
+                  <Alert className="mb-3">
+                    <AlertDescription>
+                      部分扩展界面未能加载，基础聊天仍可使用。
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={extensions.loading}
+                        onClick={extensions.retry}
+                      >
+                        重试加载
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {footer}
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Viewport>
@@ -709,6 +810,7 @@ function Assistant() {
           }}
         </MessagePrimitive.GroupedParts>
       ))}
+      {!traceTail && <AssistantFooter />}
     </MessagePrimitive.Root>
   );
 }

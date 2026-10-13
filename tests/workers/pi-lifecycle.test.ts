@@ -1,65 +1,152 @@
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it } from 'vitest';
-import { BG } from '../../src/server/conversation';
+import type { LifecycleProbe } from './lifecycle-entry';
 
-it('waits for the old Pi runtime to close before reopening the same harness', async () => {
-  const target = env.CONVERSATIONS.getByName(crypto.randomUUID());
-  await runInDurableObject(target, async (instance) => {
-    const previous = await instance.harness.pi();
-    const originalClose = previous.close.bind(previous);
-    let release!: () => void;
-    let started!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const closingStarted = new Promise<void>((resolve) => {
-      started = resolve;
-    });
-    previous.close = async (context) => {
-      started();
-      await gate;
-      return originalClose(context);
-    };
-    const closing = instance.harness.dispose();
-    await closingStarted;
-    const concurrentClose = instance.harness.dispose();
-    const opening = instance.harness.pi();
-    const openedBeforeClose = await Promise.race([
-      opening.then(() => true),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50)),
-    ]);
-    release();
-    await Promise.all([closing, concurrentClose]);
-    const next = await opening;
-    expect(openedBeforeClose).toBe(false);
-    expect(next).not.toBe(previous);
-    await next.close(BG);
-  });
+const probes = (env as unknown as { LIFECYCLE_PROBES: DurableObjectNamespace<LifecycleProbe> })
+  .LIFECYCLE_PROBES;
+const pause = () => new Promise((resolve) => setTimeout(resolve, 20));
+type Snapshot = {
+  entries: { model?: { role: string; toolName?: string; content: unknown }[] }[];
+  pending: unknown[];
+  stopping: boolean;
+  runtimeIssues: unknown[];
+};
+async function settle(stub: DurableObjectStub<LifecycleProbe>): Promise<Snapshot> {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const snapshot: Snapshot = JSON.parse(await stub.snapshot());
+    if (!snapshot.pending.length && !snapshot.stopping && !(await stub.needsRecovery()))
+      return snapshot;
+    await pause();
+  }
+  throw new Error('Lifecycle recovery did not settle');
+}
+const messages = (snapshot: Snapshot) => snapshot.entries.flatMap((entry) => entry.model ?? []);
+
+it('restores completed history in a new DO without executing successful tools again', async () => {
+  let stub = probes.getByName(crypto.randomUUID());
+  const command = { runId: crypto.randomUUID(), text: 'skill activation' };
+  await stub.submitRun(command);
+  const before = await settle(stub);
+  const old = await stub.probe();
+  expect(old.counts).toEqual([
+    { name: 'activate_skill', n: 1 },
+    { name: 'read_skill_resource', n: 1 },
+  ]);
+  await abortAllDurableObjects();
+  stub = probes.get(stub.id);
+  expect((await settle(stub)).entries).toEqual(before.entries);
+  const fresh = await stub.probe();
+  expect(fresh.instanceId).not.toBe(old.instanceId);
+  expect(fresh.opens).toBe(1);
+  expect(fresh.counts).toEqual(old.counts);
+  expect(await stub.submitRun(command)).toMatchObject({ accepted: true });
+  expect(messages(await settle(stub)).filter((message) => message.role === 'user')).toHaveLength(1);
+  expect((await stub.probe()).requests).toHaveLength(1);
 });
 
-it('reopens an interrupted runtime over its existing task without submitting the request again', async () => {
-  const target = env.CONVERSATIONS.getByName(crypto.randomUUID());
-  const runId = crypto.randomUUID();
-  await target.submitRun({ runId, text: 'slow lifecycle recovery' });
-  await runInDurableObject(target, async (instance, state) => {
-    const previous = await instance.harness.pi();
-    await instance.harness.dispose();
-    const reopened = await instance.harness.pi();
-    expect(reopened).not.toBe(previous);
-    expect(state.storage.sql.exec('SELECT count(*) AS n FROM app_requests').one().n).toBe(1);
-  });
-  let snapshot;
-  for (let attempt = 0; attempt < 250; attempt++) {
-    snapshot = JSON.parse(await target.snapshot());
-    if (!snapshot.pending.length) break;
-    await new Promise((resolve) => setTimeout(resolve, 20));
+it('resumes a pending safe tool and its queue after actual DO reconstruction', async () => {
+  let stub = probes.getByName(crypto.randomUUID());
+  const first = { runId: crypto.randomUUID(), text: 'progress seam' };
+  await stub.submitRun(first);
+  for (let attempt = 0; attempt < 150; attempt++) {
+    if ((await stub.probe()).counts.some((row) => row.name === 'progress:1')) break;
+    await pause();
   }
-  expect(snapshot.pending).toEqual([]);
-  const messages = snapshot.entries.flatMap(
-    (entry: { model?: { role: string }[] }) => entry.model ?? [],
+  const old = await stub.probe();
+  expect(old.counts).toEqual([
+    { name: 'progress:0', n: 1 },
+    { name: 'progress:1', n: 1 },
+  ]);
+  const queued = { runId: crypto.randomUUID(), text: 'queued following recovery' };
+  await stub.submitRun(queued);
+  await abortAllDurableObjects();
+  stub = probes.get(stub.id);
+  expect(await stub.submitRun(first)).toMatchObject({ accepted: true });
+  expect(await stub.submitRun(queued)).toMatchObject({ accepted: true });
+  const snapshot = await settle(stub);
+  const fresh = await stub.probe();
+  expect(fresh.instanceId).not.toBe(old.instanceId);
+  expect(fresh.opens).toBe(1);
+  expect(fresh.counts).toEqual([
+    { name: 'progress:0', n: 1 },
+    { name: 'progress:1', n: 2 },
+  ]);
+  expect(fresh.requests).toHaveLength(2);
+  expect(
+    messages(snapshot)
+      .filter((message) => message.role === 'user')
+      .map((message) => message.content),
+  ).toEqual([first.text, queued.text]);
+  expect(
+    messages(snapshot).filter((message) => message.toolName === 'progress_probe'),
+  ).toHaveLength(2);
+  expect(snapshot.runtimeIssues).toEqual([]);
+});
+
+it('joins application deletion before closing and deleting real storage once', async () => {
+  const id = crypto.randomUUID();
+  const stub = probes.getByName(id);
+  await env.DB.exec(
+    'CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY); CREATE TABLE IF NOT EXISTS lifecycle_delete(seq INTEGER PRIMARY KEY AUTOINCREMENT,chat TEXT,phase TEXT,closed INTEGER)',
   );
-  expect(messages.filter((message: { role: string }) => message.role === 'user')).toHaveLength(1);
-  expect(messages.filter((message: { role: string }) => message.role === 'assistant')).toHaveLength(
-    1,
-  );
+  const owner = crypto.randomUUID(),
+    now = Date.now();
+  await env.DB.prepare(
+    'INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt,isAnonymous)VALUES(?,?,?,0,?,?,1)',
+  )
+    .bind(owner, 'guest', owner + '@test.invalid', now, now)
+    .run();
+  await env.DB.prepare(
+    'INSERT INTO conversations(id,owner,title,created_at,updated_at)VALUES(?,?,?,?,?)',
+  )
+    .bind(id, owner, 'deletion', now, now)
+    .run();
+  await stub.submitRun({ runId: crypto.randomUUID(), text: 'ignores_cancel' });
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (JSON.parse(await stub.snapshot()).tools.length) break;
+    await pause();
+  }
+  expect(JSON.parse(await stub.snapshot()).tools).toHaveLength(1);
+  await stub.submitRun({ runId: crypto.randomUUID(), text: 'queued must not finish' });
+  await runInDurableObject(stub, async (instance, state) => {
+    const pi = await instance.harness.pi();
+    const close = pi.close.bind(pi);
+    let closed = false;
+    pi.close = async (context) => {
+      await close(context);
+      closed = true;
+      await env.DB.prepare("INSERT INTO lifecycle_delete(chat,phase,closed)VALUES(?,'close',1)")
+        .bind(id)
+        .run();
+    };
+    const deleteAll = state.storage.deleteAll.bind(state.storage);
+    state.storage.deleteAll = async () => {
+      await env.DB.prepare("INSERT INTO lifecycle_delete(chat,phase,closed)VALUES(?,'delete',?)")
+        .bind(id, closed ? 1 : 0)
+        .run();
+      await deleteAll();
+      const remaining = state.storage.sql
+        .exec("SELECT name FROM sqlite_master WHERE name='app_requests'")
+        .toArray().length;
+      await env.DB.prepare("INSERT INTO lifecycle_delete(chat,phase,closed)VALUES(?,'remaining',?)")
+        .bind(id, remaining)
+        .run();
+    };
+  });
+  // Native destroy aborts the old isolate; observe its facts in independent test D1.
+  await Promise.allSettled([stub.deleteConversation(id), stub.deleteConversation(id)]);
+  expect(
+    (await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).all()).results,
+  ).toEqual([]);
+  expect(
+    (
+      await env.DB.prepare('SELECT phase,closed FROM lifecycle_delete WHERE chat=? ORDER BY seq')
+        .bind(id)
+        .all()
+    ).results,
+  ).toEqual([
+    { phase: 'close', closed: 1 },
+    { phase: 'delete', closed: 1 },
+    { phase: 'remaining', closed: 0 },
+  ]);
 });

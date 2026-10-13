@@ -1,6 +1,59 @@
 import { partialUI } from '../../src/extensions/openui/partial';
 import { it, expect, vi } from 'vitest';
 import { AttachAgent } from '../../src/browser/transport';
+it('clones public extension projection callbacks and ignores foreign run state', async () => {
+  const projection = vi.fn();
+  const stream = (status: string) =>
+    new Response(
+      [
+        { type: 'RUN_STARTED', threadId: 'c', runId: 'r' },
+        {
+          type: 'STATE_SNAPSHOT',
+          snapshot: { runId: 'foreign', extensionState: { secret: true } },
+        },
+        {
+          type: 'STATE_SNAPSHOT',
+          snapshot: { runId: 'r', status, extensionState: { timing: { tools: {}, replies: {} } } },
+        },
+        { type: 'RUN_FINISHED', threadId: 'c', runId: 'r' },
+      ]
+        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+        .join(''),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    );
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => stream('placed')),
+  );
+  const agent = new AttachAgent(
+    'c',
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    new Map(),
+    () => {},
+    projection,
+  );
+  const attach = (instance: AttachAgent) =>
+    new Promise<void>((resolve, reject) =>
+      instance
+        .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
+        .subscribe({ complete: resolve, error: reject }),
+    );
+  try {
+    await attach(agent.clone());
+    expect(projection).toHaveBeenCalledExactlyOnceWith('r', { timing: { tools: {}, replies: {} } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => stream('done')),
+    );
+    await attach(agent);
+    expect(projection).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it('only attaches with GET; abort detaches without POST or stop', async () => {
   const requests: RequestInit[] = [];
   vi.stubGlobal(

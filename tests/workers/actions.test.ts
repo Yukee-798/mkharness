@@ -107,7 +107,7 @@ it('freezes normalized action context once across the save/accept gap and compar
     );
     expect(stored).toMatchObject({
       request: command,
-      execution: { modelId: 'fixture' },
+      execution: { provider: 'fixture', modelId: 'fixture' },
       sourceContext: { value: 'click-time' },
     });
     current = 'changed-after-save';
@@ -156,7 +156,12 @@ it.each([
         request.runId,
         JSON.stringify({
           request,
-          execution: { modelId: 'fixture', thinkingLevel: 'off' },
+          execution: {
+            provider: 'fixture',
+            modelId: 'fixture',
+            thinkingLevel: 'off',
+            credentialRef: { source: 'server', fingerprint: 'fixture-only' },
+          },
           sourceContext,
         }),
       );

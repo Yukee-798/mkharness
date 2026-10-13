@@ -1,9 +1,14 @@
 # Copy to .dev.vars. This file contains no credentials.
+AUTH_MODE=guest
+ALLOW_SERVER_MODEL_KEY=0
+# pnpm setup fills only missing secrets in .dev.vars; retain these across restarts/deploys.
+CREDENTIAL_ENCRYPTION_KEY=
 BETTER_AUTH_SECRET=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 MODEL_PROVIDER=openai
-MODEL_ID=
+MODEL_ID=gpt-5-mini
+# Optional deployment default; requires ALLOW_SERVER_MODEL_KEY=1.
 MODEL_API_KEY=
 # Optional
 # Comma-separated model allowlist for this provider; omitted = installed provider catalog.
@@ -14,7 +19,6 @@ TAVILY_API_KEY=
 
 # Developer-installed native capabilities
 ENABLE_GENERATIVE_UI=1
-ENABLE_EXAMPLE_EXTENSION=0
 ENABLE_EXAMPLE_SKILL=0
 TOOL_CALL_LIMIT=40
 # JSON configuration, credentials referenced by env variable name only.

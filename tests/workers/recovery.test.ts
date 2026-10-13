@@ -29,7 +29,12 @@ it.each([false, true])(
         command.runId,
         JSON.stringify({
           request: command,
-          execution: { modelId: 'fixture', thinkingLevel: 'off' },
+          execution: {
+            provider: 'fixture',
+            modelId: 'fixture',
+            thinkingLevel: 'off',
+            credentialRef: { source: 'server', fingerprint: 'fixture-only' },
+          },
         }),
       );
       if (accepted)

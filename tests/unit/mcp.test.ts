@@ -3,7 +3,12 @@ import { MCPClientManager } from 'agents/mcp/client';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
 import { buildMcp, configureMcpStartup, mcpConfiguration } from '../../src/server/mcp';
 const configs = [
-  { serverId: 'reference', endpoint: 'https://mcp.example.test/mcp', allowlist: ['lookup'] },
+  {
+    serverId: 'reference',
+    endpoint: 'https://mcp.example.test/mcp',
+    allowlist: ['lookup'],
+    safeTools: ['lookup'],
+  },
 ];
 const schema = {
   type: 'object',
@@ -33,10 +38,16 @@ function manager(
     callTool: async () => result,
   } as any;
 }
-it('registers the real schema and preserves JSON results and isError through Pi', async () => {
+it('registers the real schema and converts JSON results and isError', async () => {
+  const unsafe = await buildMcp(
+    manager(),
+    configs.map(({ safeTools: _safe, ...config }) => config),
+    {},
+  );
+  expect(unsafe.extension.tools![0].replay).toBe('unsafe');
   const built = await buildMcp(manager(), configs, {}, undefined);
   const tool = built.extension.tools![0];
-  expect(tool.replay).toBe('unsafe');
+  expect(tool.replay).toBe('safe');
   expect(() =>
     validateToolArguments(tool, {
       type: 'toolCall',
@@ -137,11 +148,12 @@ it('uses current deployment transports before native SDK restore and removes dis
     requestInit?: RequestInit;
     fetch?: typeof fetch;
   };
-  expect(transport.requestInit?.headers).toEqual({ Authorization: 'Bearer fixture-current' });
+  expect(transport.requestInit?.headers).toBeUndefined();
+  expect(rows.get('reference')!.server_options).not.toContain('fixture-current');
   expect(transport.fetch).toBeTypeOf('function');
   const network = vi
     .spyOn(globalThis, 'fetch')
-    .mockResolvedValue(new Response(new Uint8Array(2 * 1024 * 1024 + 1)));
+    .mockImplementation(async () => new Response(new Uint8Array(2 * 1024 * 1024 + 1)));
   try {
     const response = await transport.fetch!('https://mcp.example.test/mcp', transport.requestInit);
     await expect(response.text()).rejects.toThrow('mcp_result_too_large');
@@ -149,10 +161,26 @@ it('uses current deployment transports before native SDK restore and removes dis
       'https://mcp.example.test/mcp',
       expect.objectContaining({
         redirect: 'manual',
-        headers: { Authorization: 'Bearer fixture-current' },
+        headers: expect.any(Headers),
         signal: expect.any(AbortSignal),
       }),
     );
+    const sent = new Headers(network.mock.calls[0][1]?.headers);
+    expect(sent.get('Authorization')).toBe('Bearer fixture-current');
+    const controller = new AbortController();
+    const request = new Request('https://mcp.example.test/mcp', {
+      headers: { 'Content-Type': 'application/json', 'Mcp-Session-Id': 'fixture-session' },
+      method: 'POST',
+      body: '{}',
+      signal: controller.signal,
+    });
+    await transport.fetch!(request);
+    const requestHeaders = new Headers(network.mock.calls[1][1]?.headers);
+    expect(requestHeaders.get('Authorization')).toBe('Bearer fixture-current');
+    expect(requestHeaders.get('Content-Type')).toBe('application/json');
+    expect(requestHeaders.get('Mcp-Session-Id')).toBe('fixture-session');
+    controller.abort();
+    expect(network.mock.calls[1][1]?.signal?.aborted).toBe(true);
   } finally {
     network.mockRestore();
   }

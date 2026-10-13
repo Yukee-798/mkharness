@@ -4,7 +4,6 @@ import { panelTools } from './tools';
 import { uiInstructions } from './instructions';
 import { AppError } from '../../shared/contracts';
 import { finiteJson } from '../../shared/compute';
-import { successfulTool } from '../../shared/references';
 import { validateUI } from './tools';
 import { actionParams } from './contracts';
 export function openuiContribution(
@@ -22,13 +21,12 @@ export function openuiContribution(
     },
     resources: {
       async read(ref, context) {
-        const history = await context.entries();
-        const panel = successfulTool(history, ref, 'present_openui');
+        const panel = await context.successfulTool(ref, 'present_openui');
         if (!panel) throw new AppError(404, 'resource_not_found');
         const programRef = panel.args.programRef;
         const program =
           typeof programRef === 'string'
-            ? successfulTool(history, programRef, 'prepare_program')
+            ? await context.successfulTool(programRef, 'prepare_program')
             : undefined;
         if (programRef && !program) throw new AppError(409, 'program_not_recoverable');
         const initialState = (await validateUI(String(panel.args.ui), !!program)).stateDeclarations;
@@ -63,7 +61,7 @@ export function openuiContribution(
             typeof payload.ref !== 'string'
           )
             throw new AppError(400, 'invalid_action_payload');
-          if (!successfulTool(await context.entries(), payload.ref, 'present_openui'))
+          if (!(await context.successfulTool(payload.ref, 'present_openui')))
             throw new AppError(404, 'resource_not_found');
           const state = payload.state;
           if (!state || typeof state !== 'object' || Array.isArray(state))

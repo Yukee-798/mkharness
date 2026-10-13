@@ -61,7 +61,7 @@ it('missing native task definitions settle with an explicit recovery diagnostic'
 it('optional UI can be disabled without removing local tools or base rules', async () => {
   const { applicationExtensions } = await import('../../src/server/assembly');
   const extensions = await applicationExtensions(
-    { ENABLE_GENERATIVE_UI: '0', ENABLE_EXAMPLE_EXTENSION: '1' } as any,
+    { ENABLE_GENERATIVE_UI: '0' } as any,
     async () => [],
   );
   validateExtensions(extensions);

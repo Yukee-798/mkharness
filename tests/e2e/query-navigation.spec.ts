@@ -14,6 +14,65 @@ function answer(id: number, text: string) {
   return { id, model: [{ role: 'assistant', content: [{ type: 'text', text }] }] };
 }
 
+test('a failed terminal snapshot never reattaches cached running work', async ({ page }) => {
+  const runId = '11111111-1111-4111-8111-111111111111';
+  let snapshots = 0,
+    observations = 0,
+    submissions = 0,
+    available = false;
+  await page.route('**/api/conversations/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/snapshot')) {
+      snapshots++;
+      if (snapshots > 1 && !available)
+        return route.fulfill({
+          status: 503,
+          json: { error: { code: 'snapshot_unavailable', message: 'Snapshot unavailable' } },
+        });
+      return route.fulfill({
+        json: {
+          entries: available ? [answer(2, 'Recovered final answer')] : [],
+          pending: available ? [] : [{ operationId: runId, status: 'running' }],
+          stopping: false,
+        },
+      });
+    }
+    if (path.endsWith('/events')) {
+      observations++;
+      return route.fulfill({
+        contentType: 'text/event-stream',
+        body: [
+          { type: 'RUN_STARTED', threadId: 'a', runId },
+          { type: 'RUN_FINISHED', threadId: 'a', runId },
+        ]
+          .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+          .join(''),
+      });
+    }
+    if (path.endsWith('/runs')) submissions++;
+    return route.fulfill({ status: 404 });
+  });
+  await page.goto('/tests/browser/chat.html');
+  await expect(page.getByRole('alert')).toContainText('Snapshot unavailable');
+  const composer = page.getByLabel('消息', { exact: true });
+  await composer.fill('keep my draft');
+  const node = await composer.elementHandle();
+  // Observe a whole reconnect-backoff interval, rather than a transient stable frame.
+  await page.waitForTimeout(4500);
+  expect(snapshots).toBe(2);
+  expect(observations).toBe(1);
+  expect(submissions).toBe(0);
+  available = true;
+  await page.getByRole('button', { name: '重新连接', exact: true }).click();
+  await expect(page.getByText('Recovered final answer')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(composer).toHaveValue('keep my draft');
+  expect(await node!.evaluate((element) => element.isConnected)).toBe(true);
+  expect(snapshots).toBe(3);
+  expect(observations).toBe(1);
+  expect(submissions).toBe(0);
+});
+
 test('idle read refresh adopts new history and attaches externally started work once', async ({
   page,
 }) => {

@@ -6,6 +6,7 @@ export function createDraftSaver(
   initialRevision: number,
   report: (status: SaveStatus) => void,
   initialState: RawState = {},
+  read?: () => Promise<{ state: RawState; revision: number }>,
 ) {
   let state: RawState = structuredClone(initialState),
     revision = initialRevision,
@@ -16,19 +17,54 @@ export function createDraftSaver(
     blocked = false,
     conflict = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let uncertain:
+    { state: RawState; revision: number; version: number; conflict: boolean } | undefined;
+  const reconcile = async () => {
+    if (!read || !uncertain) return;
+    const attempt = uncertain;
+    const remote = await read();
+    if (disposed) return;
+    if (!Number.isSafeInteger(remote.revision) || remote.revision < attempt.revision)
+      throw new Error('Invalid resource revision');
+    if (remote.revision > attempt.revision && jsonEqual(remote.state, attempt.state)) {
+      revision = remote.revision;
+      persisted = attempt.version;
+      uncertain = undefined;
+      return;
+    }
+    if (remote.revision !== attempt.revision || attempt.conflict) throw { status: 409 };
+    // The server is still at our last acknowledged version. A manual retry is safe.
+    uncertain = undefined;
+  };
   const schedule = () => {
     clearTimeout(timer);
     if (!disposed && !blocked) timer = setTimeout(() => void flush(), 500);
   };
   const flush = async () => {
     if (disposed || blocked || inflight || version === persisted) return;
-    const saving = version,
-      snapshot = structuredClone(state);
     inflight = true;
     report('saving');
     try {
-      revision = await save(snapshot, revision);
-      persisted = saving;
+      // Keep the original uncertain attempt across offline reads and newer edits.
+      if (uncertain) await reconcile();
+      if (disposed) return;
+      if (version !== persisted) {
+        const attempt = { state: structuredClone(state), revision, version, conflict: false };
+        try {
+          revision = await save(attempt.state, attempt.revision);
+          persisted = attempt.version;
+        } catch (error) {
+          if (read) {
+            uncertain = { ...attempt, conflict: (error as { status?: number })?.status === 409 };
+            await reconcile();
+            if (!uncertain && persisted === attempt.version) {
+              if (!disposed) report(version === persisted ? 'saved' : 'unsaved');
+              return;
+            }
+          }
+          throw error;
+        }
+      }
       if (!disposed) report(version === persisted ? 'saved' : 'unsaved');
     } catch (error) {
       blocked = true;
@@ -75,6 +111,7 @@ export function createResourceDrafts() {
       state: RawState,
       revision: number,
       save: (state: RawState, revision: number) => Promise<number>,
+      read?: () => Promise<{ state: RawState; revision: number }>,
     ) {
       const key = JSON.stringify(scope);
       const previous = drafts.get(key);
@@ -91,6 +128,7 @@ export function createResourceDrafts() {
             for (const listener of listeners) listener(status);
           },
           state,
+          read,
         ),
         subscribe: (listener) => {
           listeners.add(listener);

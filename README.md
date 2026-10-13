@@ -1,6 +1,6 @@
-# Agent Generative UI
+# MkHarness
 
-可复制和修改的远程 Agent 应用基础模板。应用入口采用 TanStack Start / Router / Query + Cloudflare Workers，推理、队列和完整历史仍由 PiHarness / Pi Durable 管理。用户通过 Google 登录；开发者可以静态装配 Extension、Skills、远程 MCP 与异步服务。已有 assistant-ui、OpenUI 与 QuickJS 交互继续保留。
+可复制和修改的远程 Agent 应用基础模板。应用入口采用 TanStack Start / Router / Query + Cloudflare Workers，推理、队列和完整历史仍由 PiHarness / Pi Durable 管理。默认免登录，以原生匿名会话隔离用户；可选择 Google 账号模式。用户可在客户端保存个人模型 Key；开发者可以静态装配 Extension、Skills、远程 MCP 与异步服务。已有 assistant-ui、OpenUI 与 QuickJS 交互继续保留。
 
 任务提交、观察和停止分开。关闭页面只断开观察，Durable Object 中的 PiHarness 继续执行；返回后从完整 Pi 历史恢复。程序、数据和界面使用成功工具历史，不建立第二套产物表。
 
@@ -13,7 +13,8 @@
 ```sh
 pnpm install --frozen-lockfile
 cp .dev.vars.example .dev.vars
-# 编辑 .dev.vars，填写 Google OAuth、Better Auth secret 和模型配置
+pnpm setup
+# guest 默认免登录；进入侧栏账号菜单 → 模型与 API Key，填写自己的供应商 Key。
 pnpm db:migrate
 pnpm dev
 ```
@@ -24,30 +25,35 @@ pnpm dev
 
 本地改动 ConversationAgent 或其依赖时，开发服务重启 Worker，并保留 SQLite；前端单独改动继续使用 React 热更新。当前 Cloudflare Vite runner 直接热替换 DO 类会保留旧实例中的异步 Pi runtime，不能用于恢复同一份存储。`config/durable-reload.ts` 在开发环境阻止这类替换。
 
-`agents@0.28.0` 使用随仓库提交的 pnpm patch：PiHarness 必须等待旧 runtime 关闭完成后才能重新打开，并发 dispose 共用同一次关闭。升级 Agents 时先运行 `pnpm test:workers` 和 `pnpm test:hmr`；只有上游已经修复且回归通过，才移除此 patch。运行实例写入校验仍作为防线，不承担正常的生命周期交接。
+正常删除由应用单飞并等待关闭；DO 重建使用新实例恢复原 SQLite，不复用已 dispose 的 Harness。生命周期与 HMR 对照通过后已移除关闭补丁，证据见 [未补丁 Pi 接缝验证](docs/validation/2026-10-12-unpatched-pi-seams.md)。当前仅为逐任务模型绑定使用两个 [临时公开 API 补丁](patches/README.md)：Pi Durable 保存提交配置并向生成/压缩继承，Agents wrapper 转发该配置；不修改生命周期。升级时运行 `pnpm test:workers` 和 `pnpm test:hmr`。开发热重启异常时，可以完整停止开发进程再启动，保留原持久化目录；不要用清空数据库替代恢复。
 
 线上 Workers Logs 默认采样 10% 的请求；这不是硬性写入量上限，也不是按错误采样。Pi onReport 逐次输出异常分类和类型，不做应用层节流。线上保留期、配额和计费由 Cloudflare 管理，部署前按实际流量调整采样并配置用量告警。应用聊天和 Pi 历史与诊断日志分开保存。
 
-| 配置                                        | 用途                                                                                             |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `BETTER_AUTH_SECRET`                        | 至少 32 字符的随机 secret，每个环境独立                                                          |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Web OAuth 应用                                                                            |
-| `MODEL_PROVIDER`                            | 当前提供 `openai`、`anthropic` 或 `deepseek`                                                     |
-| `MODEL_ID`                                  | 已安装 Pi catalog 中的完整 ID，`pnpm models` 可列出                                              |
-| `MODEL_API_KEY`                             | 仅服务端使用的供应商密钥                                                                         |
-| `MODEL_IDS`                                 | 可选，同一 provider 下用逗号分隔的模型白名单，须包含 `MODEL_ID`；留空展示已安装 Pi provider 目录 |
-| `MODEL_THINKING_LEVEL`                      | 默认 `low`；`off` 可关闭，也可配置 minimal/medium/high/xhigh/max，默认值按模型能力调整           |
-| `TAVILY_API_KEY`                            | 可选；缺少时搜索工具明确报告未配置                                                               |
+| 配置                                        | 用途                                                                              |
+| ------------------------------------------- | --------------------------------------------------------------------------------- |
+| `AUTH_MODE`                                 | 默认 `guest`，`account` 使用 Google 登录；模式不合的身份明确拒绝                  |
+| `BETTER_AUTH_SECRET`                        | 稳定的独立随机 Secret，本地 `pnpm setup` 只补缺失值                               |
+| `CREDENTIAL_ENCRYPTION_KEY`                 | 32 字节随机值的标准 Base64，生产使用 Cloudflare Secret；必须跨重启保留            |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 仅 account 模式必需                                                               |
+| `MODEL_PROVIDER` / `MODEL_ID`               | 默认 `openai/gpt-5-mini`，静态注册 openai/anthropic/deepseek；不依赖 Key 读取目录 |
+| `MODEL_API_KEY` / `ALLOW_SERVER_MODEL_KEY`  | 只有显式设为 `1` 才允许部署 Key；默认 `0`，个人 Key 优先                          |
+| `MODEL_IDS`                                 | 可选，仅约束默认 provider 的模型目录，必须包含默认模型                            |
+| `MODEL_THINKING_LEVEL`                      | 默认 low，按实际模型能力调整                                                      |
+| `TAVILY_API_KEY`                            | 可选搜索工具凭据                                                                  |
 
-生产 `MODEL_PROVIDER` / `MODEL_ID` 使用 Wrangler `vars`；密钥使用 Cloudflare Secrets。没有默认模型、用户 API key 输入或浏览器密钥。缺少认证配置返回 503；缺少模型配置在接受任务前返回 503。
+私人 BYOK 不使用独立网关。客户端输入通过同源认证接口发送给本部署，在 D1 使用 AES-256-GCM 加密保存，owner/provider/version 进入 AAD。部署者持有主密钥，能够解密；只在可信部署填写。浏览器不持久保存 Key，Query 只缓存元数据。保存不代表供应商已验证。匿名身份属于该浏览器 Cookie，清除 Cookie 或更换浏览器无法找回；无自动升级、共享访客或跨浏览器恢复。
+
+替换 Key 创建不可变版本，只影响新请求；退休版本最多保留七天以恢复已提交任务，每 owner/provider 最多二十个版本。移除撤销该 provider 的全部版本，但不能撤回已经发给供应商的请求。版本过期、撤销、主密钥不匹配、部署 Key 轮换或策略关闭都会明确失败，不回退到其他 Key。过期版本在该 owner 后续写入时清理，读取无额外写入。
+
+本地 `.dev.vars` 可配置全部启用开关、可选参数与扩展凭据；生产非敏感配置放在对应环境的 Wrangler `vars`，凭据使用 Secrets。配置不使用 `secrets.required`：Wrangler 会将它作为本地变量加载白名单，导致未列出的可选配置和 MCP 自定义凭据被静默忽略。必需认证与模型配置由服务端准入校验，缺失时明确拒绝服务。
 
 聊天展示模型实际返回的推理文本或摘要，生成时可展开查看，完成后默认收起。历史恢复保留已有推理；没有提供推理的模型和旧记录不补造思考过程。推理配置应用于后续任务，不会重写历史。加密推理、redacted blocks 和供应商签名不会传到前端。
 
-输入框左下角使用 assistant-ui ModelSelector 的独立组件，选择服务端允许的模型和该模型实际支持的思考强度。当前 provider 共用服务端密钥；增加其他 provider 需在 `src/server/models.ts` 注册和配置，不会展示未配置的供应商。DeepSeek 目录包含 `deepseek-flash` 与 `deepseek-v4-pro`；后者不支持低档思考。
+输入框复用 assistant-ui 模型选择组件，使用 `{ provider, modelId, thinkingLevel }` 二元模型身份。空聊天把欢迎语和输入框整体居中，GET/预加载不创建聊天；首次发送创建一次聊天，提交回执缺口保留已有 chatId 和 runId 供明确重试。
 
-每次 HTTP 提交携带 `config: { modelId, thinkingLevel }`。后端校验白名单和能力，将实际选择冻结在现有 `app_requests.payload` 中；重试包含同一配置，改动配置需新的 runId。模型调度从 Pi 的当前运行 operation 读取选择，因此切换选择器只影响下一次提交，不改变运行中或排队的任务。刷新会恢复最近一次提交的选择。请求记录没有凭据，未添加设置表或新的公共接口。Pi 继续管理队列、完整历史、压缩和恢复；应用在 `Models.streamSimple` 边界分发模型及思考选项。
+服务端在首次准入将模型、思考强度与凭据版本引用冻结到 `app_requests`，重试先比较原请求再复用冻结记录。Pi 的公开执行接口在 prepare、窗口判断之前绑定，排队、后续生成、自动压缩和 DO 重建沿用原操作配置。凭据在每次实际模型调用前按真实 owner/provider/id 解密，不保存到 Pi 历史、消息或日志；没有原输入绑定的模型调用不会借用其他请求的 Key。内部 provider 身份只用于原生执行，不进入公开模型目录。切换选择只影响下一次提交。
 
-Pi 的压缩阈值仍采用会话默认 `MODEL_ID` 的目录窗口；当前两种 DeepSeek 模型的窗口一致。扩展到不同窗口的模型时，以白名单中窗口最小的模型作为 `MODEL_ID`，让共享聊天的压缩阈值适用于全部选择。
+account 模式才需要下列 Google 配置。
 
 Google 控制台选择 Web 应用，添加授权 JavaScript 来源 `http://localhost:5173`，授权重定向 URI：
 
@@ -60,6 +66,8 @@ https://YOUR_WORKER_DOMAIN/api/auth/callback/google
 
 ## Cloudflare 部署
 
+工程品牌名为 **MkHarness**。首次安装建议使用 `mkharness` 作为 Worker 和数据库名称；仓库中的旧 Worker/D1 名称是现有资源身份，不是页面品牌。已有安装改名会切换 DO 命名空间，因此保留其名称及数据库 ID。历史验收中的资源、分支与文件路径记录保持原值。
+
 已有部署升级时，保持 Worker 名称、DB / CONVERSATIONS binding、D1 database_id、DO namespace、ConversationAgent 类名和 migrations 不变；仅更换构建入口不需要创建新存储。下面“创建新资源”的步骤仅适用于复制模板首次安装。发布前检查已运行任务所依赖的 Extension/task 定义仍存在，不支持运行中热换代码或无迁移地改变 task 语义。
 
 先登录 Wrangler，创建全新的 D1 数据库，将返回 ID 写入对应配置。首个 DO `v1` 迁移创建 SQLite-backed `ConversationAgent`；不要手工创建或迁移上游 Pi 表。
@@ -67,12 +75,12 @@ https://YOUR_WORKER_DOMAIN/api/auth/callback/google
 ```sh
 pnpm exec wrangler login
 pnpm exec wrangler d1 create YOUR_NEW_DATABASE
-# 修改 wrangler.jsonc 的 name、APP_URL、D1 database_name/database_id
+# 首次安装将 name 设为 mkharness，填写 APP_URL、D1 database_name/database_id
 # 配置 MODEL_PROVIDER / MODEL_ID，然后使用交互提示逐项输入 secret
 pnpm exec wrangler secret put BETTER_AUTH_SECRET
-pnpm exec wrangler secret put GOOGLE_CLIENT_ID
-pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
-pnpm exec wrangler secret put MODEL_API_KEY
+pnpm exec wrangler secret put CREDENTIAL_ENCRYPTION_KEY
+# account 模式另设 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+# 使用部署 Key 时另设 MODEL_API_KEY 并显式 ALLOW_SERVER_MODEL_KEY=1
 pnpm exec wrangler d1 migrations apply DB --remote
 pnpm deploy
 ```
@@ -85,20 +93,19 @@ Cloudflare Vite 插件输出客户端静态资源和 Worker 部署配置，Wrang
 pnpm exec wrangler d1 create YOUR_NEW_TEST_DATABASE
 # 写入 env.test.d1_databases，填写 env.test.vars
 pnpm exec wrangler secret put BETTER_AUTH_SECRET --env test
-pnpm exec wrangler secret put GOOGLE_CLIENT_ID --env test
-pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET --env test
-pnpm exec wrangler secret put MODEL_API_KEY --env test
+pnpm exec wrangler secret put CREDENTIAL_ENCRYPTION_KEY --env test
+# account 模式按需设置 Google secrets
 pnpm db:migrate:test
 pnpm deploy:test
 ```
 
-当前测试环境允许先部署未配置的外壳：`secrets.required` 为空，认证仍拒绝服务并返回清楚错误。完成配置后可将它设为与根配置相同的四个 required secrets。此行为只为独立环境启动验证；不能据此声称完成 Google 登录、任务续跑或模型验收。用自己的隔离测试凭据完成 [云端验收清单](docs/validation/acceptance.md)。
+当前测试环境允许先部署未配置的外壳，认证仍拒绝服务并返回清楚错误。此行为只为独立环境启动验证；不能据此声称完成 Google 登录、任务续跑或模型验收。用自己的隔离测试凭据完成 [云端验收清单](docs/validation/acceptance.md)。
 
 ## TanStack 入口与私有缓存
 
 `src/server.ts` 将 `/api/*` 转交已有 Hono，其余请求交 Start，具名导出原 `ConversationAgent`。`src/router.tsx` 每次创建独立 QueryClient；文件路由验证 `/?chat=<id>`。聊天子树延迟加载到客户端，SSR 不读取 localStorage、启动浏览器 Worker 或建立 SSE。页面与 API 返回 private/no-store。
 
-Query 负责用户目录和快照读取（模型目录仍随快照返回）；缓存键包含 userId / chatId，退出或切换账号清理旧用户缓存。预加载、窗口聚焦及普通读取更新不提交任务，不重新导入消息或 attach。HTTP Composer、AG-UI attach 和 Stop 保持独立；Query 不替代流式消息 runtime。
+Query 负责用户目录、独立模型设置和快照读取；缓存键包含 userId / chatId，退出或切换账号清理旧用户缓存。预加载、窗口聚焦及普通读取更新不提交任务，不重新导入消息或 attach。HTTP Composer、AG-UI attach 和 Stop 保持独立；Query 不替代流式消息 runtime。
 
 ## 原生扩展与远端服务
 
@@ -106,18 +113,17 @@ Query 负责用户目录和快照读取（模型目录仍随快照返回）；�
 
 可选配置：
 
-| 配置                       | 默认与含义                                                     |
-| -------------------------- | -------------------------------------------------------------- |
-| `ENABLE_GENERATIVE_UI`     | 默认开启；`0` 关闭 UI 工具及其提示词，基础 Agent 仍可用        |
-| `ENABLE_EXAMPLE_EXTENSION` | `1` 启用 `describe_text` 示例（tool / section / hook）         |
-| `ENABLE_EXAMPLE_SKILL`     | `1` 启用静态来源示例                                           |
-| `TOOL_CALL_LIMIT`          | 默认 40，每提交的正整数工具预算；模型仍最多 20 轮              |
-| `MCP_SERVERS`              | 默认 `[]`，开发者配置的 HTTPS Streamable HTTP 服务             |
-| `ASYNC_SERVICE_URL`        | 未设置则关闭具体异步服务示例                                   |
-| `ASYNC_SERVICE_TOKEN`      | 可选服务端 Bearer 凭据                                         |
-| `ASYNC_RECOVERY`           | `none` / `key` / `lookup`，默认 `none`；必须匹配真实供应商契约 |
+| 配置                   | 默认与含义                                                     |
+| ---------------------- | -------------------------------------------------------------- |
+| `ENABLE_GENERATIVE_UI` | 默认开启；`0` 关闭 UI 工具及其提示词，基础 Agent 仍可用        |
+| `ENABLE_EXAMPLE_SKILL` | `1` 启用静态来源示例                                           |
+| `TOOL_CALL_LIMIT`      | 默认 40，每提交的正整数工具预算；模型仍最多 20 轮              |
+| `MCP_SERVERS`          | 默认 `[]`，开发者配置的 HTTPS Streamable HTTP 服务             |
+| `ASYNC_SERVICE_URL`    | 未设置则关闭具体异步服务示例                                   |
+| `ASYNC_SERVICE_TOKEN`  | 可选服务端 Bearer 凭据                                         |
+| `ASYNC_RECOVERY`       | `none` / `key` / `lookup`，默认 `none`；必须匹配真实供应商契约 |
 
-`src/server/extensions.ts` 提供最小原生示例；前端在 `src/extensions/example/browser.tsx` 提供原生 Toolkit，并由 `src/extensions/browser.ts` 静态懒加载。renderer 复用 assistant-ui 工具详情，结果展示由能力自己组合。未知工具保留有界请求/结果详情。部署代码可信，终端用户不能安装代码；没有插件市场或第二套 SDK。
+`src/server/extensions.ts` 提供最小原生示例。`example` 已登记在 `src/extensions/server.ts`，默认启用 `describe_text`（tool / section / hook），无需额外环境变量；移除登记即可关闭。前端在 `src/extensions/example/browser.tsx` 提供原生 Toolkit，并由 `src/extensions/browser.ts` 静态懒加载。renderer 复用 assistant-ui 工具详情，结果展示由能力自己组合。未知工具保留有界请求/结果详情。部署代码可信，终端用户不能安装代码；没有插件市场或第二套 SDK。
 
 Skills 使用 `src/server/skills.ts` 的预检与原生 `skills(sources)` 桥接。正文和资源在装配时从部署内的受信任来源读取，模型只先看到目录，激活后才得到正文。增加自己的 `SkillSource` 和静态 Markdown / 文本资源即可；不要通过浏览器或模型提供任意 URL / 路径。资源读取保留在 Pi 历史，脚本文本不会执行，也不会注册新工具。仅作类型使用的 `agents/skills` 必须 type-only 导入，避免把未启用的脚本执行依赖引入构建。
 
@@ -137,6 +143,10 @@ MCP 配置示例（只包含凭据变量名）：
 将 JSON 写入 `MCP_SERVERS`，凭据放入对应 Cloudflare Secret。连接/发现 15 秒，调用 30 秒；输入、结果及绑定定义各有 1 MiB 上限。仅接入支持的 JSON Schema、文本、structuredContent 和 isError；不支持的块明确失败，不执行 HTML、自动读取资源 URI 或启动 stdio。工具映射为 `mcp_<serverId>_<toolName>`，超过 64 字符或冲突时拒绝，不截断。首次接受的定义保存在 Pi conversation document；重建重新连接并验证原定义，schema、endpoint、描述或 replay 策略变化不能静默替换。启动时按当前部署配置重装传输的超时、大小、重定向限制和凭据，再交给 SDK 恢复连接。可选服务离线时本地工具仍可用；已绑定工具在后续调用时有界重连，并核对在线定义，暂时离线不会永久禁用工具。
 
 默认 replay unsafe。仅当开发者已验证整个调用可安全恢复时，才在配置的 `safeTools` 中列出工具。供应商提示的 readOnly/idempotent annotations 不代替验收。Google 登录不表示用户已授权外部账号；本期使用应用服务凭据，每用户 MCP OAuth 延后。
+
+凭据仅在请求发出时经原生 `transport.fetch` 从部署 Secret 注入，连接配置及 Pi 文档不保存 Key 副本；重建时仍按当前部署配置装配。模型逐任务凭据版本绑定与 MCP 部署凭据是不同边界。
+
+`replay: unsafe` 仅约束原工具任务的恢复，并不能阻止模型另外发起同一副作用。宿主在发出 unsafe MCP 请求之前，把意图保存到既有 Pi 远端意图文档；仅在有效响应和原生工具结果均已提交后解除保护。丢失回执、无效响应或未提交结果会阻止本会话中同 serverId 或 endpoint 的后续 unsafe 调用及当前自动执行，重建后仍有效；safe 工具可继续读取。通用 MCP 没有供应商调和契约，此时不能自动重提，也没有通用的“再次执行”授权接口。需要开发者查明原操作结果；需要可恢复提交与显式重试的服务应实现下述具体异步 Extension 契约。
 
 ### 具体异步服务示例
 
@@ -161,6 +171,8 @@ Stop 使用子任务的新 abort invocation 尝试有界取消；本地 idle 与
 
 双端静态装配、资源/CAS、冻结来源动作、公开进度和未来 Adapter 的完整契约见 [扩展接入说明](docs/extensions/README.md)。OpenUI 可整体关闭或移除，不需要核心 Chat 增加工具名称分支。
 
+`timing` 是默认启用的纯展示扩展：工具标题旁显示原生任务耗时，回复 Footer 使用 assistant-ui ActionBar 提供复制及 Markdown 导出，下面展示完整回复执行时间。执行时间从 Pi 记录恢复，不增加模型工具、计时结果表或独立订阅。浏览器扩展可通过 `ui.toolTitleMeta / ui.assistantFooter` 装饰共享组件，无需覆盖已有工具 renderer。
+
 ## 代码入口与扩展
 
 界面优先复用 assistant-ui 的消息、Markdown、Viewport 与滚动组件。连续工具调用使用官方 ToolGroup ghost 变体，详情复用 ToolFallback 的只读展示组件；请求参数与结果独立滚动，桌面高度最多 256px、手机 176px。思考区使用官网示例的 Reasoning ghost 变体与 DisclosureTrigger，运行标签通过官方 tw-shimmer 循环扫光。组件源码位于 `src/browser/tool-group.tsx`、`tool-fallback.tsx`、`tool-call.tsx`、`reasoning.tsx`、`reasoning.aui.tsx`、`trace.tsx` 与 `surfaces.tsx`，可以直接修改；应用补充真实失败/停止状态、中文标签和无障碍适配。登录、个人聊天目录、状态提示与自定义控件使用 shadcn/ui + Tailwind CSS。生成内容仍由 OpenUI 的原生目录渲染。Composer 使用 assistant-ui 表单包装和 shadcn Textarea，但发送、排队与停止保持独立 HTTP 接口，不调用 runtime 的默认发送或取消行为。
@@ -169,7 +181,7 @@ Stop 使用子任务的新 abort invocation 尝试有界取消；本地 idle 与
 
 OpenUI 在自身 renderer 内通过局部 `ThemeProvider` 共享 shadcn 的颜色、字体和圆角。全局品牌调整优先修改 `styles.css` 的变量；生成组件的字号、间距和主题映射在 `src/extensions/openui/theme.ts`。正文与聊天同为 14px，手机输入保持 16px；外层面板不重复加卡片边框，只留焦点环所需空间，组件自己负责分组和表格滚动。图表仍保留可区分的系列颜色。原生目录和 ThemeProvider 从同一个包入口导入，避免 OpenUI 0.17.0 的独立子入口创建另一套上下文，导致弹层或图表主题自定义失效。需要新应用控件时继续使用 shadcn/ui + Tailwind；主题调整无需改动输入绑定、验证或动作。
 
-应用外壳在 `src/browser/AppShell.tsx`：Google 登录入口位于侧栏底部，登录后替换为个人账号菜单，退出仍通过 Better Auth。桌面侧栏支持展开和窄栏模式，偏好保存在浏览器本地；手机通过 Sheet 抽屉显示目录和底部账号。收起只改变布局，保持聊天和草稿挂载，不重新提交任务。侧栏沿用应用的个人目录，不接入第二套 ThreadList 后端。
+应用外壳在 `src/browser/AppShell.tsx`：account 的 Google 登录入口位于侧栏底部，guest 直接显示浏览器访客菜单；菜单包含模型与 API Key 设置，退出仍通过 Better Auth。桌面侧栏支持展开和窄栏模式，偏好保存在浏览器本地；手机通过 Sheet 抽屉显示目录和底部账号。收起只改变布局，保持聊天和草稿挂载，不重新提交任务。侧栏沿用应用的个人目录，不接入第二套 ThreadList 后端。
 
 OpenUI Inspect 调试浮框默认禁用，避免 SDK 在开发页自动挂载调试界面和加载其 CDN 脚本；需要该工具时使用 `OPENUI_INSPECT=1 pnpm dev` 启动。仅关闭浮框，不改变程序/UI 校验或 Pi 工具历史。Inspect 的 Autofix 推广不代表本模板已启用该服务。
 
@@ -185,7 +197,7 @@ OpenUI Inspect 调试浮框默认禁用，避免 SDK 在开发页自动挂载调
 | `src/extensions/openui/tools.ts` / `instructions.ts` | 生成程序/UI 的工具、指令和有限修正                             |
 | `src/server/limits.ts`                               | 必需的通用模型和工具预算                                       |
 | `src/server/web.ts`                                  | 公开网页读取与单一 Tavily 搜索；其他数据源在这里或同层增加工具 |
-| `src/server/models.ts`                               | 注册其他 Pi provider；保持显式模型和服务端凭据                 |
+| `src/server/models.ts`                               | 注册其他 Pi provider；保留提交时绑定与凭据隔离                 |
 | `src/server/auth.ts` / `index.ts`                    | Better Auth、归属验证和聊天业务 API                            |
 
 生成程序遵循 `export function compute(inputs,data)`，同步返回有限 JSON。没有 imports、网络、DOM、文件、时间或随机数；外部能力通过应用开放的后端工具完成。无需预置业务算法。`prepare_program` 在后端试算成功后，`present_openui` 引用已提交的程序；发布不等待浏览器回执。
@@ -251,3 +263,7 @@ pnpm exec wrangler deploy --dry-run
 MIT；上游和借用组件归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 双端扩展整合后的独立 review 与根因修复见 [architecture-review.md](docs/validation/2026-10-12-architecture-review.md)，包含 SSE 初始化、原生输出预算、来源冻结、装配身份和本地计算生命周期的验证边界。
+
+当前源码、实验与补丁移除的后续审查见 [整体架构审查](docs/validation/2026-10-12-global-architecture-review.md)，分别记录本地验证、剩余成本边界和未执行的云端验收。
+
+免登录、个人 Key 加密存储与逐任务绑定的证据见 [BYOK 验证记录](docs/validation/2026-10-12-guest-byok.md)。真实供应商与云端部署单列为待验收，不用模拟 I/O 代替。

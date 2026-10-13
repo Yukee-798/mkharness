@@ -28,7 +28,6 @@ it('registers the installed DeepSeek provider with an explicit catalog model', a
     ...env,
     MODEL_PROVIDER: 'deepseek',
     MODEL_ID: 'deepseek-flash',
-    MODEL_API_KEY: 'fixture-only',
   });
   expect(models.getModel('deepseek', 'deepseek-flash')).toMatchObject({
     provider: 'deepseek',
@@ -36,10 +35,7 @@ it('registers the installed DeepSeek provider with an explicit catalog model', a
     baseUrl: 'https://api.deepseek.com',
     api: 'openai-completions',
   });
-  expect(await models.getAuth('deepseek')).toMatchObject({
-    auth: { apiKey: 'fixture-only' },
-    source: 'application',
-  });
+  await expect(models.getAuth('deepseek')).rejects.toThrow();
 });
 it('rejects an absent model instead of silently substituting another DeepSeek model', () => {
   expect(() =>
@@ -47,7 +43,6 @@ it('rejects an absent model instead of silently substituting another DeepSeek mo
       ...env,
       MODEL_PROVIDER: 'deepseek',
       MODEL_ID: 'missing-model',
-      MODEL_API_KEY: 'fixture-only',
     }),
   ).toThrow('MODEL_ID is absent');
 });
@@ -55,24 +50,40 @@ it('publishes only allowed catalog models and their actual Pi effort levels with
   const config = {
     MODEL_PROVIDER: 'deepseek',
     MODEL_ID: 'deepseek-flash',
-    MODEL_API_KEY: 'fixture-only',
   };
   const models = applicationModels(config);
   const catalog = applicationModelCatalog(config, models);
-  expect(catalog.models.map((m) => m.id)).toEqual(['deepseek-flash', 'deepseek-v4-pro']);
-  expect(catalog.models[0].thinkingLevels).toEqual(['off', 'low', 'high', 'max']);
-  expect(catalog.models[1].thinkingLevels).toEqual(['off', 'high', 'max']);
+  expect(catalog.models.filter((m) => m.provider === 'deepseek').map((m) => m.id)).toEqual([
+    'deepseek-flash',
+    'deepseek-v4-pro',
+  ]);
+  expect(catalog.models.find((m) => m.id === 'deepseek-flash')!.thinkingLevels).toEqual([
+    'off',
+    'low',
+    'high',
+    'max',
+  ]);
+  expect(catalog.models.find((m) => m.id === 'deepseek-v4-pro')!.thinkingLevels).toEqual([
+    'off',
+    'high',
+    'max',
+  ]);
   expect(JSON.stringify(catalog)).not.toContain('fixture-only');
   expect(applicationModelCatalog({ ...config, MODEL_IDS: '' }, models)).toEqual(catalog);
   const restricted = { ...config, MODEL_IDS: 'deepseek-flash' };
   expect(() =>
     validateModelSelection(restricted, models, {
+      provider: 'deepseek',
       modelId: 'deepseek-v4-pro',
       thinkingLevel: 'high',
     }),
   ).toThrow('所选模型不可用');
   expect(() =>
-    validateModelSelection(config, models, { modelId: 'deepseek-v4-pro', thinkingLevel: 'low' }),
+    validateModelSelection(config, models, {
+      provider: 'deepseek',
+      modelId: 'deepseek-v4-pro',
+      thinkingLevel: 'low',
+    }),
   ).toThrow('该模型不支持');
   expect(() => applicationModelCatalog({ ...config, MODEL_IDS: 'missing' }, models)).toThrow(
     'MODEL_IDS must include',
@@ -88,21 +99,24 @@ async function settle(stub: ReturnType<typeof env.CONVERSATIONS.getByName>) {
 }
 it('keeps per-request model and effort across a busy queue, retries and SQLite-preserving restart', async () => {
   let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  await runInDurableObject(stub, (_instance, state) => {
+    state.storage.sql.exec('CREATE TABLE test_model_prepare(model TEXT,thinking TEXT)');
+  });
   const commands = [
     {
       runId: crypto.randomUUID(),
       text: 'slow first',
-      config: { modelId: 'fixture', thinkingLevel: 'low' as const },
+      config: { provider: 'fixture', modelId: 'fixture', thinkingLevel: 'low' as const },
     },
     {
       runId: crypto.randomUUID(),
       text: 'second',
-      config: { modelId: 'fixture-pro', thinkingLevel: 'high' as const },
+      config: { provider: 'fixture', modelId: 'fixture-pro', thinkingLevel: 'high' as const },
     },
     {
       runId: crypto.randomUUID(),
       text: 'third',
-      config: { modelId: 'fixture', thinkingLevel: 'off' as const },
+      config: { provider: 'fixture', modelId: 'fixture', thinkingLevel: 'off' as const },
     },
   ];
   for (const command of commands)
@@ -125,6 +139,15 @@ it('keeps per-request model and effort across a busy queue, retries and SQLite-p
     ['fixture-pro', 'high'],
     ['fixture', 'off'],
   ]);
+  expect(
+    await runInDurableObject(stub, (_instance, state) =>
+      state.storage.sql.exec('SELECT model,thinking FROM test_model_prepare').toArray(),
+    ),
+  ).toEqual([
+    { model: 'fixture', thinking: 'low' },
+    { model: 'fixture-pro', thinking: 'high' },
+    { model: 'fixture', thinking: 'off' },
+  ]);
   expect(snapshot.selection).toEqual(commands[2].config);
   expect(
     snapshot.entries.flatMap((e: any) => e.model ?? []).filter((m: any) => m.role === 'user'),
@@ -139,13 +162,18 @@ it('keeps per-request model and effort across a busy queue, retries and SQLite-p
           return payload.execution;
         }),
     ),
-  ).toEqual(commands.map((c) => c.config));
+  ).toEqual(
+    commands.map((c) => ({
+      ...c.config,
+      credentialRef: { source: 'server', fingerprint: 'fixture-only' },
+    })),
+  );
 });
 it('rejects unsupported choices before inserting a request', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   for (const config of [
-    { modelId: 'missing', thinkingLevel: 'low' as const },
-    { modelId: 'fixture-pro', thinkingLevel: 'low' as const },
+    { provider: 'fixture', modelId: 'missing', thinkingLevel: 'low' as const },
+    { provider: 'fixture', modelId: 'fixture-pro', thinkingLevel: 'low' as const },
   ]) {
     expect(
       await stub.submitRun({ runId: crypto.randomUUID(), text: 'invalid', config }),

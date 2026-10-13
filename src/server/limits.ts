@@ -1,4 +1,5 @@
 import { hook, ToolTask, type EntryRecord, type Extension } from '@earendil-works/pi-durable';
+import { publicModelProvider } from './execution-models';
 import { AppError } from '../shared/contracts';
 export function toolBudget(env: Record<string, unknown>) {
   const limit = Number(env.TOOL_CALL_LIMIT ?? 40);
@@ -47,10 +48,7 @@ export function runLimits(
 export function withRunLimits(
   models: import('@earendil-works/pi-ai/models').Models,
   entries: () => Promise<readonly EntryRecord[]>,
-  dispatch?: () => Promise<{
-    model: import('@earendil-works/pi-ai').Model<import('@earendil-works/pi-ai').Api>;
-    thinkingLevel: import('@earendil-works/pi-ai').ModelThinkingLevel;
-  }>,
+  guard?: (entries: readonly EntryRecord[]) => Promise<unknown>,
   toolLimit = 40,
 ) {
   const result = Object.create(models) as import('@earendil-works/pi-ai/models').Models;
@@ -58,21 +56,17 @@ export function withRunLimits(
     const out = new AssistantMessageEventStream();
     void (async () => {
       try {
-        checkRunLimits(await entries(), toolLimit);
-        if (dispatch) {
-          const selected = await dispatch();
-          model = selected.model;
-          options = {
-            ...options,
-            reasoning: selected.thinkingLevel === 'off' ? undefined : selected.thinkingLevel,
-          };
-        }
+        const history = await entries();
+        checkRunLimits(history, toolLimit);
+        // Pi has already pinned the model before prepare/window checking.
+        // This wrapper may reject a request, never replace its execution configuration.
+        await guard?.(history);
       } catch (error) {
         const message: AssistantMessage = {
           role: 'assistant',
           content: [],
           api: model.api,
-          provider: model.provider,
+          provider: publicModelProvider(models, model.provider),
           model: model.id,
           usage: emptyUsage,
           stopReason: 'error',
@@ -91,11 +85,11 @@ export function withRunLimits(
         role: 'assistant',
         content: [],
         api: model.api,
-        provider: model.provider,
+        provider: publicModelProvider(models, model.provider),
         model: model.id,
         usage: emptyUsage,
         stopReason: 'error',
-        errorMessage: 'Model dispatch failed',
+        errorMessage: 'Model request failed',
         timestamp: Date.now(),
       };
       out.push({ type: 'error', reason: 'error', error: message });

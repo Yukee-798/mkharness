@@ -43,19 +43,27 @@ it.each(['slow observer race', 'progress seam'])(
       expect(history.filter((message: any) => message.role === 'tool')).toHaveLength(2);
   },
 );
-it('finishes an attachment when completion precedes watch acquisition after the initial pending read', async () => {
+it('finishes an attachment when completion races observation bootstrap after the initial pending read', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID()),
     runId = crypto.randomUUID();
   await stub.submitRun({ runId, text: 'slow before watch' });
   const body = await runInDurableObject(stub, async (instance) => {
-    const read = instance.allEntries.bind(instance);
-    instance.allEntries = async () => {
-      const stale = await read();
-      await untilDone(() => instance.submission(runId));
-      return stale;
+    const original = instance.extensionProjection.bind(instance);
+    let delayed = false;
+    instance.extensionProjection = async () => {
+      const projection = await original();
+      const restore = projection.restore.bind(projection);
+      projection.restore = async (...args) => {
+        const facts = await restore(...args);
+        delayed = true;
+        await untilDone(() => instance.submission(runId));
+        return facts;
+      };
+      return projection;
     };
     try {
       const response = await instance.observeRun(runId);
+      expect(delayed).toBe(true);
       const reader = response.body!.getReader();
       const timer = setTimeout(() => void reader.cancel(), 2000);
       const decoder = new TextDecoder();
@@ -70,7 +78,7 @@ it('finishes an attachment when completion precedes watch acquisition after the 
         clearTimeout(timer);
       }
     } finally {
-      instance.allEntries = read;
+      instance.extensionProjection = original;
     }
   });
   expect(events(body).at(-1).type).toBe('RUN_FINISHED');

@@ -99,7 +99,7 @@ export function AppShell({
                 href="/"
               >
                 <MessageSquare className="size-4" />
-                Agent UI
+                MkHarness
               </a>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -147,7 +147,7 @@ export function AppShell({
             <SheetHeader className="flex h-14 shrink-0 justify-center border-b px-6 py-0">
               <SheetTitle className="flex items-center gap-2 text-sm">
                 <MessageSquare className="size-4" />
-                Agent UI
+                MkHarness
               </SheetTitle>
               <SheetDescription className="sr-only">
                 选择已有聊天或开始新聊天；账号和登录位于底部
@@ -176,11 +176,6 @@ export function AppShell({
                 <h1 className="truncate text-sm font-medium">{title}</h1>
               ) : (
                 <span className="text-sm font-medium">新聊天</span>
-              )}
-              {title && (
-                <span className="ml-auto hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                  离开页面后，任务会继续运行
-                </span>
               )}
             </header>
             {children}

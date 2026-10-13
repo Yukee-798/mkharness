@@ -1,0 +1,451 @@
+diff --git a/dist/harness/compaction.d.ts b/dist/harness/compaction.d.ts
+index c02edc5ed29689f67df2fb14c5906975853585b0..7d0b2b56fa30f3c2a230eda551568dcd4f1ef9bb 100644
+--- a/dist/harness/compaction.d.ts
++++ b/dist/harness/compaction.d.ts
+@@ -1,9 +1,10 @@
+ import type { Message, ModelThinkingLevel } from "@earendil-works/pi-ai";
+ import type { ConversationId, EntryId, TaskId, Tx } from "../types.ts";
+-import type { CompactionHooks, CompactionReason, CompactionResult, ContextView, ConversationStreamOptions, ModelRef } from "./types.ts";
++import type { CompactionHooks, CompactionReason, CompactionResult, ContextView, ConversationStreamOptions, ModelRef, SubmissionExecution } from "./types.ts";
+ export type CompactionInput = {
+     reason: CompactionReason;
+     instructions?: string;
++    execution?: SubmissionExecution;
+ };
+ /** The pinned summarization request. */
+ export type SummaryRequest = {
+@@ -53,4 +54,3 @@ export declare function summarizedMessages(view: ContextView, cut: number): Mess
+ export declare function estimateContext(view: ContextView, extra: readonly Message[]): number;
+ /** Messages as plain text, so the summarizer reads a transcript instead of continuing it. System messages are omitted. */
+ export declare function serializeConversation(messages: readonly Message[]): string;
+\ No newline at end of file
+-//# sourceMappingURL=compaction.d.ts.map
+\ No newline at end of file
+diff --git a/dist/harness/execution.d.ts b/dist/harness/execution.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..86eccf02ce4971a00f93d128bfdfb3bd9c8a74a4
+--- /dev/null
++++ b/dist/harness/execution.d.ts
+@@ -0,0 +1,3 @@
++import type { SubmissionExecution } from "./types.ts";
++export declare function copyExecution(value: unknown): SubmissionExecution | undefined;
++export declare function sameExecution(a: SubmissionExecution | undefined, b: SubmissionExecution | undefined): boolean;
+diff --git a/dist/harness/execution.js b/dist/harness/execution.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..2ad6b89eb905ac06cb17f556e9a685979bd01350
+--- /dev/null
++++ b/dist/harness/execution.js
+@@ -0,0 +1,17 @@
++/** A narrow durable binding: never persist credential material in task inputs. */
++export function copyExecution(value) {
++    if (value === undefined) return undefined;
++    if (value === null || typeof value !== "object" || Array.isArray(value) ||
++        Object.keys(value).some((key) => key !== "model" && key !== "thinkingLevel") ||
++        value.model === null || typeof value.model !== "object" || Array.isArray(value.model) ||
++        Object.keys(value.model).some((key) => key !== "provider" && key !== "modelId") ||
++        typeof value.model.provider !== "string" || value.model.provider.length === 0 ||
++        typeof value.model.modelId !== "string" || value.model.modelId.length === 0 ||
++        !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value.thinkingLevel)) {
++        throw new Error("Invalid submission execution binding");
++    }
++    return { model: { provider: value.model.provider, modelId: value.model.modelId }, thinkingLevel: value.thinkingLevel };
++}
++export function sameExecution(a, b) {
++    return a?.model.provider === b?.model.provider && a?.model.modelId === b?.model.modelId && a?.thinkingLevel === b?.thinkingLevel;
++}
+diff --git a/dist/harness/generation.d.ts b/dist/harness/generation.d.ts
+index ecdb130a93d5c388f2090eb39cffde0fdfe48bc4..a3199855ca7d111f8b476a5fb5f845279d54af99 100644
+--- a/dist/harness/generation.d.ts
++++ b/dist/harness/generation.d.ts
+@@ -3,8 +3,8 @@ import type { DeferredHandle, ModelThinkingLevel } from "@earendil-works/pi-ai";
+ import type { ConversationId, EntryId, SubmissionId, TaskId, Tx } from "../types.ts";
+ import { type LiveState } from "./live.ts";
+ import { type ToolTaskResult } from "./tool.ts";
+-import type { CompactionResult, ConversationStreamOptions, GenerationHooks, ModelRef } from "./types.ts";
+-export type GenerationInput = Record<string, never>;
++import type { CompactionResult, ConversationStreamOptions, GenerationHooks, ModelRef, SubmissionExecution } from "./types.ts";
++export type GenerationInput = { execution?: SubmissionExecution };
+ export type GenerationCheckpoint = {
+     phase: "prepare";
+     attempt: number;
+@@ -59,7 +59,6 @@ export declare const GenerationTask: import("../types.ts").Task<GenerationInput,
+  */
+ export declare function convertPartial(tx: Tx, live: Draft<LiveState>, conversationId: ConversationId): Promise<void>;
+ /** Start a run for `inputs`, placed input submissions: a new generation takes `pi.live.run`. */
+-export declare function startRun(tx: Tx, conversationId: ConversationId, live: Draft<LiveState>, inputs: SubmissionId[]): Promise<void>;
++export declare function startRun(tx: Tx, conversationId: ConversationId, live: Draft<LiveState>, inputs: SubmissionId[], execution?: SubmissionExecution): Promise<void>;
+ /** Hand run control from `from` to `to`; the run's inputs move with it. */
+ export declare function handOver(live: Draft<LiveState>, from: TaskId, to: TaskId): void;
+\ No newline at end of file
+-//# sourceMappingURL=generation.d.ts.map
+\ No newline at end of file
+diff --git a/dist/harness/generation.js b/dist/harness/generation.js
+index abb121be414e3cac5b94869a9688cee68534b77c..bae91e0242d0f0b8aca331ae4d80c9a014627436 100644
+--- a/dist/harness/generation.js
++++ b/dist/harness/generation.js
+@@ -64,7 +64,7 @@ export const GenerationTask = defineTask({
+             if (threshold === "blocking") {
+                 // Compact first and prepare again; the transcript is unchanged until the compaction appends.
+                 await runtime.commit(async (tx) => {
+-                    const child = await createCompaction(tx, conversationId, { reason: "threshold" }, runtime.taskId);
++                    const child = await createCompaction(tx, conversationId, { reason: "threshold", execution: { model, thinkingLevel } }, runtime.taskId);
+                     const checkpoint = { phase: "prepare", attempt, compacted: child };
+                     return { status: "waiting", checkpoint, on: [child], policy: "allSettled" };
+                 }, context);
+@@ -78,7 +78,7 @@ export const GenerationTask = defineTask({
+                     throw new Error(`Conversation ${conversationId} has no entries to send`);
+                 // Checked in this commit, so a compaction admitted during preparation counts.
+                 if (threshold === "background" && (await tx.doc(LiveDoc, conversationId)).compactions === undefined) {
+-                    await createCompaction(tx, conversationId, { reason: "threshold" });
++                    await createCompaction(tx, conversationId, { reason: "threshold", execution: { model, thinkingLevel } });
+                 }
+                 const request = {
+                     attempt,
+@@ -353,7 +353,7 @@ async function classify(runtime, request, message, context) {
+                 const live = await tx.doc(LiveDoc, conversationId);
+                 await appendAssistant(tx, conversationId, message);
+                 delete live.generation;
+-                const child = await createCompaction(tx, conversationId, { reason: "overflow" }, runtime.taskId);
++                const child = await createCompaction(tx, conversationId, { reason: "overflow", execution: { model: ref, thinkingLevel: (await runtime.agent(context)).thinkingLevel } }, runtime.taskId);
+                 const checkpoint = { phase: "prepare", attempt, compacted: child, overflow: text };
+                 return { status: "waiting", checkpoint, on: [child], policy: "allSettled" };
+             }, context);
+@@ -408,17 +408,17 @@ async function answer(runtime, message, context) {
+         const live = await tx.doc(LiveDoc, conversationId);
+         const entry = await appendAssistant(tx, conversationId, message);
+         const result = { status: "terminal", outcome: { status: "completed", result: { entryId: entry.id } } };
+-        const { users, reset } = await applyBoundary(tx, boundary, "final", runtime.now());
++        const { users, reset, execution } = await applyBoundary(tx, boundary, "final", runtime.now());
+         if (continuation !== undefined && users.length === 0 && !reset) {
+             const user = { role: "user", content: continuation, timestamp: runtime.now() };
+             await tx.appendEntry(UserEntry, conversationId, { model: [user] });
+-            handOver(live, runtime.taskId, await createGeneration(tx, conversationId));
++            handOver(live, runtime.taskId, await createGeneration(tx, conversationId, live.run?.execution));
+             delete live.generation;
+             return result;
+         }
+         endRun(tx, live, runtime.taskId, { status: "done", answer: entry.id });
+         if (users.length > 0)
+-            await startRun(tx, conversationId, live, users);
++            await startRun(tx, conversationId, live, users, execution);
+         return result;
+     }, context);
+ }
+@@ -496,24 +496,24 @@ async function finishToolRound(runtime, assistant, tools, context) {
+                 const entry = await tx.appendEntry(ResetEntry, conversationId, { head: "self", model: [message] });
+                 boundary.head = entry.id;
+             }
+-            const { users } = await applyBoundary(tx, boundary, "final", now);
++            const { users, execution } = await applyBoundary(tx, boundary, "final", now);
+             endRun(tx, live, runtime.taskId, { status: "done", answer: assistant });
+             if (users.length > 0)
+-                await startRun(tx, conversationId, live, users);
++                await startRun(tx, conversationId, live, users, execution);
+         }
+         else {
+-            const { users, reset } = await applyBoundary(tx, boundary, "postTools", now);
++            const { users, reset, execution } = await applyBoundary(tx, boundary, "postTools", now);
+             if (reset) {
+                 // The queued reset cut the run's context before an answer.
+                 endRun(tx, live, runtime.taskId, { status: "unanswered", reason: "reset" });
+                 if (users.length > 0)
+-                    await startRun(tx, conversationId, live, users);
++                    await startRun(tx, conversationId, live, users, execution);
+             }
+             else {
+                 delete live.tools;
+                 if (live.run?.taskId === runtime.taskId)
+                     live.run.inputs.push(...users);
+-                handOver(live, runtime.taskId, await createGeneration(tx, conversationId));
++                handOver(live, runtime.taskId, await createGeneration(tx, conversationId, live.run?.execution));
+             }
+         }
+         return { status: "terminal", outcome: { status: "completed", result: { entryId: assistant } } };
+@@ -528,16 +528,15 @@ async function appendAssistant(tx, conversationId, message) {
+     return tx.appendEntry(AssistantEntry, conversationId, { model: [message] });
+ }
+ /** Start a run for `inputs`, placed input submissions: a new generation takes `pi.live.run`. */
+-export async function startRun(tx, conversationId, live, inputs) {
+-    live.run = { taskId: await createGeneration(tx, conversationId), inputs };
++export async function startRun(tx, conversationId, live, inputs, execution) {
++    live.run = { taskId: await createGeneration(tx, conversationId, execution), inputs, ...(execution === undefined ? {} : { execution }) };
+ }
+ /** A generation owned by its conversation. */
+-function createGeneration(tx, conversationId) {
+-    return tx.createTask(GenerationTask, {}, { ownership: { kind: "conversation" }, conversationId });
++function createGeneration(tx, conversationId, execution) {
++    return tx.createTask(GenerationTask, execution === undefined ? {} : { execution }, { ownership: { kind: "conversation" }, conversationId });
+ }
+ /** Hand run control from `from` to `to`; the run's inputs move with it. */
+ export function handOver(live, from, to) {
+     if (live.run?.taskId === from)
+         live.run.taskId = to;
+ }
+\ No newline at end of file
+-//# sourceMappingURL=generation.js.map
+\ No newline at end of file
+diff --git a/dist/harness/harness.js b/dist/harness/harness.js
+index fda8aa1e318bdecd77d11ca019217d6c43cfef01..6cd4ef31361e504f6bc0dd97acf4a225e1e80b25 100644
+--- a/dist/harness/harness.js
++++ b/dist/harness/harness.js
+@@ -1,3 +1,4 @@
++import { copyExecution } from "./execution.js";
+ import { withAbortSignal, withoutAbortSignal } from "@earendil-works/chord/context";
+ import { ResetEntry } from "../entries.js";
+ import { SessionImpl } from "../session/session.js";
+@@ -32,9 +33,10 @@ class ConversationImpl {
+     submit(submission, context) {
+         return this.#host.submissions.submit(this.id, submission, context);
+     }
+-    compact(instructions, context) {
++    compact(instructions, context, options) {
+         this.#host.tasks.resume();
+-        const input = { reason: "manual", ...(instructions === undefined ? {} : { instructions }) };
++        const execution = copyExecution(options?.execution);
++        const input = { ...(execution === undefined ? {} : { execution }), reason: "manual", ...(instructions === undefined ? {} : { instructions }) };
+         return this.#host.harness.commitWith((tx) => createCompaction(tx, this.id, input), context);
+     }
+     async reset(handoff, context) {
+@@ -302,4 +304,3 @@ export const Harness = {
+         return harness;
+     },
+ };
+\ No newline at end of file
+-//# sourceMappingURL=harness.js.map
+\ No newline at end of file
+diff --git a/dist/harness/inbox.d.ts b/dist/harness/inbox.d.ts
+index 68b16c8531ce16112d0be3f35d3e01671839c5a0..96bc2b1c690099d9705179a845fe0166181a99f7 100644
+--- a/dist/harness/inbox.d.ts
++++ b/dist/harness/inbox.d.ts
+@@ -1,11 +1,12 @@
+ import type { Draft, JsonRepresentation } from "@earendil-works/chord";
+ import type { ConversationId, EntryDraft, EntryId, JsonObject, SubmissionId, Tx } from "../types.ts";
+-import type { QueueMode, Settings, UserInput } from "./types.ts";
++import type { QueueMode, Settings, UserInput, SubmissionExecution } from "./types.ts";
+ /** A queued submission: user input for a run, or a passive entry write. */
+ export type InboxItem = {
+     id: SubmissionId;
+     mode: "steer" | "followUp";
+     content: JsonRepresentation<UserInput>;
++    execution?: SubmissionExecution;
+ }
+ /** `entry` is an `EntryDraft`, stored as plain JSON. */
+  | {
+@@ -33,6 +34,7 @@ export type Boundary = {
+ export type BoundaryResult = {
+     readonly users: SubmissionId[];
+     readonly reset: boolean;
++    readonly execution?: SubmissionExecution;
+ };
+ /**
+  * Read what a boundary needs. Table reads must precede the commit's first table write, so callers prepare the
+@@ -56,4 +58,3 @@ export declare function removeInboxItem(tx: Tx, conversationId: ConversationId,
+  * `unanswered` with `aborted` and leaves the inbox; queued writes stay for later placement.
+  */
+ export declare function withdrawQueuedInputs(tx: Tx, conversationId: ConversationId): Promise<void>;
+\ No newline at end of file
+-//# sourceMappingURL=inbox.d.ts.map
+\ No newline at end of file
+diff --git a/dist/harness/inbox.js b/dist/harness/inbox.js
+index b5cc026e536f75a8acc0feebdc33617d117f8228..38ad03eff31a2e8ab24c9e55cbeebcfdfe43bd7e 100644
+--- a/dist/harness/inbox.js
++++ b/dist/harness/inbox.js
+@@ -1,3 +1,4 @@
++import { sameExecution } from "./execution.js";
+ import { defineDoc } from "../documents.js";
+ import { UserEntry } from "../entries.js";
+ export const InboxDoc = defineDoc({
+@@ -43,6 +44,10 @@ export async function applyBoundary(tx, boundary, at, now) {
+     const writes = items.flatMap((item, index) => (item.mode === "write" ? [index] : []));
+     const users = [...pick("steer", boundary.steeringMode), ...(final ? pick("followUp", boundary.followUpMode) : [])];
+     users.sort((a, b) => a - b);
++    // Queue-mode "all" cannot put differently bound inputs into one run.
++    const execution = users.length === 0 ? undefined : items[users[0]].execution;
++    const different = users.findIndex((index) => !sameExecution(execution, items[index].execution));
++    if (different >= 0) users.splice(different);
+     // `appendEntry()` copies the drafts' values; the items are removed only afterwards.
+     for (const index of writes) {
+         const item = items[index];
+@@ -67,7 +72,7 @@ export async function applyBoundary(tx, boundary, at, now) {
+     const removed = [...writes, ...users].sort((a, b) => b - a);
+     for (const index of removed)
+         items.splice(index, 1);
+-    return { users: placed, reset };
++    return { users: placed, reset, execution };
+ }
+ /** Whether a head write targets an entry before the active range, so placing it would bring back cut history. */
+ export function isStale(boundary, entry) {
+@@ -94,4 +99,3 @@ export async function withdrawQueuedInputs(tx, conversationId) {
+         items.splice(index, 1);
+     }
+ }
+\ No newline at end of file
+-//# sourceMappingURL=inbox.js.map
+\ No newline at end of file
+diff --git a/dist/harness/live.d.ts b/dist/harness/live.d.ts
+index 52052c9afdf262c307bd1b092d6a4da12f9e859d..9ca8a2e130ee5c513f320909bbfdc56a248c8f27 100644
+--- a/dist/harness/live.d.ts
++++ b/dist/harness/live.d.ts
+@@ -1,3 +1,4 @@
++import type { SubmissionExecution } from "./types.ts";
+ import type { Draft, JsonRepresentation, JsonValue } from "@earendil-works/chord";
+ import type { AssistantMessage } from "@earendil-works/pi-ai";
+ import type { Transaction } from "../session/transaction.ts";
+@@ -44,6 +45,7 @@ export type LiveState = {
+     run?: {
+         taskId: TaskId;
+         inputs: SubmissionId[];
++        execution?: SubmissionExecution;
+     };
+     /** Presentation of the current generation attempt. */
+     generation?: {
+@@ -96,4 +98,3 @@ export declare function clearProgress(slot: Draft<ToolSlot>): void;
+  * uncertain storage failure poisons the Session instead and writes no outcome.
+  */
+ export declare function settleSchedulerOutcome(tx: Transaction, record: TaskRecord<JsonValue, JsonValue, JsonValue>, outcome: SchedulerOutcome): Promise<void>;
+\ No newline at end of file
+-//# sourceMappingURL=live.d.ts.map
+\ No newline at end of file
+diff --git a/dist/harness/scheduler.js b/dist/harness/scheduler.js
+index 6cfe05a35de48c02e98ad07806fb74f2ee80de59..120b31314bb051ca2565bd8b3fd7484fb07d8174 100644
+--- a/dist/harness/scheduler.js
++++ b/dist/harness/scheduler.js
+@@ -1008,7 +1008,11 @@ export class TaskScheduler {
+             if (invocation.ended)
+                 return Promise.reject(endedError(invocation));
+             if (phase.agent === undefined) {
+-                phase.agent = this.#agent(invocation.conversationId, phase.snapshot(), invocation.context);
++                phase.agent = this.#agent(invocation.conversationId, phase.snapshot(), invocation.context).then((agent) => {
++                    const task = this.#live.get(invocation.taskId);
++                    const execution = task?.kind === "pi.generation" || task?.kind === "pi.compaction" ? task.input.execution : undefined;
++                    return execution === undefined ? agent : { ...agent, model: execution.model, thinkingLevel: execution.thinkingLevel };
++                });
+                 // A caller that stops waiting must not leave the shared resolution's failure unobserved.
+                 phase.agent.catch(() => { });
+             }
+@@ -1269,4 +1273,3 @@ function jsonEqual(left, right) {
+         return false;
+     return keys.every((key) => Object.hasOwn(right, key) && jsonEqual(left[key], right[key]));
+ }
+\ No newline at end of file
+-//# sourceMappingURL=scheduler.js.map
+\ No newline at end of file
+diff --git a/dist/harness/submissions.js b/dist/harness/submissions.js
+index f5ddceaa4132339ca22458e6728d1d243c7f49d4..2fe4cec629efab0fc33be6a5f0098f5294569d11 100644
+--- a/dist/harness/submissions.js
++++ b/dist/harness/submissions.js
+@@ -1,3 +1,4 @@
++import { copyExecution } from "./execution.js";
+ import { copyJson } from "@earendil-works/chord";
+ import { UserEntry } from "../entries.js";
+ import { ConversationBusy } from "../errors.js";
+@@ -30,6 +31,14 @@ export class Submissions {
+     }
+     /** Admit a submission in one commit; see `admitSubmission()`. */
+     async submit(conversationId, draft, context) {
++        // Snapshot the narrow binding before entering the Session line. Invalid host options
++        // fail before a transaction; a bound input is a new run, never steering of another.
++        if (draft.type === "input") {
++            const execution = copyExecution(draft.execution);
++            if (execution !== undefined && draft.whenBusy === "steer")
++                throw new Error("Bound submissions must use followUp or reject");
++            draft = { ...draft, execution };
++        }
+         this.#resume();
+         const id = await this.#session.commitWith((tx) => admitSubmission(tx, conversationId, draft, this.#now(), this.#queueModes()), context);
+         return new SubmissionHandle(id, this);
+@@ -128,6 +137,7 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
+     const busy = live.run !== undefined;
+     if (busy && draft.type === "input" && draft.whenBusy === "reject")
+         throw new ConversationBusy(conversationId);
++    const execution = draft.type === "input" ? copyExecution(draft.execution) : undefined;
+     const requestId = draft.requestId === undefined ? {} : { requestId: draft.requestId };
+     // A boundary reads the table, so it is prepared before the first table write; a busy one needs none.
+     const boundary = busy ? undefined : await prepareBoundary(tx, conversationId, queueModes);
+@@ -147,13 +157,13 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
+             items.push({ id, mode: "write", entry: value });
+         else {
+             const mode = draft.whenBusy === "steer" ? "steer" : "followUp";
+-            items.push({ id, mode, content: value });
++            items.push({ id, mode, content: value, ...(execution === undefined ? {} : { execution }) });
+         }
+         if (boundary === undefined)
+             return id;
+-        const { users } = await applyBoundary(tx, boundary, "final", now);
++        const { users, execution: selected } = await applyBoundary(tx, boundary, "final", now);
+         if (users.length > 0)
+-            await startRun(tx, conversationId, live, users);
++            await startRun(tx, conversationId, live, users, selected);
+         return id;
+     }
+     if (draft.type === "write") {
+@@ -169,7 +179,6 @@ export async function admitSubmission(tx, conversationId, draft, now, queueModes
+     const entry = await tx.appendEntry(UserEntry, conversationId, { model: [message] });
+     const input = { conversationId, ...requestId, type: "input", status: "placed", entry: entry.id };
+     const { id } = await tx.createSubmission(input);
+-    await startRun(tx, conversationId, live, [id]);
++    await startRun(tx, conversationId, live, [id], execution);
+     return id;
+ }
+\ No newline at end of file
+-//# sourceMappingURL=submissions.js.map
+\ No newline at end of file
+diff --git a/dist/harness/types.d.ts b/dist/harness/types.d.ts
+index b8c1e3749a808e9c91a8d9e0e987b0680cdcbe67..8c00af4640cd268c0fd97fd709cdb58be0a95569 100644
+--- a/dist/harness/types.d.ts
++++ b/dist/harness/types.d.ts
+@@ -10,6 +10,11 @@ export type ModelRef = {
+     readonly provider: string;
+     readonly modelId: string;
+ };
++/** Frozen before prepare; the provider may identify an immutable host credential version. No raw keys. */
++export type SubmissionExecution = {
++    readonly model: ModelRef;
++    readonly thinkingLevel: ModelThinkingLevel;
++};
+ export type UserInput = UserMessage["content"];
+ /** Host submission: user input that may start a run, or a passive entry write. */
+ export type SubmissionDraft = {
+@@ -17,6 +22,7 @@ export type SubmissionDraft = {
+ } & ({
+     readonly type: "input";
+     readonly content: UserInput;
++    readonly execution?: SubmissionExecution;
+     readonly whenBusy?: "steer" | "followUp" | "reject";
+     readonly entry?: never;
+ } | {
+@@ -474,7 +480,7 @@ export interface Conversation {
+      * Admit a manual compaction task and return its ID. It summarizes while the conversation keeps working and places its
+      * summary through a write submission: at once when idle, otherwise at the next boundary (spec §8.7).
+      */
+-    compact(instructions: string | undefined, context: Context): Promise<TaskId<CompactionResult>>;
++    compact(instructions: string | undefined, context: Context, options?: { readonly execution?: SubmissionExecution }): Promise<TaskId<CompactionResult>>;
+     /** Session commit whose `tx.createTask()` defaults to this conversation. */
+     commit<T>(change: (tx: Tx) => T | Promise<T>, context: Context): Promise<T>;
+     /**
+@@ -597,4 +603,3 @@ export interface CompactionHooks {
+         readonly summary: string;
+     }>;
+ }
+\ No newline at end of file
+-//# sourceMappingURL=types.d.ts.map
+\ No newline at end of file
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 3ac769a57ec284452ad9a380f39eb429e9d2c7e9..3f4f169c39ee9350c46665e83f6e7a3adcd878e0 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -13,7 +13,7 @@ export { ProviderDoc, type ProviderState } from "./harness/provider.ts";
+ export { createRegistry } from "./harness/registry.ts";
+ export type { TaskGraph, TaskGraphNode, TaskGraphState, TaskGraphWatch } from "./harness/task-graph.ts";
+ export { ToolTask, type ToolTaskCheckpoint, type ToolTaskInput, type ToolTaskResult } from "./harness/tool.ts";
+-export type { Agent, AgentChange, AgentState, AnyTask, CompactionHooks, CompactionPolicy, CompactionReason, CompactionResult, ContextView, Conversation, ConversationAbortOptions, ConversationCreateOptions, ConversationHandle, ConversationInit, ConversationRetryPolicy, ConversationStreamOptions, ConversationWatch, EnvTarget, Extension, GenerationHooks, HarnessInspection, HarnessOptions, HarnessSettings, HookApi, HookRegistration, HookResult, HooksOf, InputSubmissionDraft, ModelRef, ProgressPolicy, PromptInput, PromptSection, QueueMode, Registry, RegistryReader, RegistrySnapshot, Settings, SettledSubmissionRecord, SettledTask, Submission, SubmissionDraft, TaskInspection, ToolControl, ToolDiagnostic, ToolExecutionApi, ToolExecutionMode, ToolExecutionResult, ToolHooks, ToolRegistration, UserInput, Wrap, } from "./harness/types.ts";
++export type { Agent, AgentChange, AgentState, AnyTask, CompactionHooks, CompactionPolicy, CompactionReason, CompactionResult, ContextView, Conversation, ConversationAbortOptions, ConversationCreateOptions, ConversationHandle, ConversationInit, ConversationRetryPolicy, ConversationStreamOptions, ConversationWatch, EnvTarget, Extension, GenerationHooks, HarnessInspection, HarnessOptions, HarnessSettings, HookApi, HookRegistration, HookResult, HooksOf, InputSubmissionDraft, ModelRef, ProgressPolicy, PromptInput, PromptSection, QueueMode, Registry, RegistryReader, RegistrySnapshot, Settings, SettledSubmissionRecord, SettledTask, Submission, SubmissionDraft, SubmissionExecution, TaskInspection, ToolControl, ToolDiagnostic, ToolExecutionApi, ToolExecutionMode, ToolExecutionResult, ToolHooks, ToolRegistration, UserInput, Wrap, } from "./harness/types.ts";
+ export { UsageDoc, type UsageState } from "./harness/usage.ts";
+ export type { ConversationView } from "./harness/view.ts";
+ export { createSession } from "./session/session.ts";
+@@ -21,4 +21,3 @@ export { MemoryStorage } from "./storage/memory.ts";
+ export { defineTask } from "./tasks.ts";
+ export type { CheckpointInfo, CommitChange, CommitPublication, CommonDocDefinition, ContextEdit, ConversationDocFamilyToken, ConversationDocToken, ConversationId, ConversationOwnership, ConversationQuery, ConversationRecord, Cursor, DocDefinition, DocFamilyDefinition, DocFamilyToken, DocToken, DocumentAddress, DocumentCommitChange, DocumentContent, DocumentCopySource, DocumentCreate, DocumentId, DocumentObserver, DocumentPoint, DocumentQuery, DocumentReader, DocumentRecord, DocumentSemantics, DocumentState, DocumentWatch, Entry, EntryDraft, EntryId, EntryQuery, EntryRecord, HookRunner, Id, JoinPolicy, JsonObject, LatestConversationSemantics, NextTaskState, Page, PhaseHandler, RewindableConversationDocFamilyToken, RewindableConversationDocToken, RewindableConversationSemantics, RunningTask, ScanOrder, Seq, Session, SessionDocFamilyToken, SessionDocToken, Storage, StorageWrite, StoredDocument, SubmissionCreate, SubmissionId, SubmissionQuery, SubmissionRecord, SubmissionSettlement, TableCommitChange, Task, TaskDefinition, TaskDocFamilyToken, TaskDocToken, TaskId, TaskOptions, TaskOutcome, TaskOutcomeError, TaskOwnership, TaskQuery, TaskRecord, TaskRuntime, TaskState, Tx, TypedEntry, TypedEntryDraft, WatchEnd, WatchHandle, } from "./types.ts";
+ export { ROOT_CONVERSATION_ID } from "./types.ts";
+\ No newline at end of file
+-//# sourceMappingURL=index.d.ts.map

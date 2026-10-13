@@ -2,11 +2,13 @@
 import '../../src/extensions/openui/catalog';
 import { ConversationAgent as Base } from '../../src/server/conversation';
 import { staticSkills, exampleSkillSource } from '../../src/server/skills';
-import { exampleExtension } from '../../src/server/extensions';
 import { fixtureModels } from '../fixture-model';
 import { Type } from '@earendil-works/pi-ai';
 import {
   defineTool,
+  hook,
+  ToolTask,
+  type Extension,
   type ToolRegistration,
   type ToolExecutionApi,
 } from '@earendil-works/pi-durable';
@@ -29,6 +31,12 @@ const progressProbe = defineTool({
   },
 });
 export class ConversationAgent extends Base {
+  protected override async credentials() {
+    return {
+      select: async () => ({ source: 'server' as const, fingerprint: 'fixture-only' }),
+      resolve: async () => 'fixture',
+    };
+  }
   protected override remoteConfiguration() {
     const sql = this.ctx.storage.sql;
     if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_remote'").toArray().length)
@@ -48,7 +56,20 @@ export class ConversationAgent extends Base {
     const sql = this.ctx.storage.sql;
     if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_mcp'").toArray().length)
       return [
-        { serverId: 'reference', endpoint: 'https://mcp.example.test/mcp', allowlist: ['lookup'] },
+        {
+          serverId: 'reference',
+          endpoint: 'https://mcp.example.test/mcp',
+          credential: sql.exec("SELECT key FROM test_mcp WHERE key='credential-probe'").toArray()
+            .length
+            ? 'MCP_FIXTURE_TOKEN'
+            : undefined,
+          allowlist: sql.exec("SELECT key FROM test_mcp WHERE key='unsafe-probe'").toArray().length
+            ? ['lookup', 'status']
+            : ['lookup'],
+          safeTools: sql.exec("SELECT key FROM test_mcp WHERE key='unsafe-probe'").toArray().length
+            ? ['status']
+            : [],
+        },
       ];
     return super.mcpConfiguration();
   }
@@ -81,12 +102,30 @@ export class ConversationAgent extends Base {
     ];
   }
   protected override async extensions() {
-    const extensions = [
+    const extensions: Extension[] = [
       ...(await super.extensions()),
-      exampleExtension(),
       await staticSkills([exampleSkillSource()]),
       {
         name: 'fixture',
+        sections: [
+          {
+            key: 'model-binding-probe',
+            render: (input: import('@earendil-works/pi-durable').PromptInput) => {
+              const sql = this.ctx.storage.sql;
+              if (
+                sql.exec("SELECT name FROM sqlite_master WHERE name='test_model_prepare'").toArray()
+                  .length
+              ) {
+                sql.exec(
+                  'INSERT INTO test_model_prepare(model,thinking)VALUES(?,?)',
+                  input.agent.model?.modelId ?? '',
+                  input.agent.thinkingLevel,
+                );
+              }
+              return undefined;
+            },
+          },
+        ],
         wraps: [
           {
             tool: 'present_openui',
@@ -129,6 +168,27 @@ export class ConversationAgent extends Base {
         ],
       },
     ];
+    const sql = this.ctx.storage.sql;
+    if (
+      sql.exec("SELECT name FROM sqlite_master WHERE name='test_mcp'").toArray().length &&
+      sql.exec("SELECT key FROM test_mcp WHERE key='pause-result'").toArray().length
+    )
+      extensions.push({
+        name: 'mcp-receipt-gate',
+        hooks: [
+          hook(ToolTask, {
+            afterTool: async (call, _result, _api, context) => {
+              if (call.name !== 'mcp_reference_lookup' || _result.isError) return;
+              sql.exec("INSERT INTO test_mcp VALUES('result-paused')");
+              await new Promise<never>((_resolve, reject) => {
+                const abort = () => reject(context.abortSignal?.reason);
+                if (context.abortSignal?.aborted) abort();
+                else context.abortSignal?.addEventListener('abort', abort, { once: true });
+              });
+            },
+          }),
+        ],
+      });
     // Deliberately broken host for a negative control; never part of the production entry.
     if (
       this.ctx.storage.sql

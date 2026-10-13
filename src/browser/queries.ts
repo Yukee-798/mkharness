@@ -1,8 +1,9 @@
-import { focusManager, infiniteQueryOptions } from '@tanstack/react-query';
+import { focusManager, infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { request } from './api';
 export type Conversation = { id: string; title: string; updated_at: number };
 export type Directory = { items: Conversation[]; next: string | null };
 export const userKeys = (userId: string) => ({
+  models: ['user', userId, 'model-settings'] as const,
   directory: ['user', userId, 'directory'] as const,
   snapshot: (id: string) => ['user', userId, 'chat', id, 'snapshot'] as const,
 });
@@ -31,3 +32,11 @@ if (typeof window !== 'undefined') {
     };
   });
 }
+
+export const modelSettingsOptions = (userId: string) =>
+  queryOptions({
+    queryKey: userKeys(userId).models,
+    queryFn: ({ signal }) =>
+      request<import('../shared/model-settings').ModelSettings>('/settings/models', { signal }),
+    retry: false,
+  });

@@ -39,6 +39,33 @@ export function fixtureModels(contextWindow = model.contextWindow) {
     const last = context.messages.at(-1);
     const tool = text?.includes('ignores_cancel') && last?.role === 'user';
     let content: AssistantMessage['content'] | undefined;
+    if (text?.includes('large tool outputs') && last?.role === 'user')
+      content = [
+        {
+          type: 'toolCall',
+          id: 'large-read',
+          name: 'read_web',
+          arguments: { url: 'https://public.example.test/page' },
+        },
+        {
+          type: 'toolCall',
+          id: 'large-search',
+          name: 'search_web',
+          arguments: { query: 'large sources' },
+        },
+        {
+          type: 'toolCall',
+          id: 'large-skill',
+          name: 'activate_skill',
+          arguments: { name: 'large-guide' },
+        },
+        {
+          type: 'toolCall',
+          id: 'large-resource',
+          name: 'read_skill_resource',
+          arguments: { name: 'large-guide', path: 'reference.md' },
+        },
+      ];
     if (text?.includes('fault seam') && last?.role === 'user')
       content = [{ type: 'toolCall', id: 'same-call', name: 'fault_probe', arguments: {} }];
     if (text?.includes('progress seam')) {
@@ -193,6 +220,22 @@ export function fixtureModels(contextWindow = model.contextWindow) {
           id: 'same-call',
           name: 'mcp_reference_lookup',
           arguments: { query: 'hi' },
+        },
+      ];
+    if (text?.includes('mcp unsafe retry'))
+      content = [0, 1].map((index) => ({
+        type: 'toolCall' as const,
+        id: `unsafe-${index}`,
+        name: 'mcp_reference_lookup',
+        arguments: { query: 'same mutation' },
+      }));
+    if (text?.includes('mcp safe status') && last?.role === 'user')
+      content = [
+        {
+          type: 'toolCall',
+          id: 'status',
+          name: 'mcp_reference_status',
+          arguments: { query: 'read only' },
         },
       ];
     if (text?.includes('multiple_text_blocks'))

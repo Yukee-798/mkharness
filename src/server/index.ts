@@ -1,8 +1,16 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { auth } from './auth';
+import { auth, authMode } from './auth';
 import { boundedText } from './web';
 import { extensionIds } from '../extensions/server';
+import { z } from 'zod';
+import { ModelCredentials } from './model-credentials';
+import {
+  applicationModels,
+  applicationModelCatalog,
+  modelProviders,
+  registeredProvider,
+} from './models';
 import { AppError, commandSchema, conversationTitleSchema } from '../shared/contracts';
 const app = new Hono<{ Bindings: Env; Variables: { userId: string; conversationId: string } }>();
 app.use('/api/*', async (c, next) => {
@@ -10,10 +18,13 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth(c.env).handler(c.req.raw));
+app.get('/api/bootstrap', (c) => c.json({ authMode: authMode(c.env) }));
 app.use('/api/*', async (c, next) => {
   const session = await auth(c.env).api.getSession({ headers: c.req.raw.headers });
   if (!session)
     return c.json({ error: { code: 'unauthenticated', message: 'Sign in to continue' } }, 401);
+  if (Boolean(session.user.isAnonymous) !== (authMode(c.env) === 'guest'))
+    throw new AppError(409, 'auth_mode_mismatch', '当前身份不适用于此部署模式，请退出后重新进入');
   if (
     !['GET', 'HEAD'].includes(c.req.method) &&
     c.req.header('Origin') !== new URL(c.env.APP_URL).origin
@@ -23,6 +34,42 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 app.get('/api/capabilities', (c) => c.json({ extensionIds: extensionIds(c.env) }));
+app.get('/api/settings/models', async (c) => {
+  const credentials = new ModelCredentials(c.env, c.get('userId'));
+  return c.json({
+    providers: modelProviders.map(({ id, name }) => ({ id, name })),
+    modelCatalog: applicationModelCatalog(c.env, applicationModels(c.env)),
+    credentials: await Promise.all(modelProviders.map((p) => credentials.metadata(p.id))),
+    credentialStorageReady: credentials.storageReady,
+  });
+});
+app.on(['PUT', 'DELETE'], '/api/settings/model-credentials/:provider', async (c) => {
+  const provider = registeredProvider(c.req.param('provider')).id;
+  let body: unknown;
+  try {
+    body = JSON.parse(
+      await boundedText(new Response(c.req.raw.body, { headers: c.req.raw.headers }), 16 * 1024),
+    );
+  } catch {
+    throw new AppError(400, 'invalid_credential_request');
+  }
+  const expected = z.uuid().nullable();
+  const schema =
+    c.req.method === 'PUT'
+      ? z.object({ apiKey: z.string(), expectedCurrentId: expected }).strict()
+      : z.object({ expectedCurrentId: expected }).strict();
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new AppError(400, 'invalid_credential_request');
+  const credentials = new ModelCredentials(c.env, c.get('userId'));
+  return c.json(
+    'apiKey' in parsed.data
+      ? await credentials.save(
+          provider,
+          parsed.data as { apiKey: string; expectedCurrentId: string | null },
+        )
+      : await credentials.remove(provider, parsed.data.expectedCurrentId),
+  );
+});
 app.get('/api/conversations', async (c) => {
   const offset = Math.max(0, Math.min(1000000, Number(c.req.query('cursor')) || 0));
   const { results } = await c.env.DB.prepare(

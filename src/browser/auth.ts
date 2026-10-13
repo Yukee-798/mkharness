@@ -1,2 +1,3 @@
 import { createAuthClient } from 'better-auth/react';
-export const authClient = createAuthClient({ basePath: '/api/auth' });
+import { anonymousClient } from 'better-auth/client/plugins';
+export const authClient = createAuthClient({ basePath: '/api/auth', plugins: [anonymousClient()] });

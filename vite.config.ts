@@ -42,6 +42,7 @@ export default defineConfig({
       },
     },
     cloudflare({
+      configPath: process.env.AGENT_E2E_FIXTURES === '1' ? 'tests/e2e/worker.jsonc' : undefined,
       viteEnvironment: { name: 'ssr' },
       persistState: process.env.AGENT_E2E_FIXTURES === '1' ? { path: '.wrangler/e2e' } : true,
     }),

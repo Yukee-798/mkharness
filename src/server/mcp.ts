@@ -1,9 +1,17 @@
 import type { MCPClientManager } from 'agents/mcp/client';
-import { defineDoc, defineTool, type Extension } from '@earendil-works/pi-durable';
+import {
+  defineDoc,
+  defineTool,
+  hook,
+  ToolTask,
+  type Extension,
+  type TaskId,
+} from '@earendil-works/pi-durable';
 import { Type } from '@earendil-works/pi-ai';
-import { AppError } from '../shared/contracts';
+import { AppError, type RunCommand } from '../shared/contracts';
 import { canonicalJson, finiteJson, jsonText, type Json } from '../shared/compute';
 import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
+import { RemoteIntents, mcpIntentUnresolved } from './remote-intents';
 
 export type MCPConfig = {
   serverId: string;
@@ -252,16 +260,20 @@ function serverOptions(
       type: 'streamable-http' as const,
       requestInit: {
         redirect: 'manual' as const,
-        headers: config.credential ? { Authorization: `Bearer ${env[config.credential]}` } : {},
       },
       fetch: async (url: RequestInfo | URL, init?: RequestInit) => {
+        // Native MCP persists requestInit. Inject deployment secrets only at the
+        // network boundary, keeping them out of the recoverable connection row.
+        const headers = new Headers(
+          init?.headers ?? (url instanceof Request ? url.headers : undefined),
+        );
+        const signal = init?.signal ?? (url instanceof Request ? url.signal : undefined);
+        if (config.credential) headers.set('Authorization', `Bearer ${env[config.credential]}`);
         const response = await fetch(url, {
           ...init,
+          headers,
           redirect: 'manual',
-          signal: AbortSignal.any([
-            ...(init?.signal ? [init.signal] : []),
-            AbortSignal.timeout(30000),
-          ]),
+          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30000)]),
         });
         if (response.status >= 300 && response.status < 400)
           throw new AppError(503, 'mcp_redirect_blocked');
@@ -328,6 +340,7 @@ export async function buildMcp(
   configs: MCPConfig[],
   env: Record<string, unknown>,
   pinned?: readonly MCPBinding[],
+  command?: () => Promise<RunCommand>,
 ) {
   const bindings: MCPBinding[] = [...(pinned ?? [])];
   const availability = new Map<string, string>();
@@ -420,6 +433,24 @@ export async function buildMcp(
       availability.set(binding.name, 'mcp_disabled');
   const extension: Extension = {
     name: 'remote-mcp',
+    hooks: [
+      hook(ToolTask, {
+        beforeTool: async (call, api, context) => {
+          const binding = bindings.find((binding) => binding.name === call.name);
+          if (!binding || binding.replay === 'safe') return;
+          const doc = await api.snapshot(RemoteIntents, api.conversationId, context);
+          for (const intent of Object.values(doc?.mcp ?? {}))
+            if (
+              (intent.serverId === binding.serverId || intent.endpoint === binding.endpoint) &&
+              intent.status !== 'responded'
+            )
+              return {
+                block:
+                  'remote_outcome_unknown: reconcile this MCP operation before another unsafe call',
+              };
+        },
+      }),
+    ],
     tools: bindings.map((binding) =>
       defineTool({
         name: binding.name,
@@ -427,10 +458,21 @@ export async function buildMcp(
         parameters: Type.Unsafe<Record<string, Json>>(binding.schema),
         replay: binding.replay,
         outputLimits: JSON_TOOL_OUTPUT_LIMITS,
-        execute: async (args, _api, context) => {
+        execute: async (args, api, context) => {
           const signal = context.abortSignal ?? new AbortController().signal;
           if (availability.has(binding.name)) return failure(availability.get(binding.name)!);
+          let dispatched = false;
           try {
+            if (binding.replay === 'unsafe') {
+              const intents =
+                (await api.snapshot(RemoteIntents, api.conversationId, context))?.mcp ?? {};
+              for (const intent of Object.values(intents))
+                if (
+                  (intent.serverId === binding.serverId || intent.endpoint === binding.endpoint) &&
+                  mcpIntentUnresolved(intent, await api.getTask(intent.taskId as TaskId, context))
+                )
+                  return failure('remote_outcome_unknown');
+            }
             jsonText(args);
             // A prior transient outage is not a changed definition. Retry connection on this
             // tool invocation only; retain the binding and verify the recovered live catalog.
@@ -462,6 +504,28 @@ export async function buildMcp(
                 diagnostics[i].code !== 'mcp_definition_changed'
               )
                 diagnostics.splice(i, 1);
+            if (binding.replay === 'unsafe') {
+              if (!command) return failure('mcp_host_context_missing');
+              const runId = (await command()).runId;
+              await api.commit(async (tx) => {
+                const doc = await tx.doc(RemoteIntents, api.conversationId);
+                doc.mcp ??= {};
+                // Read the tracked document view after assignment. The assignment's
+                // raw object is not the Pi draft proxy and later mutations won't commit.
+                const intents = doc.mcp;
+                if (intents[api.taskId]) throw new AppError(409, 'remote_outcome_unknown');
+                intents[api.taskId] = {
+                  taskId: Number(api.taskId),
+                  runId,
+                  callId: api.callId,
+                  serverId: binding.serverId,
+                  endpoint: binding.endpoint,
+                  toolName: binding.name,
+                  status: 'dispatching',
+                };
+              }, context);
+            }
+            dispatched = true;
             const result = await bounded(
               manager.callTool(
                 { serverId: binding.serverId, name: binding.remoteName, arguments: args },
@@ -469,8 +533,25 @@ export async function buildMcp(
               ),
               30000,
             );
-            return convertResult(result);
+            const converted = convertResult(result);
+            if (binding.replay === 'unsafe')
+              await api.commit(async (tx) => {
+                (await tx.doc(RemoteIntents, api.conversationId)).mcp![api.taskId]!.status =
+                  'responded';
+              }, context);
+            return converted;
           } catch (e) {
+            if (dispatched && binding.replay === 'unsafe') {
+              // The dispatch intent already protects Stop/reconstruction. A native
+              // abort mark forbids more writes from this invocation; changing its
+              // Context cannot bypass that boundary or prove the remote canceled.
+              signal.throwIfAborted();
+              await api.commit(async (tx) => {
+                const intent = (await tx.doc(RemoteIntents, api.conversationId)).mcp?.[api.taskId];
+                if (intent) intent.status = 'unknown';
+              }, context);
+              return failure('remote_outcome_unknown');
+            }
             return failure(
               e instanceof AppError
                 ? e.code

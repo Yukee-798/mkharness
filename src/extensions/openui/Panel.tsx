@@ -83,6 +83,10 @@ export function Panel({
             );
             return result.revision;
           },
+          () =>
+            request<{ state: RawState; revision: number }>(
+              `/conversations/${conversationId}/extensions/openui/resources/${encodeURIComponent(panelRef)}`,
+            ),
         );
         state.current = entry.saver.current();
         setDraft(entry);

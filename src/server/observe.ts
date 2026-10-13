@@ -15,40 +15,21 @@ export async function observeRun(
     pi = await owner.harness.pi();
   let record = await owner.submission(runId);
   if (!record) return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
-  let historyEntries = await owner.allEntries();
   let watch = await watchEvents(pi, root.id, BG);
   let progress: Awaited<ReturnType<typeof restoreToolProgress>>;
   let projector: Awaited<ReturnType<ConversationAgent['progressProjector']>>;
-  try {
-    projector = await owner.progressProjector();
-    const latest = await owner.submission(runId);
-    if (!latest) {
-      await watch.stop();
-      return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
-    }
-    if (
-      record.status !== 'done' &&
-      record.status !== 'unanswered' &&
-      (latest.status === 'done' || latest.status === 'unanswered')
-    ) {
-      // A terminal receipt may be newer than this watch's prefix. Acquire a fresh
-      // prefix after that receipt so final entries cannot be lost when we close.
-      // A still-pending receipt instead relies on the existing watch's queued events.
-      await watch.stop();
-      historyEntries = await owner.allEntries();
-      watch = await watchEvents(pi, root.id, BG);
-    }
-    record = latest;
-    progress = await restoreToolProgress(pi, watch.snapshot, historyEntries);
-  } catch (error) {
+  const extensionProjection = await owner.extensionProjection().catch(async (error) => {
     await watch.stop();
     throw error;
-  }
-  const entries = new Map(historyEntries.map((e) => [Number(e.id), e]));
+  });
+  const entries = new Map<number, EntryRecord>();
   let committedRemote: Record<string, RemoteIntent> | undefined;
   let remoteRevision = 0;
   let sendState: (() => void) | undefined;
+  let stateScheduled = false;
+  let remoteChanged = false;
   const unsubscribe = pi.subscribeCommits((publication) => {
+    const projectionChanged = extensionProjection.accept(publication.changes);
     for (const change of publication.changes) {
       if (
         change.type === 'document' &&
@@ -58,10 +39,48 @@ export async function observeRun(
         committedRemote =
           (change.value as { operations: Record<string, RemoteIntent> } | null)?.operations ?? {};
         remoteRevision = Number(publication.seq);
-        sendState?.();
+        remoteChanged = true;
       }
     }
+    // Keep commit listeners short. Coalesce changes and serialize optional public
+    // projections outside Pi's synchronous adoption callback, using the same SSE.
+    if ((projectionChanged || remoteChanged) && !stateScheduled) {
+      stateScheduled = true;
+      queueMicrotask(() => {
+        stateScheduled = false;
+        if (!sendState) return;
+        if (remoteChanged || extensionProjection.hasChanges()) sendState?.();
+      });
+    }
   });
+  try {
+    let facts = await extensionProjection.restore(true);
+    const latest = await owner.submission(runId);
+    if (!latest) {
+      unsubscribe();
+      await watch.stop();
+      return Response.json({ error: { code: 'run_not_found' } }, { status: 404 });
+    }
+    if (
+      record.status !== 'done' &&
+      record.status !== 'unanswered' &&
+      (latest.status === 'done' || latest.status === 'unanswered')
+    ) {
+      // Completion can race bootstrap. Acquire a prefix after its receipt;
+      // pending work instead continues through the watch's queued events.
+      await watch.stop();
+      watch = await watchEvents(pi, root.id, BG);
+      facts = await extensionProjection.restore(true);
+    }
+    record = latest;
+    for (const entry of facts.entries) entries.set(Number(entry.id), entry);
+    progress = await restoreToolProgress(pi, watch.snapshot, facts.entries, facts.tasks);
+    projector = await owner.progressProjector();
+  } catch (error) {
+    unsubscribe();
+    await watch.stop();
+    throw error;
+  }
   const initialRemote =
     (
       await pi.snapshot(RemoteIntents, root.id, BG).catch(async (error) => {
@@ -118,7 +137,8 @@ export async function observeRun(
           messages,
         } as BaseEvent);
       };
-      const state = () =>
+      const state = () => {
+        remoteChanged = false;
         emit({
           type: EventType.STATE_SNAPSHOT,
           snapshot: {
@@ -135,8 +155,10 @@ export async function observeRun(
             ),
             remoteRevision,
             remote: remoteProgress(committedRemote ?? initialRemote),
+            extensionState: extensionProjection.project(),
           },
         } as BaseEvent);
+      };
       sendState = () => {
         if (!ended) state();
       };

@@ -1,24 +1,15 @@
-import {
-  env,
-  applyD1Migrations,
-  runInDurableObject,
-  abortAllDurableObjects,
-} from 'cloudflare:test';
+import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { beforeAll, it, expect } from 'vitest';
-import migration from '../../migrations/0001_auth_and_conversations.sql?raw';
-import titleMigration from '../../migrations/0002_custom_conversation_titles.sql?raw';
 import { makeSignature } from 'better-auth/crypto';
 import app from '../../src/server/index';
 const cookie = async (token: string) =>
   'better-auth.session_token=' +
   encodeURIComponent(token + '.' + (await makeSignature(token, env.BETTER_AUTH_SECRET!)));
 beforeAll(async () => {
-  await applyD1Migrations(env.DB, [
-    { name: '0001', queries: migration.split(';').filter((s) => s.trim()) },
-    { name: '0002', queries: titleMigration.split(';').filter((s) => s.trim()) },
-  ]);
   for (const id of ['a', 'b']) {
-    await env.DB.prepare('INSERT INTO user VALUES(?,?,?,1,NULL,?,?)')
+    await env.DB.prepare(
+      'INSERT INTO user(id,name,email,emailVerified,image,createdAt,updatedAt) VALUES(?,?,?,1,NULL,?,?)',
+    )
       .bind(id, id, id + '@example.com', Date.now(), Date.now())
       .run();
     await env.DB.prepare('INSERT INTO session VALUES(?,?,?,?,?,NULL,NULL,?)')
@@ -43,7 +34,7 @@ it('capabilities are authenticated configuration reads that never acquire a DO',
     { ...env, CONVERSATIONS: unavailableDO } as any,
   );
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ extensionIds: ['web', 'openui'] });
+  expect(await response.json()).toEqual({ extensionIds: ['timing', 'web', 'openui', 'example'] });
 });
 it('isolates listing and every resource operation using real Better Auth sessions', async () => {
   const a = await cookie('token-a'),
@@ -241,8 +232,37 @@ it('resumes a persisted deletion after eviction without restoring a directory en
   await abortAllDurableObjects();
   for (let i = 0; i < 150; i++) {
     // Wake the same object while retaining SQLite, as an alarm or retried request would.
-    await env.CONVERSATIONS.get(target.id).snapshot();
-    if (!(await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first())) return;
+    let snapshot: { entries?: unknown[]; error?: { code: string } } | undefined;
+    try {
+      snapshot = JSON.parse(await env.CONVERSATIONS.get(target.id).snapshot());
+    } catch (error) {
+      // destroy() can invalidate the very RPC that woke recovery. It is success only
+      // when the authoritative directory is already gone; other failures still fail.
+      expect((error as Error).message).toBe('destroyed');
+      expect(
+        await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
+      ).toBeNull();
+    }
+    if (!(await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first())) {
+      // D1 deletion precedes destroy(). A deleting response or the invalidated RPC
+      // is still in flight; wait for a genuinely fresh, empty SQLite instance.
+      if (!snapshot?.entries) {
+        if (snapshot) expect(snapshot.error?.code).toBe('not_found');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        continue;
+      }
+      expect(snapshot.entries).toEqual([]);
+      expect(
+        (
+          await app.request(
+            `http://localhost:5173/api/conversations/${id}/snapshot`,
+            { headers },
+            env,
+          )
+        ).status,
+      ).toBe(404);
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('Deletion did not recover');

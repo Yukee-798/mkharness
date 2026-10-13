@@ -4,7 +4,9 @@ import {
   type Harness,
   type EntryRecord,
   type Cursor,
+  type TaskRecord,
 } from '@earendil-works/pi-durable';
+import type { Json } from '../shared/compute';
 import { BG } from './conversation';
 import { AppError } from '../shared/contracts';
 import { ToolProgressFold } from '../shared/tool-progress';
@@ -14,6 +16,7 @@ export async function restoreToolProgress(
   pi: Harness,
   snapshot: Extract<AgentEvent, { type: 'snapshot' }>,
   entries: readonly EntryRecord[] = snapshot.entries,
+  restoredTasks?: readonly TaskRecord<Json, Json, Json>[],
 ) {
   const fold = new ToolProgressFold();
   // Context compaction trims the watch view, but browser progress covers the full history.
@@ -23,7 +26,9 @@ export async function restoreToolProgress(
   let assistant: number | undefined;
   for (const slot of snapshot.tools)
     if (slot.taskId !== undefined) {
-      const task = await pi.getTask(slot.taskId, BG);
+      const task =
+        restoredTasks?.find((task) => task.id === slot.taskId) ??
+        (await pi.getTask(slot.taskId, BG));
       const input = task?.input as { assistant?: number; callId?: string } | undefined;
       if (
         task?.kind !== 'pi.tool' ||
@@ -35,11 +40,10 @@ export async function restoreToolProgress(
       assistant = input.assistant;
     }
   if (snapshot.tools.length && assistant === undefined) {
-    const generations = (await pi.inspect(BG)).tasks.filter(
-      (task) => task.record.kind === 'pi.generation',
-    );
+    const generations = restoredTasks ?? (await pi.inspect(BG)).tasks.map((task) => task.record);
     for (const task of generations) {
-      const checkpoint = task.record.state.checkpoint as
+      if (task.kind !== 'pi.generation') continue;
+      const checkpoint = task.state.checkpoint as
         { phase?: string; assistant?: number } | undefined;
       if (checkpoint?.phase === 'tools') assistant = checkpoint.assistant;
     }
@@ -53,6 +57,22 @@ export async function restoreToolProgress(
   )
     throw new AppError(409, 'tool_progress_identity');
   // Pi receipts provide failures with no result entry. They remain authoritative after live slots clear.
+  const failures = (tasks: readonly TaskRecord<Json, Json, Json>[]) => {
+    for (const task of tasks)
+      if (
+        task.kind === 'pi.tool' &&
+        task.state.status === 'terminal' &&
+        task.state.outcome.status !== 'completed'
+      ) {
+        const input = task.input as { assistant?: number; callId?: string };
+        if (input.assistant && typeof input.callId === 'string')
+          fold.end(`${input.assistant}.${encodeURIComponent(input.callId)}`, false);
+      }
+  };
+  if (restoredTasks) {
+    failures(restoredTasks);
+    return fold;
+  }
   let cursor: Cursor | undefined;
   do {
     const tasks = await pi.commit(
@@ -69,12 +89,7 @@ export async function restoreToolProgress(
         ),
       BG,
     );
-    for (const task of tasks.items)
-      if (task.state.status === 'terminal' && task.state.outcome.status !== 'completed') {
-        const input = task.input as { assistant?: number; callId?: string };
-        if (input.assistant && typeof input.callId === 'string')
-          fold.end(`${input.assistant}.${encodeURIComponent(input.callId)}`, false);
-      }
+    failures(tasks.items);
     cursor = tasks.next;
   } while (cursor);
   return fold;

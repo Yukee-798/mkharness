@@ -1,4 +1,54 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/capabilities', (route) =>
+    route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } }),
+  );
+});
+
+test('a directory read failure cannot reject a successfully created chat', async ({ page }) => {
+  await page.route('**/api/auth/get-session', (route) =>
+    route.fulfill({
+      json: {
+        session: { id: 'session', userId: 'user', expiresAt: '2027-01-01T00:00:00Z' },
+        user: { id: 'user', name: 'User', email: 'user@example.test' },
+      },
+    }),
+  );
+  let created = false;
+  await page.route('**/api/conversations', (route) => {
+    if (route.request().method() === 'POST') {
+      created = true;
+      return route.fulfill({ status: 201, json: { id: 'created', title: '新聊天' } });
+    }
+    if (created)
+      return route.fulfill({
+        status: 503,
+        json: { error: { code: 'directory_unavailable' } },
+      });
+    return route.fulfill({
+      json: { items: [{ id: 'existing', title: '旧聊天', updated_at: 1 }], next: null },
+    });
+  });
+  await page.route('**/api/conversations/*/snapshot', (route) =>
+    route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
+  );
+  await page.route('**/api/conversations/*/runs', (route) =>
+    route.fulfill({ status: 202, json: { accepted: true } }),
+  );
+  await page.goto('/?chat=existing');
+  await expect(page.getByRole('button', { name: '旧聊天', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '新建聊天', exact: true }).click();
+  await expect(page).not.toHaveURL(/chat=/);
+  const composer = page.getByLabel('消息', { exact: true });
+  await composer.fill('first message');
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  await expect(page).toHaveURL(/chat=created/);
+  await composer.fill('new chat draft');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page).toHaveURL(/chat=created/);
+  await expect(composer).toHaveValue('new chat draft');
+});
 
 test('signed-out login stays at the sidebar bottom and is accessible when collapsed', async ({
   page,
@@ -33,6 +83,8 @@ test('sidebar collapse retains the chat and draft; bottom account menu reports s
     }),
   );
   let snapshots = 0;
+  let releaseInitial!: () => void;
+  const initialRead = new Promise<void>((resolve) => (releaseInitial = resolve));
   await page.route('**/api/conversations', (route) =>
     route.fulfill({
       json: {
@@ -41,8 +93,9 @@ test('sidebar collapse retains the chat and draft; bottom account menu reports s
       },
     }),
   );
-  await page.route('**/api/conversations/current/snapshot', (route) => {
+  await page.route('**/api/conversations/current/snapshot', async (route) => {
     snapshots++;
+    await initialRead;
     return route.fulfill({ json: { entries: [], pending: [], stopping: false } });
   });
   await page.route('**/api/auth/sign-out', (route) =>
@@ -50,6 +103,8 @@ test('sidebar collapse retains the chat and draft; bottom account menu reports s
   );
   await page.goto('/?chat=current');
   const composer = page.getByRole('textbox', { name: '消息', exact: true });
+  await expect(composer).toBeDisabled();
+  releaseInitial();
   await composer.fill('尚未发送的草稿');
   const original = await composer.elementHandle();
   await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
@@ -167,6 +222,9 @@ test('personal directory creates and restores a chat with keyboard access on mob
   await page.route('**/api/conversations/*/snapshot', (route) =>
     route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
   );
+  await page.route('**/api/conversations/*/runs', (route) =>
+    route.fulfill({ status: 202, json: { accepted: true } }),
+  );
   await page.goto('/');
   await page.getByRole('button', { name: '打开聊天目录' }).click();
   const account = page.getByRole('button', { name: '账号：Yukee', exact: true });
@@ -174,8 +232,13 @@ test('personal directory creates and restores a chat with keyboard access on mob
   expect((await account.boundingBox())!.y).toBeGreaterThan(744);
   await page.getByRole('button', { name: '新建聊天', exact: true }).focus();
   await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'MkHarness', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
-  expect(new URL(page.url()).searchParams.get('chat')).toBe('created');
+  expect(created).toBe(false);
+  expect(new URL(page.url()).searchParams.has('chat')).toBe(false);
+  await page.getByLabel('消息', { exact: true }).fill('first message');
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  await expect(page).toHaveURL(/chat=created/);
   await page.reload();
   await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '打开聊天目录' }).click();

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdtemp, rm, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,13 +7,31 @@ import { createServer } from 'vite';
 import { cloudflare } from '@cloudflare/vite-plugin';
 
 process.env.X_LOCAL_OBSERVABILITY = 'false';
-const file = fileURLToPath(new URL('./worker.ts', import.meta.url));
-const original = await readFile(file, 'utf8');
-const dependency = fileURLToPath(new URL('./revision.ts', import.meta.url));
-const originalDependency = await readFile(dependency, 'utf8');
-const clientFile = fileURLToPath(new URL('./client.ts', import.meta.url));
-const originalClient = await readFile(clientFile, 'utf8');
-const persistence = await mkdtemp(join(tmpdir(), 'pi-hmr-'));
+const persistence = await realpath(await mkdtemp(join(tmpdir(), 'pi-hmr-')));
+// Do not mutate repository files watched by another running dev server.
+const file = join(persistence, 'worker.ts');
+const original = (await readFile(new URL('./worker.ts', import.meta.url), 'utf8'))
+  .replace(
+    '../../src/server/conversation',
+    fileURLToPath(new URL('../../src/server/conversation', import.meta.url)),
+  )
+  .replace('../fixture-model', fileURLToPath(new URL('../fixture-model', import.meta.url)));
+const dependency = join(persistence, 'revision.ts');
+const originalDependency = await readFile(new URL('./revision.ts', import.meta.url), 'utf8');
+const clientFile = join(persistence, 'client.ts');
+const originalClient = await readFile(new URL('./client.ts', import.meta.url), 'utf8');
+await writeFile(file, original);
+await writeFile(dependency, originalDependency);
+await writeFile(clientFile, originalClient);
+await writeFile(
+  join(persistence, 'wrangler.jsonc'),
+  await readFile(new URL('./wrangler.jsonc', import.meta.url)),
+);
+await symlink(
+  fileURLToPath(new URL('../../node_modules', import.meta.url)),
+  join(persistence, 'node_modules'),
+  'dir',
+);
 const plugins = [];
 let restart;
 plugins.push({
@@ -29,13 +47,13 @@ if (!process.argv.includes('--unfixed')) {
 }
 plugins.push(
   cloudflare({
-    configPath: fileURLToPath(new URL('./wrangler.jsonc', import.meta.url)),
-    persistState: { path: persistence },
+    configPath: join(persistence, 'wrangler.jsonc'),
+    persistState: { path: join(persistence, 'storage') },
   }),
 );
 const server = await createServer({
   configFile: false,
-  root: fileURLToPath(new URL('.', import.meta.url)),
+  root: persistence,
   cacheDir: join(persistence, 'vite-cache'),
   plugins,
   resolve: { alias: { '@': fileURLToPath(new URL('../../src', import.meta.url)) } },
@@ -82,9 +100,9 @@ try {
   }
 } finally {
   await server.watcher.unwatch([file, dependency, clientFile]);
-  await server.close();
-  await writeFile(file, original);
-  await writeFile(dependency, originalDependency);
-  await writeFile(clientFile, originalClient);
-  await rm(persistence, { recursive: true, force: true });
+  try {
+    await server.close();
+  } finally {
+    await rm(persistence, { recursive: true, force: true });
+  }
 }

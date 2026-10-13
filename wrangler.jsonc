@@ -1,5 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
+  // Existing Worker identity: keep it to preserve local/remote DO storage.
+  // For a fresh MkHarness installation, set name to "mkharness" before provisioning.
   "name": "agent-generative-ui",
   "main": "src/server.ts",
   "compatibility_date": "2026-10-06",
@@ -14,6 +16,8 @@
   },
   "vars": {
     "APP_URL": "http://localhost:5173",
+    "AUTH_MODE": "guest",
+    "ALLOW_SERVER_MODEL_KEY": "0",
     "MODEL_PROVIDER": "",
     "MODEL_ID": "",
   },
@@ -46,14 +50,13 @@
       "migrations_dir": "migrations",
     },
   ],
-  "secrets": {
-    "required": ["BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "MODEL_API_KEY"],
-  },
   "env": {
     "test": {
       "name": "agent-generative-ui-test-20261010-7591",
       "vars": {
         "APP_URL": "https://agent-generative-ui-test-20261010-7591.yukee798.workers.dev",
+        "AUTH_MODE": "guest",
+        "ALLOW_SERVER_MODEL_KEY": "0",
         "MODEL_PROVIDER": "",
         "MODEL_ID": "",
       },
@@ -73,9 +76,6 @@
           "migrations_dir": "migrations",
         },
       ],
-      "secrets": {
-        "required": [],
-      },
       "workers_dev": true,
       "preview_urls": false,
     },

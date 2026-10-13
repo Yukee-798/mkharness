@@ -28,6 +28,7 @@ export interface ToolCallProps {
   icon: ReactNode;
   statusIcon?: ReactNode;
   ariaLabel: string;
+  titleMeta?: ReactNode;
 }
 
 // Each payload scrolls independently; the labels and other tools remain visible.
@@ -47,6 +48,7 @@ export function ToolCall({
   icon,
   statusIcon,
   ariaLabel,
+  titleMeta,
 }: ToolCallProps) {
   return (
     <ToolFallbackRoot data-slot="tool-call" open={open} onOpenChange={onOpenChange}>
@@ -65,6 +67,7 @@ export function ToolCall({
         </ShimmerLabel>
         {query && <span className="min-w-0 truncate text-muted-foreground/70">{query}</span>}
         <DisclosureChevron data-slot="tool-call-chevron" />
+        {titleMeta}
       </CollapsibleTrigger>
       <ToolFallbackContent>
         {progress && (

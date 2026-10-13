@@ -1,5 +1,5 @@
 {
-  "name": "agent-generative-ui",
+  "name": "mkharness",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,9 +7,10 @@
   "packageManager": "pnpm@11.17.0",
   "scripts": {
     "dev": "vite",
+    "setup": "node scripts/setup.mjs",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "types": "wrangler types",
+    "types": "wrangler types --strict-vars false",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:hmr": "node tests/hmr/pi-session.mjs",

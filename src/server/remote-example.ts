@@ -1,6 +1,5 @@
 import { Type } from '@earendil-works/pi-ai';
 import {
-  defineDoc,
   defineTask,
   defineTool,
   hook,
@@ -15,31 +14,9 @@ import { canonicalJson, jsonText, finiteJson, type Json } from '../shared/comput
 import { boundedText } from './web';
 import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
 
-export type RemoteIntent = {
-  taskId: number;
-  childTaskId: number;
-  runId: string;
-  callId: string;
-  service: string;
-  toolName: string;
-  fingerprint: string;
-  key: string;
-  remoteId: string | null;
-  status: string;
-  remoteStatus: string;
-  deadline: number;
-  nextPollAt: number;
-  retryRunId: string | null;
-  retryTaskId: number | null;
-};
-export const RemoteIntents = defineDoc<{ operations: Record<string, RemoteIntent> }>({
-  kind: 'app.remote-intents',
-  version: 1,
-  scope: 'conversation',
-  history: 'latest',
-  fork: 'initial',
-  initial: () => ({ operations: {} }),
-});
+import { RemoteIntents, type RemoteIntent } from './remote-intents';
+export { RemoteIntents, type RemoteIntent } from './remote-intents';
+
 export const remoteBlocked = (operation: RemoteIntent) =>
   ['unknown', 'timeout', 'cancel_unknown', 'cancel_failed', 'cancel_unsupported'].includes(
     operation.status,

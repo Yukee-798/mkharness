@@ -1,50 +1,33 @@
+diff --git a/dist/harness/pi/index.d.ts b/dist/harness/pi/index.d.ts
+index 32a6fabf879e83f56e80761e7162216f887e3ff4..7a20e09a1d1283a6be5152d877d7d83067e954c1 100644
+--- a/dist/harness/pi/index.d.ts
++++ b/dist/harness/pi/index.d.ts
+@@ -59,6 +59,8 @@ type PiSubmitOptions = {
+   /** Default: the root session. */ readonly session?: PiSessionId /** Idempotency key. Submitting the same id twice returns the same receipt. */;
+   readonly operationId?: string;
+   readonly whenBusy?: PiWhenBusy;
++  /** Frozen per submission before prepare; forwarded to native Pi. */
++  readonly execution?: import("@earendil-works/pi-durable").SubmissionExecution;
+ };
+ type PiSessionOptions = {
+   /** Default: the root session. */ readonly session?: PiSessionId;
 diff --git a/dist/harness/pi/index.js b/dist/harness/pi/index.js
-index 9fceb9c0621a5a06202e235877184deb45d1d029..ae29d7301ef727ccfc262ad2f9d631d8f4dc07d0 100644
+index 9fceb9c0621a5a06202e235877184deb45d1d029..cf9a35f91ff03e44d21d2eee66ff904346f8d411 100644
 --- a/dist/harness/pi/index.js
 +++ b/dist/harness/pi/index.js
-@@ -301,6 +301,7 @@ var _sleepThresholdMs = /* @__PURE__ */ new WeakMap();
- var _waitBudgetMs = /* @__PURE__ */ new WeakMap();
- var _heartbeatMs = /* @__PURE__ */ new WeakMap();
- var _opening = /* @__PURE__ */ new WeakMap();
-+var _closing = /* @__PURE__ */ new WeakMap();
- var _PiHarness_brand = /* @__PURE__ */ new WeakSet();
- /**
- * pi-durable hosted in a Durable Object, behind a small harness interface:
-@@ -334,6 +335,7 @@ var PiHarness = class extends LifecycleCapability {
- 		_classPrivateFieldInitSpec(this, _waitBudgetMs, WAIT_BUDGET_MS);
- 		_classPrivateFieldInitSpec(this, _heartbeatMs, HEARTBEAT_MS);
- 		_classPrivateFieldInitSpec(this, _opening, void 0);
-+		_classPrivateFieldInitSpec(this, _closing, void 0);
- 		_classPrivateFieldSet2(_options, this, options);
- 		this.sessions = new PiSessions(this);
- 	}
-@@ -350,9 +352,19 @@ var PiHarness = class extends LifecycleCapability {
- 	}
- 	/** Close pi's in-memory resources. Durable state is untouched. */
- 	async dispose() {
-+		const previousClose = _classPrivateFieldGet2(_closing, this);
-+		if (previousClose) return previousClose;
- 		const opening = _classPrivateFieldGet2(_opening, this);
- 		_classPrivateFieldSet2(_opening, this, void 0);
--		await (await opening?.catch(() => void 0))?.pi.close(BG);
-+		const closing = (async () => {
-+			await (await opening?.catch(() => void 0))?.pi.close(BG);
-+		})();
-+		_classPrivateFieldSet2(_closing, this, closing);
-+		try {
-+			await closing;
-+		} finally {
-+			_classPrivateFieldSet2(_closing, this, void 0);
-+		}
- 	}
- 	/** A handle on one session. No I/O until you call it. */
- 	session(id = ROOT_SESSION) {
-@@ -520,6 +532,8 @@ async function _waitForIdle(conversation) {
- */
- async function _open() {
- 	await this.lifecycle.ready();
-+	const closing = _classPrivateFieldGet2(_closing, this);
-+	if (closing) await closing;
- 	_classPrivateFieldGet2(_opening, this) ?? _classPrivateFieldSet2(_opening, this, _assertClassBrand(_PiHarness_brand, this, _doOpen).call(this).catch((error) => {
- 		_classPrivateFieldSet2(_opening, this, void 0);
- 		throw error;
+@@ -416,7 +416,8 @@ var PiHarness = class extends LifecycleCapability {
+ 				type: "input",
+ 				content: input,
+ 				whenBusy: options.whenBusy ?? "followUp",
+-				requestId: operationId
++				requestId: operationId,
++				execution: options.execution
+ 			}, BG);
+ 		} finally {
+ 			const left = (_classPrivateFieldGet2(_admitting, this).get(session) ?? 1) - 1;
+@@ -869,5 +870,3 @@ async function skills(sources) {
+ }
+ //#endregion
+ export { PiHarness, PiSession, PiSessions, ROOT_SESSION, openPiSessionStore, skills };
+-
+-//# sourceMappingURL=index.js.map

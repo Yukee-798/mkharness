@@ -2,6 +2,8 @@ import { skills } from 'agents/harness/pi';
 import { type SkillSource, type SkillContent, type SkillResource } from 'agents/skills';
 import type { Extension, ToolRegistration } from '@earendil-works/pi-durable';
 import { AppError } from '../shared/contracts';
+import { jsonText } from '../shared/compute';
+import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
 
 const pathAllowed = (path: string) =>
   !!path &&
@@ -72,8 +74,14 @@ export async function staticSkills(sources: SkillSource[]): Promise<Extension> {
       tool: tool.name,
       wrap: (original: ToolRegistration): ToolRegistration => ({
         ...original,
+        outputLimits: JSON_TOOL_OUTPUT_LIMITS,
         execute: async (args, api, context) => {
           const result = await original.execute(args, api, context);
+          try {
+            jsonText(result.content ?? []);
+          } catch {
+            return { isError: true, content: [{ type: 'text', text: 'skill_output_too_large' }] };
+          }
           const missing = (result.content ?? []).some(
             (c) => c.type === 'text' && /^Skill (resource )?not found:/.test(c.text),
           );
@@ -88,7 +96,7 @@ export function exampleSkillSource(): SkillSource {
   const content: SkillContent = {
     name: 'source-comparison',
     description: 'Compare public sources and explain uncertainties.',
-    body: 'Use only enabled read_webpage/search_web tools. Keep source URLs and dates. Separate verified facts from assumptions. Consult references/checklist.md before presenting a comparison. This guidance grants no additional tools or permissions.',
+    body: 'Use only enabled read_web/search_web tools. Keep source URLs and dates. Separate verified facts from assumptions. Consult references/checklist.md before presenting a comparison. This guidance grants no additional tools or permissions.',
     resources: [{ path: 'references/checklist.md', kind: 'reference' }],
   };
   return {

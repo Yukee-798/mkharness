@@ -6,7 +6,41 @@ export type { Locator, Page } from '@playwright/test';
 export const test = base.extend({
   page: async ({ page }, use) => {
     await page.route('**/api/**', async (route) => {
-      if (new URL(route.request().url()).pathname === '/api/capabilities')
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/api/bootstrap') return route.fulfill({ json: { authMode: 'account' } });
+      if (path === '/api/settings/models')
+        return route.fulfill({
+          json: {
+            providers: [{ id: 'openai', name: 'OpenAI' }],
+            modelCatalog: route.request().frame().url().includes('/tests/browser/')
+              ? null
+              : {
+                  models: [
+                    {
+                      id: 'fixture',
+                      name: 'Fixture',
+                      provider: 'fixture',
+                      thinkingLevels: ['off', 'low', 'high'],
+                    },
+                  ],
+                  defaultSelection: {
+                    provider: 'fixture',
+                    modelId: 'fixture',
+                    thinkingLevel: 'low',
+                  },
+                },
+            credentialStorageReady: true,
+            credentials: ['fixture', 'deepseek', 'openai'].map((provider) => ({
+              provider,
+              currentId: null,
+              configured: false,
+              effectiveSource: 'server',
+              serverDefaultAllowed: true,
+              updatedAt: null,
+            })),
+          },
+        });
+      if (path === '/api/capabilities')
         return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
       await route.fallback();
     });

@@ -1,6 +1,6 @@
 export const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
-export type ModelSelection = { modelId: string; thinkingLevel: ThinkingLevel };
+export type ModelSelection = { provider: string; modelId: string; thinkingLevel: ThinkingLevel };
 export type ModelCatalog = {
   models: { id: string; name: string; provider: string; thinkingLevels: ThinkingLevel[] }[];
   defaultSelection: ModelSelection;

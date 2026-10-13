@@ -10,37 +10,59 @@ import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { AppError } from '../shared/contracts';
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
 import { thinkingLevels, type ModelCatalog, type ModelSelection } from '../shared/model-selection';
+export const modelProviders = [
+  { id: 'openai', name: 'OpenAI', factory: openaiProvider, defaultModel: 'gpt-5-mini' },
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    factory: anthropicProvider,
+    defaultModel: 'claude-sonnet-4-5',
+  },
+  { id: 'deepseek', name: 'DeepSeek', factory: deepseekProvider, defaultModel: 'deepseek-flash' },
+] as const;
+export function registeredProvider(id: string) {
+  const provider = modelProviders.find((p) => p.id === id);
+  if (!provider) throw new AppError(400, 'unsupported_provider', '此供应商尚未注册');
+  return provider;
+}
 type ModelEnvironment = {
-  MODEL_PROVIDER: string;
-  MODEL_ID: string;
+  MODEL_PROVIDER?: string;
+  MODEL_ID?: string;
   MODEL_IDS?: string;
   MODEL_THINKING_LEVEL?: string;
 };
 export function applicationModelCatalog(env: ModelEnvironment, models: Models): ModelCatalog {
-  const available = models.getModels(env.MODEL_PROVIDER);
-  const ids = env.MODEL_IDS?.trim()
-    ? env.MODEL_IDS.split(',')
-        .map((id) => id.trim())
-        .filter(Boolean)
-    : available.map((m) => m.id);
-  if (!ids.includes(env.MODEL_ID))
+  const provider = env.MODEL_PROVIDER?.trim() || 'openai';
+  const modelId =
+    env.MODEL_ID?.trim() || modelProviders.find((p) => p.id === provider)?.defaultModel || '';
+  const initial = models.getModel(provider, modelId);
+  if (!initial)
+    throw new AppError(503, 'unknown_model', 'MODEL_ID is absent from the installed Pi catalog');
+  const restricted = env.MODEL_IDS?.trim()
+    ? new Set(
+        env.MODEL_IDS.split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      )
+    : undefined;
+  if (restricted && !restricted.has(modelId))
     throw new AppError(503, 'invalid_model_catalog', 'MODEL_IDS must include MODEL_ID');
-  const options = [...new Set(ids)].map((id) => {
-    const model = available.find((m) => m.id === id);
-    if (!model)
-      throw new AppError(503, 'invalid_model_catalog', 'MODEL_IDS contains an unknown model');
-    return {
-      id,
-      name: model.name,
-      provider: model.provider,
-      thinkingLevels: getSupportedThinkingLevels(model),
-    };
-  });
-  const initial = models.getModel(env.MODEL_PROVIDER, env.MODEL_ID)!;
+  if (restricted && [...restricted].some((id) => !models.getModel(provider, id)))
+    throw new AppError(503, 'invalid_model_catalog', 'MODEL_IDS contains an unknown model');
   return {
-    models: options,
+    models: models
+      .getProviders()
+      .flatMap((p) => models.getModels(p.id))
+      .filter((m) => m.provider !== provider || !restricted || restricted.has(m.id))
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        provider: m.provider,
+        thinkingLevels: getSupportedThinkingLevels(m),
+      })),
     defaultSelection: {
-      modelId: env.MODEL_ID,
+      provider,
+      modelId,
       thinkingLevel: clampThinkingLevel(initial, applicationThinkingLevel(env)),
     },
   };
@@ -50,9 +72,11 @@ export function validateModelSelection(
   models: Models,
   selection?: ModelSelection,
 ): ModelSelection {
-  const catalog = applicationModelCatalog(env, models);
-  const chosen = selection ?? catalog.defaultSelection;
-  const model = catalog.models.find((m) => m.id === chosen.modelId);
+  const catalog = applicationModelCatalog(env, models),
+    chosen = selection ?? catalog.defaultSelection;
+  const model = catalog.models.find(
+    (m) => m.id === chosen.modelId && m.provider === chosen.provider,
+  );
   if (!model) throw new AppError(400, 'model_not_allowed', '所选模型不可用，请重新选择');
   if (!model.thinkingLevels.includes(chosen.thinkingLevel))
     throw new AppError(400, 'thinking_level_not_supported', '该模型不支持所选思考强度');
@@ -66,44 +90,23 @@ export function applicationThinkingLevel(env: {
     throw new AppError(503, 'invalid_thinking_level', 'Invalid MODEL_THINKING_LEVEL');
   return level as ModelThinkingLevel;
 }
-export function applicationModels(env: {
-  MODEL_PROVIDER: string;
-  MODEL_ID: string;
-  MODEL_API_KEY?: string;
-}): Models {
-  if (!env.MODEL_PROVIDER || !env.MODEL_ID || !env.MODEL_API_KEY)
-    throw new AppError(
-      503,
-      'model_not_configured',
-      'Configure MODEL_PROVIDER, MODEL_ID and MODEL_API_KEY',
-    );
-  const provider =
-    env.MODEL_PROVIDER === 'openai'
-      ? openaiProvider()
-      : env.MODEL_PROVIDER === 'anthropic'
-        ? anthropicProvider()
-        : env.MODEL_PROVIDER === 'deepseek'
-          ? deepseekProvider()
-          : undefined;
-  if (!provider)
-    throw new AppError(
-      503,
-      'unsupported_provider',
-      'Register the selected Pi provider in src/server/models.ts',
-    );
+/** Catalog registration is independent of credentials. Only task-bound providers may authenticate. */
+export function applicationModels(env: ModelEnvironment): Models {
   const models = createModels({
     authContext: { env: async () => undefined, fileExists: async () => false },
   });
-  models.setProvider({
-    ...provider,
-    auth: {
-      apiKey: {
-        name: 'Application key',
-        resolve: async () => ({ auth: { apiKey: env.MODEL_API_KEY }, source: 'application' }),
+  for (const definition of modelProviders)
+    models.setProvider({
+      ...definition.factory(),
+      auth: {
+        apiKey: {
+          name: 'Task-bound credential',
+          resolve: async () => {
+            throw new AppError(503, 'execution_binding_required', '模型调用缺少提交时的执行配置');
+          },
+        },
       },
-    },
-  });
-  if (!models.getModel(env.MODEL_PROVIDER, env.MODEL_ID))
-    throw new AppError(503, 'unknown_model', 'MODEL_ID is absent from the installed Pi catalog');
+    });
+  applicationModelCatalog(env, models);
   return models;
 }

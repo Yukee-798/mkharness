@@ -23,15 +23,23 @@ export function computationContract(compute: (p: Program, i: Json) => Promise<Co
       'memory growth',
       'export function compute(){const a=[];while(true)a.push(new Array(10000).fill(42))}',
     ],
-  ])('rejects %s with a recoverable error', async (_name, code) => {
-    const result = await compute({ code, data: null }, {});
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.kind).not.toBe('unimplemented');
-    expect(await compute({ code: 'export function compute(){return 7}', data: null }, {})).toEqual({
-      ok: true,
-      value: 7,
-    });
-  });
+  ])(
+    'rejects %s with a recoverable error',
+    async (_name, code) => {
+      const result = await compute({ code, data: null }, {});
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.kind).not.toBe('unimplemented');
+      expect(
+        await compute({ code: 'export function compute(){return 7}', data: null }, {}),
+      ).toEqual({
+        ok: true,
+        value: 7,
+      });
+    },
+    // Covers WASM allocation/disposal and the recovery invocation too, not just execution.
+    // Match the workerd harness budget; production heap, interrupt and Worker deadlines are unchanged.
+    15000,
+  );
   it('has no host capabilities, environmental clock or randomness', async () => {
     expect(
       await compute(

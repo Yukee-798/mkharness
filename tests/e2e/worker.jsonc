@@ -1,0 +1,28 @@
+{
+  "name": "mkharness-e2e",
+  "main": "../../src/server.ts",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "APP_URL": "http://localhost:5174",
+    "AUTH_MODE": "guest",
+    "ALLOW_SERVER_MODEL_KEY": "0",
+    "MODEL_PROVIDER": "",
+    "MODEL_ID": "",
+    "BETTER_AUTH_SECRET": "e2e-fixture-only-secret-at-least-32-characters",
+    "CREDENTIAL_ENCRYPTION_KEY": "bW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0=",
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "CONVERSATIONS", "class_name": "ConversationAgent" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationAgent"] }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mkharness-e2e",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../migrations",
+    },
+  ],
+  "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }],
+}

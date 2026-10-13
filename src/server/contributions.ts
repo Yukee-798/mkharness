@@ -1,10 +1,25 @@
-import type { EntryRecord, Extension } from '@earendil-works/pi-durable';
+import type {
+  EntryRecord,
+  Extension,
+  TaskRecord,
+  SubmissionRecord,
+} from '@earendil-works/pi-durable';
 import type { Json as JsonValue } from '../shared/compute';
 import { AppError } from '../shared/contracts';
 import { validateExtensions } from './extensions';
+import type { successfulTool } from '../shared/references';
 
 /** Trusted deployment code. Read contexts do not expose execution, credentials or writes. */
-export type ReadContext = { entries: () => Promise<readonly EntryRecord[]> };
+export type ReadContext = {
+  entries: () => Promise<readonly EntryRecord[]>;
+  successfulTool: (ref: string, name: string) => Promise<ReturnType<typeof successfulTool>>;
+};
+/** Committed native facts, never a second execution runtime or a writable Pi handle. */
+export type ProjectionContext = {
+  entries: readonly EntryRecord[];
+  tasks: readonly TaskRecord<JsonValue, JsonValue, JsonValue>[];
+  submissions: readonly SubmissionRecord[];
+};
 export type ServerContribution = {
   id: string;
   extension?: Extension;
@@ -22,6 +37,7 @@ export type ServerContribution = {
     details?: JsonValue;
     terminal: boolean;
   }) => JsonValue;
+  projectState?: (context: ProjectionContext) => JsonValue;
 };
 export function validateContributionIds(ids: readonly string[]) {
   const seen = new Set<string>();
@@ -41,6 +57,8 @@ export function collectContributions(contributions: readonly ServerContribution[
           (contribution.resources.validateState !== undefined &&
             typeof contribution.resources.validateState !== 'function'))) ||
       (contribution.projectTool !== undefined && typeof contribution.projectTool !== 'function') ||
+      (contribution.projectState !== undefined &&
+        typeof contribution.projectState !== 'function') ||
       Object.entries(contribution.actions ?? {}).some(
         ([name, action]) =>
           !/^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(name) || typeof action?.normalize !== 'function',

@@ -22,7 +22,7 @@ it('includes model settings in idempotent retries and makes a new command when t
     commands.push(command);
     throw new Error('ack lost');
   });
-  const config = { modelId: 'flash', thinkingLevel: 'low' as const };
+  const config = { provider: 'fixture', modelId: 'flash', thinkingLevel: 'low' as const };
   await expect(send('same', undefined, config)).rejects.toThrow();
   await expect(send('same', undefined, config)).rejects.toThrow();
   expect(commands[1]).toEqual(commands[0]);

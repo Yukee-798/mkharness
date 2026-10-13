@@ -15,7 +15,7 @@ const catalog = {
     },
     { id: 'plain', name: 'Plain text', provider: 'fixture', thinkingLevels: ['off'] },
   ],
-  defaultSelection: { modelId: 'flash', thinkingLevel: 'low' },
+  defaultSelection: { provider: 'deepseek', modelId: 'flash', thinkingLevel: 'low' },
 };
 test('model and effort apply to new HTTP submissions, preserve busy work and restore after reload', async ({
   page,
@@ -51,7 +51,11 @@ test('model and effort apply to new HTTP submissions, preserve busy work and res
   await page.getByLabel('消息', { exact: true }).fill('first');
   await page.getByRole('button', { name: '发送', exact: true }).click();
   await expect.poll(() => commands.length).toBe(1);
-  expect(commands[0].config).toEqual({ modelId: 'flash', thinkingLevel: 'max' });
+  expect(commands[0].config).toEqual({
+    provider: 'deepseek',
+    modelId: 'flash',
+    thinkingLevel: 'max',
+  });
   await trigger.click();
   await page.getByRole('option', { name: 'DeepSeek Pro' }).click();
   await trigger.click();
@@ -61,7 +65,11 @@ test('model and effort apply to new HTTP submissions, preserve busy work and res
   await page.getByLabel('消息', { exact: true }).fill('second');
   await page.getByRole('button', { name: '发送', exact: true }).click();
   await expect.poll(() => commands.length).toBe(2);
-  expect(commands[1].config).toEqual({ modelId: 'pro', thinkingLevel: 'high' });
+  expect(commands[1].config).toEqual({
+    provider: 'deepseek',
+    modelId: 'pro',
+    thinkingLevel: 'high',
+  });
   await page.reload();
   await expect(trigger).toContainText('DeepSeek Pro');
   await expect(trigger).toContainText('高');

@@ -34,7 +34,7 @@ export function ModelPicker({
   return (
     <ModelSelectorRoot
       models={catalog.models.map((model) => ({
-        id: model.id,
+        id: JSON.stringify([model.provider, model.id]),
         name: model.name,
         keywords: [model.provider],
         icon: <Bot className="size-4" />,
@@ -43,16 +43,16 @@ export function ModelPicker({
             ? model.thinkingLevels.map((id) => ({ id, name: thinkingLabels[id] }))
             : undefined,
       }))}
-      value={value.modelId}
+      value={JSON.stringify([value.provider, value.modelId])}
       effort={value.thinkingLevel}
       onValueChange={(modelId) => {
-        const model = catalog.models.find((m) => m.id === modelId)!;
+        const model = catalog.models.find((m) => JSON.stringify([m.provider, m.id]) === modelId)!;
         const thinkingLevel = model.thinkingLevels.includes(value.thinkingLevel)
           ? value.thinkingLevel
           : model.thinkingLevels.includes(catalog.defaultSelection.thinkingLevel)
             ? catalog.defaultSelection.thinkingLevel
             : (model.thinkingLevels.find((level) => level !== 'off') ?? 'off');
-        onChange({ modelId, thinkingLevel });
+        onChange({ provider: model.provider, modelId: model.id, thinkingLevel });
       }}
       onEffortChange={(level) => onChange({ ...value, thinkingLevel: level as ThinkingLevel })}
     >
@@ -77,9 +77,9 @@ export function ModelPicker({
           <ModelSelectorGroup>
             {catalog.models.map((model) => (
               <ModelSelectorItem
-                key={model.id}
+                key={JSON.stringify([model.provider, model.id])}
                 model={{
-                  id: model.id,
+                  id: JSON.stringify([model.provider, model.id]),
                   name: model.name,
                   keywords: [model.provider],
                   icon: <Bot className="size-4" />,

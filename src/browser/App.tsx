@@ -1,17 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { authClient } from './auth';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient, useQuery } from '@tanstack/react-query';
+import { ensureGuestSession } from './session-bootstrap';
 import { directoryOptions, userKeys } from './queries';
 import { request } from './api';
 import { Button } from './ui/button';
 import { ResourceDrafts } from './ResourceDrafts';
 import { ConversationActions } from './ConversationActions';
 import { AppShell } from './AppShell';
-import { MessageSquare, Plus, LogIn, LogOut, ArrowRight, ChevronsUpDown } from 'lucide-react';
+import { Plus, LogIn, LogOut, Settings, ChevronsUpDown } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
 import { ScrollArea } from './ui/scroll-area';
+import { ModelSettingsDialog } from './ModelSettings';
 import { ChatLoading } from './chat-loading';
 import { cn } from './ui/utils';
 import {
@@ -25,24 +27,88 @@ import {
 const Chat = lazy(() => import('./Chat').then((module) => ({ default: module.Chat })));
 export function App() {
   const { data: session, isPending, error: sessionError, refetch } = authClient.useSession();
+  const bootstrap = useQuery({
+    queryKey: ['bootstrap'],
+    queryFn: () => request<{ authMode: 'guest' | 'account' }>('/bootstrap'),
+    staleTime: Infinity,
+    retry: false,
+  });
   const queryClient = useQueryClient();
   const sessionId = session?.user.id;
   useEffect(() => {
     // Clear the previous account, without cancelling reads mounted for the new one.
     queryClient.removeQueries({
       predicate: (query) =>
-        !sessionId || (query.queryKey[0] === 'user' && query.queryKey[1] !== sessionId),
+        query.queryKey[0] === 'user' && (!sessionId || query.queryKey[1] !== sessionId),
     });
   }, [queryClient, sessionId]);
   const [error, setError] = useState(''),
     [signingIn, setSigningIn] = useState(false),
+    [guestFailed, setGuestFailed] = useState(false),
     [menu, setMenu] = useState(false);
-  if (isPending)
+  useEffect(() => {
+    if (bootstrap.data?.authMode !== 'guest' || isPending || session || sessionError || guestFailed)
+      return;
+    let active = true;
+    setSigningIn(true);
+    void ensureGuestSession()
+      .then(() => refetch())
+      .catch(() => {
+        if (active) {
+          setError('无法建立浏览器身份，请重试');
+          setGuestFailed(true);
+        }
+      })
+      .finally(() => {
+        if (active) setSigningIn(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [bootstrap.data?.authMode, isPending, session, sessionError, guestFailed, refetch]);
+  if (
+    bootstrap.error ||
+    (session &&
+      bootstrap.data &&
+      Boolean(session.user.isAnonymous) !== (bootstrap.data.authMode === 'guest'))
+  )
+    return (
+      <main className="m-auto max-w-md p-6">
+        <Alert variant="destructive">
+          <AlertDescription>
+            {bootstrap.error
+              ? bootstrap.error.message
+              : '当前身份不适用于此部署模式，请退出后重新进入'}
+          </AlertDescription>
+        </Alert>
+        <Button
+          className="mt-4"
+          onClick={() => {
+            if (bootstrap.error) void bootstrap.refetch();
+            else void authClient.signOut();
+          }}
+        >
+          {bootstrap.error ? '重试' : '退出当前身份'}
+        </Button>
+      </main>
+    );
+  if (isPending || bootstrap.isPending || (!session && bootstrap.data?.authMode === 'guest'))
     return (
       <main className="flex min-h-dvh items-center justify-center p-6">
         <p role="status" className="text-sm text-muted-foreground">
-          正在恢复登录状态…
+          {error || sessionError?.message || (signingIn ? '正在建立浏览器身份…' : '正在恢复身份…')}
         </p>
+        {(guestFailed || sessionError) && (
+          <Button
+            onClick={() => {
+              setError('');
+              setGuestFailed(false);
+              void refetch();
+            }}
+          >
+            重试
+          </Button>
+        )}
       </main>
     );
   if (!session)
@@ -109,9 +175,24 @@ export function App() {
         </div>
       </AppShell>
     );
-  return <Workspace key={session.user.id} name={session.user.name} userId={session.user.id} />;
+  return (
+    <Workspace
+      key={session.user.id}
+      name={session.user.isAnonymous ? '此浏览器的访客' : session.user.name}
+      userId={session.user.id}
+      anonymous={Boolean(session.user.isAnonymous)}
+    />
+  );
 }
-function Workspace({ name, userId }: { name: string; userId: string }) {
+function Workspace({
+  name,
+  userId,
+  anonymous,
+}: {
+  name: string;
+  userId: string;
+  anonymous: boolean;
+}) {
   const { chat: id = '' } = useSearch({ from: '/' });
   const navigate = useNavigate({ from: '/' });
   const client = useQueryClient();
@@ -121,8 +202,13 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
   const loading = directoryQuery.isPending || directoryQuery.isFetching;
   const [menu, setMenu] = useState(false),
     [error, setError] = useState(''),
-    [creating, setCreating] = useState(false),
+    [settingsOpen, setSettingsOpen] = useState(false),
+    [settingsProvider, setSettingsProvider] = useState<string>(),
     [signingOut, setSigningOut] = useState(false);
+  const showSettings = useCallback((provider?: string) => {
+    setSettingsProvider(provider);
+    setSettingsOpen(true);
+  }, []);
   const refreshDirectory = useCallback(() => {
     void client.invalidateQueries({ queryKey: userKeys(userId).directory });
   }, [client, userId]);
@@ -133,40 +219,12 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
     },
     [navigate],
   );
-  useEffect(() => {
-    const data = directoryQuery.data;
-    if (
-      id &&
-      data &&
-      !directoryQuery.isFetching &&
-      !directoryQuery.hasNextPage &&
-      !data.pages.some((page) => page.items.some((item) => item.id === id))
-    ) {
-      choose(data.pages[0]?.items[0]?.id ?? '', true);
-    }
-  }, [id, directoryQuery.data, directoryQuery.isFetching, directoryQuery.hasNextPage, choose]);
   const deleted = (value: string) => {
     client.removeQueries({ queryKey: userKeys(userId).snapshot(value) });
     if (id === value) choose(items.find((item) => item.id !== value)?.id ?? '', true);
     refreshDirectory();
   };
-  const create = async () => {
-    if (creating) return;
-    setCreating(true);
-    try {
-      const chat = await request<{ id: string; title: string }>('/conversations', {
-        method: 'POST',
-      });
-      // Await the directory read before navigation, so stale cache cannot reject the new ID.
-      await client.invalidateQueries({ queryKey: userKeys(userId).directory });
-      choose(chat.id);
-      setError('');
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setCreating(false);
-    }
-  };
+  const create = () => choose('');
   const current = items.find((item) => item.id === id);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -192,11 +250,11 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
       <Button
         variant="outline"
         className="w-full justify-start"
-        disabled={creating}
+
         onClick={() => void create()}
       >
         <Plus className="size-4" />
-        {creating ? '创建中…' : '新建聊天'}
+        新建聊天
       </Button>
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         {loading && !items.length && (
@@ -267,12 +325,13 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
         directory={directory}
         title={id ? (current?.title ?? '聊天') : undefined}
         onNewChat={() => void create()}
-        creating={creating}
         footer={(collapsed) => (
           <AccountMenu
             name={name}
+            anonymous={anonymous}
             collapsed={collapsed}
             busy={signingOut}
+            onSettings={() => showSettings()}
             onSignOut={() => void signOut()}
           />
         )}
@@ -282,29 +341,26 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
             <AlertDescription>{error || directoryQuery.error?.message}</AlertDescription>
           </Alert>
         )}
-        {id ? (
-          <Suspense fallback={<ChatLoading />}>
-            <Chat
-              key={id}
-              id={id}
-              userId={userId}
-              onDirectoryChange={refreshDirectory}
-              onUnavailable={() => deleted(id)}
-            />
-          </Suspense>
-        ) : (
-          <div className="m-auto max-w-md px-6 py-12 text-center">
-            <MessageSquare className="mx-auto mb-5 size-8 text-muted-foreground" />
-            <h1 className="text-2xl font-semibold tracking-tight">从一个问题开始。</h1>
-            <p className="mt-3 mb-6 text-sm leading-relaxed text-muted-foreground">
-              提出问题、比较方案，或一起探索数据与想法。
-            </p>
-            <Button disabled={creating} onClick={() => void create()}>
-              开始新聊天
-              <ArrowRight className="size-4" />
-            </Button>
-          </div>
-        )}
+        <Suspense fallback={<ChatLoading />}>
+          <Chat
+            key={id}
+            id={id}
+            userId={userId}
+            onDirectoryChange={refreshDirectory}
+            onUnavailable={() => deleted(id)}
+            onCreated={(value) => {
+              refreshDirectory();
+              choose(value);
+            }}
+            onSettings={showSettings}
+          />
+        </Suspense>
+        <ModelSettingsDialog
+          userId={userId}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          initialProvider={settingsProvider}
+        />
       </AppShell>
     </ResourceDrafts>
   );
@@ -312,14 +368,18 @@ function Workspace({ name, userId }: { name: string; userId: string }) {
 
 function AccountMenu({
   name,
+  anonymous,
   collapsed,
   busy,
   onSignOut,
+  onSettings,
 }: {
   name: string;
+  anonymous: boolean;
   collapsed: boolean;
   busy: boolean;
   onSignOut: () => void;
+  onSettings: () => void;
 }) {
   return (
     <DropdownMenu>
@@ -343,7 +403,9 @@ function AccountMenu({
             <>
               <span className="min-w-0 flex-1 text-left">
                 <span className="block truncate text-sm font-medium">{name}</span>
-                <span className="block text-xs text-muted-foreground">个人账号</span>
+                <span className="block text-xs text-muted-foreground">
+                  {anonymous ? '身份保留在此浏览器' : '个人账号'}
+                </span>
               </span>
               <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
             </>
@@ -353,6 +415,10 @@ function AccountMenu({
       <DropdownMenuContent side="top" align="start" className="w-56">
         <DropdownMenuLabel className="truncate">{name}</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onSettings}>
+          <Settings />
+          模型与 API Key
+        </DropdownMenuItem>
         <DropdownMenuItem disabled={busy} onSelect={onSignOut}>
           <LogOut />
           {busy ? '正在退出…' : '退出登录'}
