@@ -34,6 +34,7 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
   const client = useQueryClient(),
     query = useQuery(modelSettingsOptions(userId));
   const [choice, setProvider] = useState<string>(),
+    [baseUrl, setBaseUrl] = useState<string>(),
     [key, setKey] = useState(''),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
@@ -56,6 +57,11 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
     if (choice === undefined && query.data) setProvider(provider);
   }, [choice, query.data, provider]);
   const current = query.data?.credentials.find((c) => c.provider === provider);
+  const defaultUrl = query.data?.providers.find((p) => p.id === provider)?.baseUrl ?? '';
+  const endpoint = baseUrl ?? current?.baseUrl ?? defaultUrl;
+  useEffect(() => {
+    if (baseUrl === undefined && current) setBaseUrl(endpoint);
+  }, [baseUrl, current, endpoint]);
   const write = async (remove = false) => {
     if (busy || !current) return;
     setBusy(true);
@@ -67,13 +73,13 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
         body: JSON.stringify(
           remove
             ? { expectedCurrentId: current.currentId }
-            : { apiKey: key, expectedCurrentId: current.currentId },
+            : { apiKey: key, baseUrl: endpoint, expectedCurrentId: current.currentId },
         ),
       });
       if (!alive.current) return;
       setKey('');
       setConfirmRemove(false);
-      setMessage(remove ? '已移除，未完成请求将无法继续使用此 Key' : '已保存，尚未验证供应商连接');
+      setMessage(remove ? '已移除，未完成请求将无法继续使用此 Key' : '已保存，尚未验证连接');
       await client.invalidateQueries({ queryKey: userKeys(userId).models });
     } catch (e) {
       if (alive.current) {
@@ -100,26 +106,22 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
         void write();
       }}
     >
+      <p className="text-sm text-muted-foreground">
+        配置适用于输入框当前选择的模型。Base URL 需支持该模型的 API 协议。
+      </p>
       <label className="block space-y-2">
-        供应商
-        <select
-          aria-label="供应商"
-          className="h-9 w-full rounded-md border bg-background px-3"
-          value={provider}
-          disabled={busy}
-          onChange={(e) => {
-            setProvider(e.target.value);
-            setKey('');
-            setMessage('');
-            setConfirmRemove(false);
-          }}
-        >
-          {query.data?.providers.map((p) => (
-            <option value={p.id} key={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        Base URL
+        <Input
+          aria-label="Base URL"
+          type="url"
+          required
+          autoComplete="off"
+          spellCheck={false}
+          value={endpoint}
+          disabled={busy || !query.data?.credentialStorageReady}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          placeholder="https://api.example.com/v1"
+        />
       </label>
       <p className="text-sm text-muted-foreground">
         当前来源：
@@ -148,12 +150,14 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
         </p>
       )}
       <p className="text-xs leading-relaxed text-muted-foreground">
-        替换 Key
+        修改 Base URL 或 Key
         只影响新请求。旧版本最多保留七天供已提交任务恢复；移除会撤销全部版本。更换浏览器或清除
         Cookie 后无法找回访客身份。部署者可以解密 Key。
       </p>
       <div className="flex gap-2">
-        <Button disabled={busy || !key.trim() || !query.data?.credentialStorageReady}>
+        <Button
+          disabled={busy || !key.trim() || !endpoint.trim() || !query.data?.credentialStorageReady}
+        >
           保存 Key
         </Button>
         <Button
@@ -167,7 +171,7 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
       </div>
       {confirmRemove && (
         <div role="alert" className="space-y-2 rounded-lg border p-3 text-sm">
-          <p>移除会撤销此供应商的全部 Key 版本，已提交任务的后续调用与恢复将失败。</p>
+          <p>移除会撤销当前配置的全部 Key 版本，已提交任务的后续调用与恢复将失败。</p>
           <div className="flex gap-2">
             <Button
               type="button"

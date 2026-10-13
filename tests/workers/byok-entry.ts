@@ -10,11 +10,14 @@ export class BYOKProbe extends ConversationAgent {
       ? String(this.ctx.storage.sql.exec('SELECT id FROM test_removed_model').one().id)
       : undefined;
     const record = (model: any, context: any, options: any) => {
-      this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS test_byok(model TEXT,version TEXT)');
       this.ctx.storage.sql.exec(
-        'INSERT INTO test_byok VALUES(?,?)',
+        'CREATE TABLE IF NOT EXISTS test_byok(model TEXT,version TEXT,base_url TEXT)',
+      );
+      this.ctx.storage.sql.exec(
+        'INSERT INTO test_byok VALUES(?,?,?)',
         model.id,
         options.apiKey?.split('-').at(-1) ?? 'missing',
+        model.baseUrl,
       );
       return provider.streamSimple(model, context, options);
     };

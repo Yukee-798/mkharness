@@ -37,7 +37,11 @@ app.get('/api/capabilities', (c) => c.json({ extensionIds: extensionIds(c.env) }
 app.get('/api/settings/models', async (c) => {
   const credentials = new ModelCredentials(c.env, c.get('userId'));
   return c.json({
-    providers: modelProviders.map(({ id, name }) => ({ id, name })),
+    providers: modelProviders.map(({ id, name, factory }) => ({
+      id,
+      name,
+      baseUrl: factory().baseUrl!,
+    })),
     modelCatalog: applicationModelCatalog(c.env, applicationModels(c.env)),
     credentials: await Promise.all(modelProviders.map((p) => credentials.metadata(p.id))),
     credentialStorageReady: credentials.storageReady,
@@ -56,7 +60,13 @@ app.on(['PUT', 'DELETE'], '/api/settings/model-credentials/:provider', async (c)
   const expected = z.uuid().nullable();
   const schema =
     c.req.method === 'PUT'
-      ? z.object({ apiKey: z.string(), expectedCurrentId: expected }).strict()
+      ? z
+          .object({
+            apiKey: z.string(),
+            baseUrl: z.string().max(2048).optional(),
+            expectedCurrentId: expected,
+          })
+          .strict()
       : z.object({ expectedCurrentId: expected }).strict();
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'invalid_credential_request');
@@ -65,7 +75,7 @@ app.on(['PUT', 'DELETE'], '/api/settings/model-credentials/:provider', async (c)
     'apiKey' in parsed.data
       ? await credentials.save(
           provider,
-          parsed.data as { apiKey: string; expectedCurrentId: string | null },
+          parsed.data as { apiKey: string; baseUrl?: string; expectedCurrentId: string | null },
         )
       : await credentials.remove(provider, parsed.data.expectedCurrentId),
   );

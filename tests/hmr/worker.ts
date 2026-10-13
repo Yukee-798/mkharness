@@ -13,7 +13,7 @@ export class ConversationAgent extends Base {
   protected override async credentials() {
     return {
       select: async () => ({ source: 'server' as const, fingerprint: 'fixture-only' }),
-      resolve: async () => 'fixture',
+      resolve: async () => ({ apiKey: 'fixture' }),
     };
   }
 

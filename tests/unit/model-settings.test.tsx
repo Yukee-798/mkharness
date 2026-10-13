@@ -7,6 +7,7 @@ import { userKeys } from '../../src/browser/queries';
 const metadata = {
   provider: 'openai',
   currentId: null,
+  baseUrl: null,
   configured: false,
   updatedAt: null,
   effectiveSource: 'none',
@@ -14,8 +15,8 @@ const metadata = {
 };
 const data = {
   providers: [
-    { id: 'openai', name: 'OpenAI' },
-    { id: 'deepseek', name: 'DeepSeek' },
+    { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1' },
+    { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com' },
   ],
   modelCatalog: {
     models: [],
@@ -32,6 +33,11 @@ it('keeps plaintext outside Query and storage, retains a failed draft and clears
   let writes = 0;
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
     if (init?.method === 'PUT') {
+      expect(JSON.parse(String(init.body))).toMatchObject({
+        baseUrl: 'https://custom.example.com/v1',
+        apiKey: 'CANARY-PRIVATE-KEY',
+      });
+      expect(String(_url)).toContain('/model-credentials/deepseek');
       writes++;
       return writes === 1
         ? Response.json(
@@ -56,11 +62,16 @@ it('keeps plaintext outside Query and storage, retains a failed draft and clears
   );
   const view = render(ui(true, 'deepseek'));
   await waitFor(() => expect(view.queryByLabelText('API Key')).not.toBeNull());
-  expect(view.getByLabelText('供应商')).toHaveProperty('value', 'deepseek');
+  expect(view.queryByRole('combobox')).toBeNull();
+  expect(view.getByLabelText('Base URL')).toHaveProperty('value', 'https://api.deepseek.com');
+  fireEvent.change(view.getByLabelText('Base URL'), {
+    target: { value: 'https://custom.example.com/v1' },
+  });
   fireEvent.change(view.getByLabelText('API Key'), { target: { value: 'CANARY-PRIVATE-KEY' } });
   fireEvent.click(view.getByRole('button', { name: '保存 Key' }));
   await waitFor(() => expect(view.queryByText('冲突')).not.toBeNull());
   expect((view.getByLabelText('API Key') as HTMLInputElement).value).toBe('CANARY-PRIVATE-KEY');
+  expect(view.getByLabelText('Base URL')).toHaveProperty('value', 'https://custom.example.com/v1');
   expect(
     JSON.stringify(
       client
@@ -75,7 +86,7 @@ it('keeps plaintext outside Query and storage, retains a failed draft and clears
   view.rerender(ui(false));
   view.rerender(ui(true));
   await waitFor(() => expect((view.getByLabelText('API Key') as HTMLInputElement).value).toBe(''));
-  expect(view.getByLabelText('供应商')).toHaveProperty('value', 'openai');
+  expect(view.getByLabelText('Base URL')).toHaveProperty('value', 'https://api.openai.com/v1');
   fireEvent.change(view.getByLabelText('API Key'), { target: { value: 'SECOND-PRIVATE-KEY' } });
   await act(async () => {
     client.setQueryData(userKeys('owner').models, {
@@ -86,6 +97,6 @@ it('keeps plaintext outside Query and storage, retains a failed draft and clears
       },
     });
   });
-  expect(view.getByLabelText('供应商')).toHaveProperty('value', 'openai');
+  expect(view.getByLabelText('Base URL')).toHaveProperty('value', 'https://api.openai.com/v1');
   expect((view.getByLabelText('API Key') as HTMLInputElement).value).toBe('SECOND-PRIVATE-KEY');
 });

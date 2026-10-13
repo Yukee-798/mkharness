@@ -7,6 +7,7 @@ import {
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
 import { AppError, type StoredRequest } from '../shared/contracts';
+import { modelEndpointFetch } from './model-endpoint';
 import type { ModelCredentials } from './model-credentials';
 import {
   InboxDoc,
@@ -191,6 +192,15 @@ export async function bindExecution(
     })();
     return out;
   };
+  const requestOptions = <T extends { fetch?: typeof fetch }>(
+    model: { id: string; baseUrl: string },
+    options: T | undefined,
+  ): T | undefined => {
+    // Bundled catalog destinations remain native; only user overrides need the egress guard.
+    // This avoids two extra DNS subrequests per normal model call.
+    if (model.baseUrl === models.getModel(base.id, model.id)?.baseUrl) return options;
+    return { ...options, fetch: modelEndpointFetch(model.baseUrl, options?.fetch) } as T;
+  };
   boundProviders.get(models)?.set(id, base.id);
   models.setProvider({
     ...base,
@@ -201,19 +211,26 @@ export async function bindExecution(
       apiKey: {
         name: 'Frozen task credential',
         resolve: async () => ({
-          auth: {
-            apiKey: await (
-              await credentials()
-            ).resolve(execution.provider, execution.credentialRef),
-          },
+          auth: await (await credentials()).resolve(execution.provider, execution.credentialRef),
           source: 'task-bound',
         }),
       },
     },
     stream: (model, context, options) =>
-      relay(() => base.stream({ ...model, provider: base.id }, context, options), model),
+      relay(
+        () => base.stream({ ...model, provider: base.id }, context, requestOptions(model, options)),
+        model,
+      ),
     streamSimple: (model, context, options) =>
-      relay(() => base.streamSimple({ ...model, provider: base.id }, context, options), model),
+      relay(
+        () =>
+          base.streamSimple(
+            { ...model, provider: base.id },
+            context,
+            requestOptions(model, options),
+          ),
+        model,
+      ),
   });
   return id;
 }
@@ -233,7 +250,7 @@ function safeError(message: AssistantMessage, trustedCredential = false): Assist
         ? '429 rate limit: 模型服务暂时限流，请稍后重试'
         : /maximum context length|context.?window|context.?length/i.test(text)
           ? 'maximum context length exceeded'
-          : '模型服务请求失败，请检查凭据与供应商状态后发起新请求。';
+          : '模型服务请求失败，请检查 Base URL、API Key 与服务状态后发起新请求。';
   return {
     ...message,
     content: [],

@@ -21,17 +21,31 @@ test('native anonymous identity, empty hero, metadata-only settings and browser 
   if (settings.modelCatalog.models.length > 5)
     await page.getByPlaceholder('搜索模型…').fill(selected.name);
   await page.getByRole('option', { name: selected.name, exact: true }).click();
+  await page.getByRole('button', { name: '账号：此浏览器的访客' }).click();
+  await page.getByRole('menuitem', { name: '模型与 API Key' }).click();
+  await expect(page.getByLabel('Base URL', { exact: true })).toHaveValue(
+    'https://api.deepseek.com',
+  );
+  await expect(page.getByLabel('Base URL', { exact: true })).toHaveAttribute('data-slot', 'input');
+  await page.getByRole('button', { name: '关闭' }).click();
   await page.getByLabel('消息', { exact: true }).fill('retained draft');
   await page.getByRole('button', { name: '发送', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.getByLabel('供应商', { exact: true })).toHaveValue('deepseek');
+  await expect(page.getByLabel('Base URL', { exact: true })).toHaveValue(
+    'https://api.deepseek.com',
+  );
+  await expect(page.getByRole('dialog').locator('select')).toHaveCount(0);
   await expect(page.getByLabel('消息', { exact: true })).toHaveValue('retained draft');
   expect(calls.filter((p) => p === 'POST /api/conversations')).toHaveLength(0);
+  await page.getByLabel('Base URL', { exact: true }).fill('https://custom.example.com/v1');
   await page.getByLabel('API Key', { exact: true }).fill('E2E-CANARY-PERSONAL');
   await page.getByRole('button', { name: '保存 Key' }).click();
-  await expect(page.getByText('已保存，尚未验证供应商连接')).toBeVisible();
+  await expect(page.getByText('已保存，尚未验证连接')).toBeVisible();
   const data = await (await context.request.get('/api/settings/models')).json();
-  expect(data.credentials.find((c: any) => c.provider === 'deepseek').effectiveSource).toBe('user');
+  expect(data.credentials.find((c: any) => c.provider === 'deepseek')).toMatchObject({
+    effectiveSource: 'user',
+    baseUrl: 'https://custom.example.com/v1',
+  });
   expect(JSON.stringify(data)).not.toContain('E2E-CANARY');
   await page.getByRole('button', { name: '关闭' }).click();
   await page.reload();

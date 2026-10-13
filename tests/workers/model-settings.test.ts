@@ -58,7 +58,11 @@ it('only returns metadata on credential writes and keeps other owners separate',
     {
       method: 'PUT',
       headers: a.headers,
-      body: JSON.stringify({ apiKey: 'http-canary', expectedCurrentId: null }),
+      body: JSON.stringify({
+        apiKey: 'http-canary',
+        baseUrl: 'https://gateway.example.com/v1',
+        expectedCurrentId: null,
+      }),
     },
     a.settingsEnv,
   );
@@ -67,6 +71,7 @@ it('only returns metadata on credential writes and keeps other owners separate',
   expect(body).not.toContain('http-canary');
   expect(body).not.toContain('ciphertext');
   const first = JSON.parse(body);
+  expect(first.baseUrl).toBe('https://gateway.example.com/v1');
   const conflict = await app.request(
     origin + '/api/settings/model-credentials/openai',
     {
@@ -118,6 +123,16 @@ it('enforces session, Origin, registered providers and bounded strict input befo
   for (const body of [
     '{',
     '{}',
+    ...[
+      'http://example.com',
+      'https://localhost',
+      'https://127.0.0.1',
+      'https://10.0.0.1',
+      'https://user:pass@example.com',
+      'https://example.com?key=secret',
+      'https://example.com#secret',
+      '',
+    ].map((baseUrl) => JSON.stringify({ apiKey: 'valid', baseUrl, expectedCurrentId: null })),
     JSON.stringify({ apiKey: 'valid', expectedCurrentId: null, owner: 'someone' }),
     JSON.stringify({ apiKey: 'a'.repeat(8193), expectedCurrentId: null }),
   ])

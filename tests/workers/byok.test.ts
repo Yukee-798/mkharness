@@ -175,7 +175,11 @@ it('reconciles an already completed native receipt without its removed model or 
 it('freezes real D1 key versions through queue, duplicate acceptance and DO reconstruction', async () => {
   const { store, stub: original } = await fixture();
   let stub = original;
-  const first = await store.save('fixture', { apiKey: 'key-first', expectedCurrentId: null });
+  const first = await store.save('fixture', {
+    apiKey: 'key-first',
+    baseUrl: 'https://first.example.com/v1',
+    expectedCurrentId: null,
+  });
   const a = {
     runId: crypto.randomUUID(),
     text: 'slow first',
@@ -184,6 +188,7 @@ it('freezes real D1 key versions through queue, duplicate acceptance and DO reco
   expect(await stub.submitRun(a)).toMatchObject({ accepted: true });
   const second = await store.save('fixture', {
     apiKey: 'key-second',
+    baseUrl: 'https://second.example.com/v1',
     expectedCurrentId: first.currentId,
   });
   const b = {
@@ -192,7 +197,11 @@ it('freezes real D1 key versions through queue, duplicate acceptance and DO reco
     config: { provider: 'fixture', modelId: 'fixture-pro', thinkingLevel: 'high' as const },
   };
   expect(await stub.submitRun(b)).toMatchObject({ accepted: true });
-  await store.save('fixture', { apiKey: 'key-third', expectedCurrentId: second.currentId });
+  await store.save('fixture', {
+    apiKey: 'key-third',
+    baseUrl: 'https://third.example.com/v1',
+    expectedCurrentId: second.currentId,
+  });
   expect(await stub.submitRun(b)).toMatchObject({ accepted: true });
   await abortAllDurableObjects();
   stub = (env as any).BYOK_PROBES.get(stub.id);
@@ -207,7 +216,9 @@ it('freezes real D1 key versions through queue, duplicate acceptance and DO reco
   const calls = await stub.calls();
   expect(
     calls.every((c: any) =>
-      c.model === 'fixture' ? c.version === 'first' : c.version === 'second',
+      c.model === 'fixture'
+        ? c.version === 'first' && c.base_url === 'https://first.example.com/v1'
+        : c.version === 'second' && c.base_url === 'https://second.example.com/v1',
     ),
   ).toBe(true);
   expect(calls.some((c: any) => c.model === 'fixture-pro' && c.version === 'second')).toBe(true);
@@ -239,6 +250,7 @@ it('inherits real D1 credentials into blocking and overlapping background compac
   const { store } = await fixture();
   const first = await store.save('fixture', {
     apiKey: 'CANARY-NONSECRET-k1',
+    baseUrl: 'https://first.example.com/v1',
     expectedCurrentId: null,
   });
   const refs = { k1: { source: 'user', id: first.currentId } };
@@ -265,7 +277,12 @@ it('inherits real D1 credentials into blocking and overlapping background compac
   expect(
     done.log
       .filter((r: any) => r.event === 'provider')
-      .every((r: any) => r.data.version === 'k1' && r.data.keyMatches),
+      .every(
+        (r: any) =>
+          r.data.version === 'k1' &&
+          r.data.keyMatches &&
+          r.data.baseUrl === 'https://first.example.com/v1',
+      ),
   ).toBe(true);
   const background = (env as any).BINDING_PROBES.getByName(crypto.randomUUID());
   await background.useD1Credentials(owner, refs);
@@ -278,6 +295,7 @@ it('inherits real D1 credentials into blocking and overlapping background compac
   );
   const second = await store.save('fixture', {
     apiKey: 'CANARY-NONSECRET-k2',
+    baseUrl: 'https://second.example.com/v1',
     expectedCurrentId: first.currentId,
   });
   await background.useD1Credentials(owner, {
@@ -292,6 +310,7 @@ it('inherits real D1 credentials into blocking and overlapping background compac
   );
   expect(after.log.find((r: any) => r.event === 'provider' && r.data.summary).data).toMatchObject({
     version: 'k1',
+    baseUrl: 'https://first.example.com/v1',
     keyMatches: true,
     thinking: 'high',
   });

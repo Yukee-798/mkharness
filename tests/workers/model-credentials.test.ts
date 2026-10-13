@@ -34,7 +34,7 @@ it('stores authenticated ciphertext while metadata and other owners cannot expos
   expect(JSON.stringify(rows.results)).not.toContain(canary);
   expect(rows.results[0].nonce).toBeTruthy();
   const reference = await store.select('openai');
-  expect(await store.resolve('openai', reference)).toBe(canary);
+  expect(await store.resolve('openai', reference)).toEqual({ apiKey: canary });
   await expect(
     new ModelCredentials(configured(), other).resolve('openai', reference),
   ).rejects.toMatchObject({ code: 'credential_unavailable' });
@@ -57,7 +57,7 @@ it('atomically arbitrates competing replacements and retains the accepted old ve
   expect(competing.find((result) => result.status === 'rejected')).toMatchObject({
     reason: { code: 'credential_conflict' },
   });
-  expect(await store.resolve('openai', reference)).toBe(canary);
+  expect(await store.resolve('openai', reference)).toEqual({ apiKey: canary });
   expect(
     await env.DB.prepare('SELECT COUNT(*) AS n FROM model_credentials WHERE owner=?')
       .bind(id)
@@ -173,5 +173,32 @@ it('freezes server credentials and never turns a user failure into deployment fa
   await store.remove('openai', (await store.metadata('openai')).currentId);
   await expect(store.resolve('openai', personal)).rejects.toMatchObject({
     code: 'credential_unavailable',
+  });
+});
+
+it('binds the destination to the immutable encrypted Key version, including after reconstruction', async () => {
+  const id = await owner(),
+    store = new ModelCredentials(configured(), id);
+  const first = await store.save('openai', {
+    apiKey: canary,
+    baseUrl: 'https://first.example.com/v1/',
+    expectedCurrentId: null,
+  });
+  const reference = await store.select('openai');
+  const second = await store.save('openai', {
+    apiKey: 'new-key',
+    baseUrl: 'https://second.example.com/v1',
+    expectedCurrentId: first.currentId,
+  });
+  expect(second.baseUrl).toBe('https://second.example.com/v1');
+  expect(await new ModelCredentials(configured(), id).resolve('openai', reference)).toEqual({
+    apiKey: canary,
+    baseUrl: 'https://first.example.com/v1',
+  });
+  await env.DB.prepare('UPDATE model_credentials SET base_url=? WHERE id=?')
+    .bind('https://attacker.example.com/v1', first.currentId)
+    .run();
+  await expect(store.resolve('openai', reference)).rejects.toMatchObject({
+    code: 'credential_decryption_failed',
   });
 });

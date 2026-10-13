@@ -22,7 +22,7 @@ The template provides execution and application infrastructure. Product-specific
 
 | Capability                         | Included capabilities                                                                                                                                                              |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Guest access and personal API keys | Better Auth anonymous sessions by default; optional Google sign-in; client settings for OpenAI, Anthropic, and DeepSeek keys.                                                      |
+| Guest access and personal API keys | Better Auth anonymous sessions by default; optional Google sign-in; client settings for Base URL and API Key.                                                                      |
 | Durable Agent execution            | PiHarness in a conversation-scoped Durable Object; queued submissions, Stop, persisted history, and reconstruction after runtime interruption. Closing a tab detaches observation. |
 | Streaming chat                     | assistant-ui with AG-UI/SSE, reasoning and tool activity, model/thinking selection, conversation history, and timing decorations.                                                  |
 | Extensions on both sides           | Native Pi Extensions on the server; assistant-ui Toolkits in the browser; shared resource, action, and progress contracts.                                                         |
@@ -46,11 +46,11 @@ pnpm dev
 
 Open **http://localhost:5173**:
 
-1. Open the visitor menu at the bottom of the sidebar → **模型与 API Key** (Models & API Key).
-2. Select your provider, enter its API key, and click **保存 Key** (Save Key).
-3. Select a matching model and thinking level in the composer, then send a message.
+1. Select a model in the composer, then open the visitor menu at the bottom of the sidebar → **模型与 API Key** (Models & API Key).
+2. Configure the **Base URL** and **API Key**, then click **保存 Key** (Save Key).
+3. Select a thinking level in the composer and send a message.
 
-The app currently uses Chinese UI labels; these README files are available in both languages. Saving a key does not validate it with the provider. The first model request uses it.
+The app currently uses Chinese UI labels; these README files are available in both languages. Saving a key does not validate it with the provider. The first model request uses it. Custom Base URLs must be public HTTPS endpoints supporting the selected model’s native API (OpenAI Responses, Anthropic Messages, or DeepSeek Chat Completions); changing the address does not switch protocols. Redirects and private-network destinations are rejected.
 
 `pnpm setup` generates missing local authentication and encryption secrets and preserves existing values. `.dev.vars` is ignored by Git. Use the same origin (`localhost`, rather than mixing it with `127.0.0.1`) and retain local secrets across restarts.
 
@@ -64,7 +64,7 @@ Try the built-in example: “Use `describe_text` to count the characters in `Hel
 
 - Personal keys take precedence over an explicitly enabled deployment key for the same provider.
 - Each accepted request freezes its model, thinking level, and credential version. Queue execution, background compaction, and runtime reconstruction use that binding.
-- Replacing a key affects new requests. Retired versions are retained for up to seven days for recovery; removing a provider's key revokes all its versions.
+- Changing a Base URL or key affects new requests; each accepted task keeps the original pair. Retired versions are retained for up to seven days for recovery; removing a provider's key revokes all its versions.
 - Invalid, revoked, expired, or unavailable bound credentials fail explicitly. An accepted task never silently switches to a server key.
 
 The default `ALLOW_SERVER_MODEL_KEY=0` requires personal keys. To offer a deployment default, explicitly set it to `1` and configure `MODEL_API_KEY`; provider usage is then billed to that key's owner.

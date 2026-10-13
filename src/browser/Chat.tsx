@@ -81,6 +81,7 @@ export function Chat({
   onUnavailable,
   onCreated,
   onSettings,
+  onModelProviderChange,
 }: {
   id: string;
   userId: string;
@@ -88,6 +89,7 @@ export function Chat({
   onUnavailable?: () => void;
   onCreated?: (id: string) => void;
   onSettings?: (provider?: string) => void;
+  onModelProviderChange?: (provider: string | undefined) => void;
 }) {
   const unavailable = useRef(onUnavailable);
   unavailable.current = onUnavailable;
@@ -113,6 +115,9 @@ export function Chat({
   const [remoteSending, setRemoteSending] = useState(false);
   const catalog = settings.data?.modelCatalog ?? snapshot?.modelCatalog;
   const selected = selection ?? snapshot?.selection ?? catalog?.defaultSelection;
+  useEffect(() => {
+    onModelProviderChange?.(selected?.provider);
+  }, [selected?.provider, onModelProviderChange]);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [connection, setConnection] = useState<'reconnecting' | 'recovered'>();
   useEffect(() => () => clearTimeout(reconnectTimer.current), []);
@@ -189,7 +194,7 @@ export function Chat({
           'none')
     ) {
       onSettings?.(selected?.provider);
-      throw new Error('请先配置所选供应商的 API Key');
+      throw new Error('请先配置所选模型的 Base URL 与 API Key');
     }
     try {
       await send(message, source, selected);

@@ -94,6 +94,32 @@ function entities(text: string) {
       ]!,
   );
 }
+export async function resolvePublicAddresses(
+  host: string,
+  signal: AbortSignal,
+  fetcher: typeof fetch = fetch,
+) {
+  const answers = await Promise.all(
+    ['A', 'AAAA'].map(async (type) => {
+      const url = new URL('https://cloudflare-dns.com/dns-query');
+      url.searchParams.set('name', host);
+      url.searchParams.set('type', type);
+      const response = await fetcher(url, {
+        headers: { Accept: 'application/dns-json' },
+        signal,
+      });
+      if (!response.ok) throw new Error('Public DNS lookup failed');
+      const body = JSON.parse(await boundedText(response, 65536)) as {
+        Answer?: { type: number; data: unknown }[];
+      };
+      return (body.Answer ?? [])
+        .filter((a) => a.type === 1 || a.type === 28)
+        .map((a) => String(a.data));
+    }),
+  );
+  return answers.flat();
+}
+
 type Dependencies = {
   fetcher?: typeof fetch;
   resolve?: (host: string, signal: AbortSignal) => Promise<string[]>;
@@ -103,27 +129,7 @@ export function createWebReader(deps: Dependencies = {}) {
   const fetcher = deps.fetcher ?? fetch;
   const resolve =
     deps.resolve ??
-    (async (host: string, signal: AbortSignal) => {
-      const answers = await Promise.all(
-        ['A', 'AAAA'].map(async (type) => {
-          const url = new URL('https://cloudflare-dns.com/dns-query');
-          url.searchParams.set('name', host);
-          url.searchParams.set('type', type);
-          const response = await fetcher(url, {
-            headers: { Accept: 'application/dns-json' },
-            signal,
-          });
-          if (!response.ok) throw new Error('Public DNS lookup failed');
-          const body = JSON.parse(await boundedText(response, 65536)) as {
-            Answer?: { type: number; data: unknown }[];
-          };
-          return (body.Answer ?? [])
-            .filter((a) => a.type === 1 || a.type === 28)
-            .map((a) => String(a.data));
-        }),
-      );
-      return answers.flat();
-    });
+    ((host: string, signal: AbortSignal) => resolvePublicAddresses(host, signal, fetcher));
   return async (raw: string) => {
     // Validate before starting network work; the deadline covers DNS, redirects and body reads.
     let target = webURL(raw);

@@ -79,12 +79,10 @@ export class BindingProbe extends Agent<any> {
                   }>('d1-credentials');
                   if (binding)
                     return {
-                      auth: {
-                        apiKey: await new ModelCredentials(this.env, binding.owner).resolve(
-                          'fixture',
-                          binding.refs[version],
-                        ),
-                      },
+                      auth: await new ModelCredentials(this.env, binding.owner).resolve(
+                        'fixture',
+                        binding.refs[version],
+                      ),
                       source: version,
                     };
                   const disabled = (await ctx.storage.get<string[]>('disabled')) ?? [];
@@ -210,6 +208,7 @@ export class BindingProbe extends Agent<any> {
       provider: model.provider,
       model: model.id,
       contextWindow: model.contextWindow,
+      baseUrl: model.baseUrl,
       thinking: options.reasoning ?? 'off',
       keyMatches: options.apiKey === 'CANARY-NONSECRET-' + version,
       sessionId: options.sessionId,

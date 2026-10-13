@@ -204,6 +204,7 @@ function Workspace({
     [error, setError] = useState(''),
     [settingsOpen, setSettingsOpen] = useState(false),
     [settingsProvider, setSettingsProvider] = useState<string>(),
+    [activeProvider, setActiveProvider] = useState<string>(),
     [signingOut, setSigningOut] = useState(false);
   const showSettings = useCallback((provider?: string) => {
     setSettingsProvider(provider);
@@ -331,7 +332,7 @@ function Workspace({
             anonymous={anonymous}
             collapsed={collapsed}
             busy={signingOut}
-            onSettings={() => showSettings()}
+            onSettings={() => showSettings(activeProvider)}
             onSignOut={() => void signOut()}
           />
         )}
@@ -353,6 +354,7 @@ function Workspace({
               choose(value);
             }}
             onSettings={showSettings}
+            onModelProviderChange={setActiveProvider}
           />
         </Suspense>
         <ModelSettingsDialog

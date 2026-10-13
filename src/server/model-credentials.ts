@@ -1,3 +1,4 @@
+import { modelBaseUrl } from './model-endpoint';
 import { AppError } from '../shared/contracts';
 import type { CredentialMetadata, CredentialRef } from '../shared/model-settings';
 export type CredentialEnvironment = {
@@ -42,10 +43,10 @@ export class ModelCredentials {
   }
   private current(provider: string) {
     return this.env.DB.prepare(
-      'SELECT id,created_at FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL',
+      'SELECT id,created_at,base_url FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL',
     )
       .bind(this.owner, provider)
-      .first<{ id: string; created_at: number }>();
+      .first<{ id: string; created_at: number; base_url: string | null }>();
   }
   async metadata(provider: string): Promise<CredentialMetadata> {
     const row = await this.current(provider),
@@ -53,6 +54,7 @@ export class ModelCredentials {
     return {
       provider,
       currentId: row?.id ?? null,
+      baseUrl: row?.base_url ?? null,
       configured: !!row,
       updatedAt: row?.created_at ?? null,
       effectiveSource: row ? 'user' : serverDefaultAllowed ? 'server' : 'none',
@@ -66,7 +68,7 @@ export class ModelCredentials {
   }
   async save(
     provider: string,
-    input: { apiKey: string; expectedCurrentId: string | null },
+    input: { apiKey: string; baseUrl?: string; expectedCurrentId: string | null },
   ): Promise<CredentialMetadata> {
     const text = input.apiKey.trim();
     if (
@@ -77,11 +79,12 @@ export class ModelCredentials {
       new TextEncoder().encode(text).byteLength > 8192
     )
       throw new AppError(400, 'invalid_api_key', 'Key 不能为空、包含控制字符或超过 8 KiB');
+    const baseUrl = input.baseUrl === undefined ? null : modelBaseUrl(input.baseUrl);
     const id = crypto.randomUUID(),
       time = this.now(),
       nonce = crypto.getRandomValues(new Uint8Array(12));
     const ciphertext = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: nonce, additionalData: aad(id, this.owner, provider) },
+      { name: 'AES-GCM', iv: nonce, additionalData: aad(id, this.owner, provider, baseUrl) },
       await this.master(),
       new TextEncoder().encode(text),
     );
@@ -91,7 +94,7 @@ export class ModelCredentials {
         'UPDATE model_credentials SET retired_at=? WHERE owner=? AND provider=? AND id=? AND retired_at IS NULL AND (SELECT COUNT(*) FROM model_credentials WHERE owner=? AND provider=?)<20',
       ).bind(time, this.owner, provider, input.expectedCurrentId, this.owner, provider),
       this.env.DB.prepare(
-        'INSERT INTO model_credentials(id,owner,provider,ciphertext,nonce,envelope_version,created_at) SELECT ?,?,?,?,?,1,? WHERE (changes()=1 OR (? IS NULL AND NOT EXISTS(SELECT 1 FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL))) AND (SELECT COUNT(*) FROM model_credentials WHERE owner=? AND provider=?)<20 RETURNING id',
+        'INSERT INTO model_credentials(id,owner,provider,ciphertext,nonce,envelope_version,created_at,base_url) SELECT ?,?,?,?,?,1,?,? WHERE (changes()=1 OR (? IS NULL AND NOT EXISTS(SELECT 1 FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL))) AND (SELECT COUNT(*) FROM model_credentials WHERE owner=? AND provider=?)<20 RETURNING id',
       ).bind(
         id,
         this.owner,
@@ -99,6 +102,7 @@ export class ModelCredentials {
         encode(new Uint8Array(ciphertext)),
         encode(nonce),
         time,
+        baseUrl,
         input.expectedCurrentId,
         this.owner,
         provider,
@@ -149,7 +153,7 @@ export class ModelCredentials {
     if (row) return { source: 'user', id: row.id };
     if (this.serverAllowed(provider))
       return { source: 'server', fingerprint: await this.fingerprint(provider) };
-    throw new AppError(400, 'credential_required', '请先配置此供应商的个人模型凭据');
+    throw new AppError(400, 'credential_required', '请先配置所选模型的 Base URL 与 API Key');
   }
   private async fingerprint(provider: string) {
     return encode(
@@ -163,7 +167,10 @@ export class ModelCredentials {
       ),
     );
   }
-  async resolve(provider: string, ref: CredentialRef): Promise<string> {
+  async resolve(
+    provider: string,
+    ref: CredentialRef,
+  ): Promise<{ apiKey: string; baseUrl?: string }> {
     if (ref.source === 'server') {
       if (!this.serverAllowed(provider))
         throw new AppError(503, 'credential_unavailable', '原请求的部署凭据当前不可用');
@@ -173,10 +180,10 @@ export class ModelCredentials {
           'credential_configuration_changed',
           '原请求的部署凭据已更改，请发起新请求',
         );
-      return this.env.MODEL_API_KEY!;
+      return { apiKey: this.env.MODEL_API_KEY! };
     }
     const row = await this.env.DB.prepare(
-      'SELECT ciphertext,nonce,envelope_version,retired_at FROM model_credentials WHERE owner=? AND provider=? AND id=?',
+      'SELECT ciphertext,nonce,envelope_version,retired_at,base_url FROM model_credentials WHERE owner=? AND provider=? AND id=?',
     )
       .bind(this.owner, provider, ref.id)
       .first<{
@@ -184,6 +191,7 @@ export class ModelCredentials {
         nonce: string;
         envelope_version: number;
         retired_at: number | null;
+        base_url: string | null;
       }>();
     if (!row || (row.retired_at !== null && this.now() >= row.retired_at + RETENTION))
       throw new AppError(
@@ -195,17 +203,18 @@ export class ModelCredentials {
     try {
       if (row.envelope_version !== 1 || decode(row.nonce).length !== 12)
         throw new Error('invalid envelope');
-      return new TextDecoder('utf-8', { fatal: true }).decode(
+      const apiKey = new TextDecoder('utf-8', { fatal: true }).decode(
         await crypto.subtle.decrypt(
           {
             name: 'AES-GCM',
             iv: decode(row.nonce),
-            additionalData: aad(ref.id, this.owner, provider),
+            additionalData: aad(ref.id, this.owner, provider, row.base_url),
           },
           key,
           decode(row.ciphertext),
         ),
       );
+      return { apiKey, ...(row.base_url ? { baseUrl: modelBaseUrl(row.base_url) } : {}) };
     } catch {
       throw new AppError(
         503,
@@ -222,6 +231,9 @@ function encode(bytes: Uint8Array) {
 function decode(text: string) {
   return Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
 }
-function aad(id: string, owner: string, provider: string) {
-  return new TextEncoder().encode(JSON.stringify([1, id, owner, provider]));
+function aad(id: string, owner: string, provider: string, baseUrl: string | null) {
+  // The destination is authenticated with the Key; editing it cannot redirect a stored secret.
+  return new TextEncoder().encode(
+    JSON.stringify([1, id, owner, provider, ...(baseUrl ? [baseUrl] : [])]),
+  );
 }

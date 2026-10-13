@@ -24,7 +24,7 @@ it('restores a background compaction binding without resolving unrelated complet
   const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
   const credentials = async () => ({
     select: async () => execution.credentialRef,
-    resolve: async () => 'original-key',
+    resolve: async () => ({ apiKey: 'original-key' }),
   });
   const old = {
     ...execution,
@@ -77,7 +77,10 @@ it('refuses an unaccepted removed model rather than inheriting a newer model', a
           },
         },
       ],
-      async () => ({ select: async () => execution.credentialRef, resolve: async () => 'key' }),
+      async () => ({
+        select: async () => execution.credentialRef,
+        resolve: async () => ({ apiKey: 'key' }),
+      }),
       context,
     ),
   ).rejects.toMatchObject({ code: 'execution_model_unavailable' });
@@ -86,7 +89,7 @@ it('validates a second model even when its credential alias is already installed
   const models = executionModels(fixtureModels());
   const credentials = async () => ({
     select: async () => execution.credentialRef,
-    resolve: async () => 'key',
+    resolve: async () => ({ apiKey: 'key' }),
   });
   await bindExecution(models, execution, credentials);
   await expect(
@@ -114,7 +117,7 @@ it('normalizes budget refusals before commit rather than leaking a bound provide
   const models = executionModels(fixtureModels());
   const id = await bindExecution(models, execution, async () => ({
     select: async () => execution.credentialRef,
-    resolve: async () => 'key',
+    resolve: async () => ({ apiKey: 'key' }),
   }));
   const limited = withRunLimits(
     models,
@@ -137,9 +140,41 @@ it('does not persist supplier error bodies that echo the key', async () => {
   const models = executionModels(base);
   const id = await bindExecution(models, execution, async () => ({
     select: async () => execution.credentialRef,
-    resolve: async () => 'CANARY-KEY',
+    resolve: async () => ({ apiKey: 'CANARY-KEY' }),
   }));
   const result = await models.completeSimple(models.getModel(id, 'fixture')!, { messages: [] });
   expect(result.stopReason).toBe('error');
   expect(JSON.stringify(result)).not.toContain('CANARY-KEY');
+});
+
+it('uses native auth Base URL overrides without changing model identity, protocol or context window', async () => {
+  const base = fixtureModels(),
+    provider = base.getProvider('fixture')!,
+    seen: any[] = [];
+  base.setProvider({
+    ...provider,
+    streamSimple: (model, context, options) => {
+      seen.push({ model, apiKey: options?.apiKey });
+      return provider.streamSimple(model, context, options);
+    },
+  });
+  const models = executionModels(base),
+    original = base.getModel('fixture', 'fixture')!;
+  const alias = await bindExecution(models, execution, async () => ({
+    select: async () => execution.credentialRef,
+    resolve: async () => ({ apiKey: 'frozen-key', baseUrl: 'https://custom.example.com/v1' }),
+  }));
+  await models.completeSimple(models.getModel(alias, 'fixture')!, { messages: [] });
+  expect(seen).toHaveLength(1);
+  expect(seen[0]).toMatchObject({
+    model: {
+      id: original.id,
+      provider: original.provider,
+      api: original.api,
+      contextWindow: original.contextWindow,
+      baseUrl: 'https://custom.example.com/v1',
+    },
+    apiKey: 'frozen-key',
+  });
+  expect(original.baseUrl).not.toBe('https://custom.example.com/v1');
 });
