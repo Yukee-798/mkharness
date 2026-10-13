@@ -8,7 +8,7 @@
 
 **本地启动，无需登录；在界面填写自己的 API Key；同一套应用可部署到 Cloudflare。**
 
-v0.1.0 · [MIT](LICENSE)
+[MIT](LICENSE)
 
 [快速开始](#快速开始) · [API Key](#免登录与-api-key) · [部署](#部署到-cloudflare) · [扩展](#扩展-mkharness) · [文档](#文档)
 
@@ -20,7 +20,7 @@ v0.1.0 · [MIT](LICENSE)
 
 ## 核心能力
 
-| 能力                 | v0.1.0 已包含                                                                                                     |
+| 能力                 | 已包含能力                                                                                                        |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | 免登录与个人 API Key | 默认 Better Auth 匿名会话；可选 Google 登录；客户端配置 OpenAI、Anthropic 和 DeepSeek Key。                       |
 | 持久化 Agent 执行    | 每个聊天由独立 Durable Object 承载 PiHarness；支持排队、Stop、完整历史和 runtime 中断后重建。关闭页面只断开观察。 |
@@ -71,7 +71,7 @@ pnpm dev
 
 ## 部署到 Cloudflare
 
-部署目标为 **Cloudflare Workers + D1 + Durable Objects**。首次部署需要创建资源和配置 Secrets；v0.1.0 暂未提供自动化一键部署流程。
+部署目标为 **Cloudflare Workers + D1 + Durable Objects**。首次部署需要创建资源和配置 Secrets；暂未提供自动化一键部署流程。
 
 ### 1. 创建数据库并配置应用
 
@@ -150,9 +150,9 @@ flowchart LR
 
 Pi 负责执行历史与结果；Query 负责读取缓存；assistant-ui 负责聊天展示。提交、观察和 Stop 独立。远程副作用恢复需要验证供应商的幂等或调和契约，持久化本身不保证操作只执行一次。
 
-## 版本状态与开发
+## 开发与范围
 
-**v0.1.0 是早期的开源基础版本。** 附件、R2 素材、云端电脑/沙箱、每用户 MCP OAuth、支付和订阅不在本期范围。图片/视频生成需要接入对应服务扩展，模板未内置生成供应商。接口可能随迭代调整。
+**MkHarness 聚焦 Agent 基础设施。** 附件、R2 素材、云端电脑/沙箱、每用户 MCP OAuth、支付和订阅不在本期范围。图片/视频生成需要接入对应服务扩展，模板未内置生成供应商。接口可能随迭代调整。
 
 当前保留两个用于逐任务模型配置的依赖补丁，原因及移除条件见 [`patches/README.md`](patches/README.md)。
 

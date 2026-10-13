@@ -8,7 +8,7 @@ Build an Agent app with a working chat UI, durable execution, and extensions on 
 
 **Start locally without signing in. Add your API key in the UI. Deploy the same app to Cloudflare.**
 
-v0.1.0 · [MIT](LICENSE)
+[MIT](LICENSE)
 
 [Quick start](#quick-start) · [API keys](#api-keys-and-guest-access) · [Deploy](#deploy-to-cloudflare) · [Extensions](#extend-mkharness) · [Docs](#documentation)
 
@@ -20,7 +20,7 @@ The template provides execution and application infrastructure. Product-specific
 
 ## Core capabilities
 
-| Capability                         | Included in v0.1.0                                                                                                                                                                 |
+| Capability                         | Included capabilities                                                                                                                                                              |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Guest access and personal API keys | Better Auth anonymous sessions by default; optional Google sign-in; client settings for OpenAI, Anthropic, and DeepSeek keys.                                                      |
 | Durable Agent execution            | PiHarness in a conversation-scoped Durable Object; queued submissions, Stop, persisted history, and reconstruction after runtime interruption. Closing a tab detaches observation. |
@@ -71,7 +71,7 @@ The default `ALLOW_SERVER_MODEL_KEY=0` requires personal keys. To offer a deploy
 
 ## Deploy to Cloudflare
 
-The deployment target is **Cloudflare Workers + D1 + Durable Objects**. Initial deployment requires resource and secret setup; an automated one-click deployment flow is not included in v0.1.0.
+The deployment target is **Cloudflare Workers + D1 + Durable Objects**. Initial deployment requires resource and secret setup; an automated one-click deployment flow is not included.
 
 ### 1. Create your database and configure the app
 
@@ -150,9 +150,9 @@ flowchart LR
 
 Pi owns execution history and results. Query owns read caches; assistant-ui owns the chat presentation. Submit, observe, and Stop remain separate operations. Remote side-effect recovery requires verified provider idempotency or reconciliation; durability alone does not guarantee exactly-once execution.
 
-## Project status and development
+## Development and scope
 
-**v0.1.0 is an early open-source foundation.** Attachments, R2 assets, cloud computers/sandboxes, per-user MCP OAuth, payments, and subscriptions are outside this release. Image/video generation requires a service extension; no generation provider is bundled. Interfaces may change while the template matures.
+**MkHarness focuses on Agent infrastructure.** Attachments, R2 assets, cloud computers/sandboxes, per-user MCP OAuth, payments, and subscriptions are outside the current scope. Image/video generation requires a service extension; no generation provider is bundled. Interfaces may change while the template matures.
 
 Two scoped dependency patches currently provide task-bound model configuration; rationale and removal criteria are documented in [`patches/README.md`](patches/README.md).
 
