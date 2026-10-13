@@ -1,38 +1,18 @@
 # MkHarness
 
-**The execution foundation for extensible Agent apps.**
+**Build Agent apps with durable execution and extensible UI.**
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-Build an Agent app with a working chat UI, durable execution, and extensions on both the server and browser. MkHarness brings together **TanStack, Cloudflare, Pi, and assistant-ui** in one open-source application template.
+MkHarness is an open-source application template for building your own Agent product. It combines a streaming chat interface, persistent execution, and extensions for tools and interactive results, using **TanStack, Cloudflare, Pi, and assistant-ui**.
 
-**Start locally without signing in. Add your API key in the UI. Deploy the same app to Cloudflare.**
+Start locally without signing in, add your API key in the UI, and deploy the same application to Cloudflare.
 
-[MIT](LICENSE)
-
-[Quick start](#quick-start) · [API keys](#api-keys-and-guest-access) · [Deploy](#deploy-to-cloudflare) · [Extensions](#extend-mkharness) · [Docs](#documentation)
-
-## What you can build
-
-MkHarness is for developers building Agent products that combine conversations, tools, interactive results, and remote services. Use it as a foundation for research assistants, data workflows, or creative Agents backed by your own service integrations.
-
-The template provides execution and application infrastructure. Product-specific tools, media generation, billing, and subscriptions are implemented by the application developer.
-
-## Core capabilities
-
-| Capability                         | Included capabilities                                                                                                                                                              |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Guest access and personal API keys | Better Auth anonymous sessions by default; optional Google sign-in; client settings for Base URL and API Key.                                                                      |
-| Durable Agent execution            | PiHarness in a conversation-scoped Durable Object; queued submissions, Stop, persisted history, and reconstruction after runtime interruption. Closing a tab detaches observation. |
-| Streaming chat                     | assistant-ui with AG-UI/SSE, reasoning and tool activity, model/thinking selection, conversation history, and timing decorations.                                                  |
-| Extensions on both sides           | Native Pi Extensions on the server; assistant-ui Toolkits in the browser; shared resource, action, and progress contracts.                                                         |
-| Interactive generated UI           | An optional OpenUI extension with forms, tables, charts, saved inputs, and bounded QuickJS calculations.                                                                           |
-| Remote tools and async services    | Configured HTTPS MCP tools, static Skills, and an async-service example with polling, persisted references, and explicit handling of uncertain outcomes.                           |
-| Cloudflare application stack       | TanStack Start / Router / Query, Workers, D1, and SQLite-backed Durable Objects in one repository.                                                                                 |
+[Quick start](#quick-start) · [Features](#features) · [Extensions](#extend-mkharness) · [Deployment](#deploy-to-cloudflare) · [FAQ](#faq) · [MIT License](LICENSE)
 
 ## Quick start
 
-Requires **Node.js 24**, **pnpm 11.17.0**, and a supported model provider API key. Local development uses Cloudflare's local runtime and SQLite storage; no Cloudflare login or Google OAuth setup is needed.
+You need **Node.js 24**, **pnpm 11.17.0**, and a supported model API key. Local development requires neither a Cloudflare account nor Google OAuth configuration.
 
 ```sh
 git clone https://github.com/Yukee-798/mkharness.git
@@ -46,34 +26,51 @@ pnpm dev
 
 Open **http://localhost:5173**:
 
-1. Select a model in the composer, then open the visitor menu at the bottom of the sidebar → **模型与 API Key** (Models & API Key).
-2. Configure the **Base URL** and **API Key**, then click **保存 Key** (Save Key).
-3. Select a thinking level in the composer and send a message.
+1. Select a model in the composer.
+2. Open the visitor menu at the bottom of the sidebar → **模型与 API Key** (Models & API Key). Configure **Base URL** and **API Key**, then click **保存 Key** (Save Key).
+3. Send your first message.
 
-The app currently uses Chinese UI labels; these README files are available in both languages. Saving a key does not validate it with the provider. The first model request uses it. Custom Base URLs must be public HTTPS endpoints supporting the selected model’s native API (OpenAI Responses, Anthropic Messages, or DeepSeek Chat Completions); changing the address does not switch protocols. Redirects and private-network destinations are rejected.
+Try the included tool: **“Use `describe_text` to count the characters in `Hello world`. Reply with text only.”** It needs no search key or MCP server.
 
-`pnpm setup` generates missing local authentication and encryption secrets and preserves existing values. `.dev.vars` is ignored by Git. Use the same origin (`localhost`, rather than mixing it with `127.0.0.1`) and retain local secrets across restarts.
+> Keys entered through the UI are sent to your deployment and encrypted on the server for background execution and recovery. Use your own deployment or one you trust. Saving a key does not test the connection; the first model request uses it.
 
-Try the built-in example: “Use `describe_text` to count the characters in `Hello world`. Reply with text only.” No search key or MCP server is required.
+`pnpm setup` generates missing local authentication and encryption secrets. Keep `.dev.vars` across restarts; Git ignores it. Local data lives in Cloudflare's local SQLite storage. Use `localhost` consistently rather than switching between it and `127.0.0.1`. The app currently uses Chinese UI labels; both README languages describe the same setup.
 
-## API keys and guest access
+## Features
 
-**Guest mode skips the sign-in screen, while keeping each browser's conversations and credentials isolated.** It uses an authenticated anonymous session, not a shared guest account. Clearing cookies or switching browsers loses access to that identity; cross-browser guest recovery is not included.
+- **A working chat app.** Streaming responses, reasoning and tool activity, model and thinking-level selection, conversation history, and reply/tool timing. Built with assistant-ui, shadcn/ui, and Tailwind CSS.
+- **Durable Agent execution.** Each conversation runs in its own Durable Object with PiHarness. Submissions queue, history persists, and execution can reconstruct after interruption. Closing the browser detaches observation; Stop is a separate action.
+- **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, and message footers in the browser.
+- **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
+- **Remote integrations.** Configured HTTPS MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.
+- **Guest access and personal keys.** Better Auth anonymous sessions isolate each browser's data. Users configure their own Base URL and API Key; Google sign-in and a deployment default key are optional.
 
-**Client configuration means entering a key through the UI; model execution still runs on the server.** The key is sent to your deployment and encrypted in D1 with AES-256-GCM. It is not persistently stored in the browser or included in chat history. The deployment operator holds the encryption key and can decrypt credentials: use your own deployment or one you trust.
+Use this foundation for research assistants, data workflows, or creative Agents that call your services. MkHarness provides application and execution infrastructure; product-specific tools, image/video services, billing, and subscriptions are yours to add.
 
-- Personal keys take precedence over an explicitly enabled deployment key for the same provider.
-- Each accepted request freezes its model, thinking level, and credential version. Queue execution, background compaction, and runtime reconstruction use that binding.
-- Changing a Base URL or key affects new requests; each accepted task keeps the original pair. Retired versions are retained for up to seven days for recovery; removing a provider's key revokes all its versions.
-- Invalid, revoked, expired, or unavailable bound credentials fail explicitly. An accepted task never silently switches to a server key.
+## Extend MkHarness
 
-The default `ALLOW_SERVER_MODEL_KEY=0` requires personal keys. To offer a deployment default, explicitly set it to `1` and configure `MODEL_API_KEY`; provider usage is then billed to that key's owner.
+Extensions are trusted code that you review and ship with your application. Server capabilities and browser presentation have separate static registration points, so a tool can have a custom renderer without adding tool-specific branches to core chat logic.
+
+| Add or customize                                           | Start here                                                                                                            |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Agent tools, prompt sections, hooks                        | [`src/extensions/server.ts`](src/extensions/server.ts) — native Pi Extensions                                         |
+| Tool renderers, title decorations, reply footers           | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkits and browser contributions            |
+| Generated UI, resources, input state, continuation actions | [`src/extensions/openui/`](src/extensions/openui/) — a complete optional extension                                    |
+| Static Skills                                              | [`src/server/skills.ts`](src/server/skills.ts)                                                                        |
+| Remote MCP tools                                           | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` configuration                                                |
+| An async service                                           | [`src/server/remote-example.ts`](src/server/remote-example.ts) — adapt to your service's submit/query/cancel contract |
+
+For a small example, follow the `describe_text` tool in [`src/server/extensions.ts`](src/server/extensions.ts) and its [browser renderer](src/extensions/example/browser.tsx). The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
+
+Set `ENABLE_GENERATIVE_UI=0` to disable OpenUI's tools, prompts, and UI together. Set `ENABLE_EXAMPLE_SKILL=1` to try the static Skill example. Web search is registered only when `TAVILY_API_KEY` is configured; reading web pages needs no search key.
+
+See the [server contracts](src/server/contributions.ts), [browser contracts](src/browser/extensions.ts), and [.dev.vars.example](.dev.vars.example) for the available interfaces and configuration. Runtime plugin installation and marketplace compatibility are not included.
 
 ## Deploy to Cloudflare
 
-The deployment target is **Cloudflare Workers + D1 + Durable Objects**. Initial deployment requires resource and secret setup; an automated one-click deployment flow is not included.
+The application runs on **Workers + D1 + SQLite-backed Durable Objects**. First deployment requires the following resource and secret setup.
 
-### 1. Create your database and configure the app
+### 1. Create resources
 
 After installing dependencies:
 
@@ -82,21 +79,21 @@ pnpm exec wrangler login
 pnpm exec wrangler d1 create mkharness
 ```
 
-Edit the **top-level** settings in `wrangler.jsonc`:
+Edit the **top-level configuration** in [`wrangler.jsonc`](wrangler.jsonc):
 
-| Setting                                         | First installation                                                                                                    |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `name`                                          | `mkharness`, or your own unique Worker name.                                                                          |
-| `d1_databases[0].database_name` / `database_id` | The name and ID returned by `d1 create`. The all-zero local ID cannot be used remotely.                               |
-| `vars.APP_URL`                                  | Your exact public origin, such as `https://mkharness.<your-subdomain>.workers.dev`, or your configured custom domain. |
-| `vars.AUTH_MODE`                                | Keep `guest` for no-sign-in access.                                                                                   |
-| `vars.ALLOW_SERVER_MODEL_KEY`                   | Keep `0` for personal API keys only.                                                                                  |
+| Setting                                         | Value                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| `name`                                          | `mkharness`, or your own Worker name                                            |
+| `d1_databases[0].database_name` / `database_id` | The name and ID returned by `d1 create`; replace the all-zero local placeholder |
+| `vars.APP_URL`                                  | Your exact public origin, e.g. `https://mkharness.<your-subdomain>.workers.dev` |
+| `vars.AUTH_MODE`                                | `guest` for access without a sign-in screen                                     |
+| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0` for personal API keys only                                                  |
 
-Keep the `DB` and `CONVERSATIONS` bindings, `ConversationAgent` class, and migration definitions. The repository's `env.test` contains development reference resources; replace them with your own if you use that environment.
+Keep the `DB` and `CONVERSATIONS` bindings, `ConversationAgent` class, and migration definitions. The repository's `env.test` contains development reference resources; substitute your own if using that environment.
 
-### 2. Configure secrets and deploy
+### 2. Set secrets and deploy
 
-Build after editing configuration so Wrangler uses the correct generated deployment configuration:
+Build after editing configuration so Wrangler uses the intended generated deployment configuration:
 
 ```sh
 pnpm build
@@ -106,36 +103,17 @@ pnpm exec wrangler d1 migrations apply DB --remote
 pnpm deploy
 ```
 
-Generate **two independent values** with `openssl rand -base64 32`, one for each interactive secret prompt. `CREDENTIAL_ENCRYPTION_KEY` must be the Base64 encoding of exactly 32 random bytes. If Wrangler asks to create the Worker while adding its first secret, allow creation. Retain both secrets across deployments; changing the encryption key prevents existing credentials from being decrypted.
+Run `openssl rand -base64 32` twice to generate **two independent secrets** and enter them at the corresponding prompts. The encryption key must encode exactly 32 random bytes. If Wrangler asks to create the Worker when setting its first secret, allow creation.
 
-Open the deployed URL, then configure your personal API key through the same sidebar menu. Guest mode needs **no Google credentials and no deployment model key**.
+Keep these secrets across deployments. Changing the encryption key prevents existing credentials from being decrypted. For existing installations, also preserve the Worker name, database ID, and Durable Object identity. [Environment selection happens at build time](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/); rebuild after changing configuration or environments.
 
-Environment selection happens at build time with the [Cloudflare Vite plugin](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/). Rebuild after changing configuration or switching environments. For existing installations, preserve the Worker name, database ID, and Durable Object identity to retain data.
+### 3. Open your app
 
-Cloudflare and model-provider usage have separate quotas and costs. Check your account's [Durable Object limits](https://developers.cloudflare.com/durable-objects/platform/limits/) before deployment; this template does not include spending caps or billing.
+Visit the deployed URL and configure your personal API key through the sidebar menu. Guest mode needs no Google credentials and no deployment model key.
 
-### Optional Google sign-in
+For Google sign-in, set `AUTH_MODE=account`, add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as secrets, and register `https://YOUR_DOMAIN/api/auth/callback/google` with the same origin as `APP_URL`.
 
-Set `AUTH_MODE=account`, configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as secrets, and register this callback with Google:
-
-```text
-https://YOUR_DOMAIN/api/auth/callback/google
-```
-
-Use the same origin as `APP_URL`. Guest-to-account data migration is not included.
-
-## Extend MkHarness
-
-| Extension point                 | Where to start                                                                                                                                  |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agent tools, prompts, and hooks | Static server registration in [`src/extensions/server.ts`](src/extensions/server.ts), using native Pi Extensions.                               |
-| Tool renderers and decorations  | Browser registration in [`src/extensions/browser.ts`](src/extensions/browser.ts), using assistant-ui Toolkits and tool-title/footer decorators. |
-| Interactive generated UI        | [`src/extensions/openui/`](src/extensions/openui/); set `ENABLE_GENERATIVE_UI=0` to disable its tools, prompts, and UI together.                |
-| Skills                          | [`src/server/skills.ts`](src/server/skills.ts); `ENABLE_EXAMPLE_SKILL=1` enables the static example.                                            |
-| Remote MCP tools                | `MCP_SERVERS` configuration with server IDs, HTTPS endpoints, tool allowlists, and secret names.                                                |
-| Async service integration       | [`src/server/remote-example.ts`](src/server/remote-example.ts); adapt submit/query/cancel to the provider's actual contract.                    |
-
-The `example` and `timing` extensions demonstrate tools and presentation decorations. Extensions are reviewed code shipped with your deployment; runtime installation and an external plugin marketplace are not included. The host contracts are defined in [`src/server/contributions.ts`](src/server/contributions.ts) and [`src/browser/extensions.ts`](src/browser/extensions.ts).
+Cloudflare and model usage are billed separately. Check your account's [Durable Object limits](https://developers.cloudflare.com/durable-objects/platform/limits/). Resource provisioning is manual; the template does not provide an automated one-click deployment or spending caps.
 
 ## Architecture
 
@@ -148,13 +126,47 @@ flowchart LR
   DO --> Tools[Pi Extensions / Skills / MCP / remote services]
 ```
 
-Pi owns execution history and results. Query owns read caches; assistant-ui owns the chat presentation. Submit, observe, and Stop remain separate operations. Remote side-effect recovery requires verified provider idempotency or reconciliation; durability alone does not guarantee exactly-once execution.
+**Pi owns execution history and results; Query owns read caches; assistant-ui owns chat presentation.** Submit, observe, and Stop are separate operations. Remote side effects require provider idempotency or reconciliation; durable execution alone does not guarantee exactly-once delivery.
 
-## Development and scope
+## FAQ
 
-**MkHarness focuses on Agent infrastructure.** Attachments, R2 assets, cloud computers/sandboxes, per-user MCP OAuth, payments, and subscriptions are outside the current scope. Image/video generation requires a service extension; no generation provider is bundled. Interfaces may change while the template matures.
+<details>
+<summary><strong>How are guest identities and API keys stored?</strong></summary>
 
-Two scoped dependency patches currently provide task-bound model configuration; rationale and removal criteria are documented in [`patches/README.md`](patches/README.md).
+Each browser gets an authenticated anonymous Better Auth session. Clearing cookies or switching browsers loses access to that guest identity; cross-browser recovery and guest-to-account migration are not included.
+
+Keys are encrypted in D1 with AES-256-GCM, not persistently stored in the browser or included in chat history. The deployment operator holds the encryption secret and can decrypt them. Personal keys take precedence over an explicitly enabled deployment key for the same provider. The default `ALLOW_SERVER_MODEL_KEY=0` requires users to supply a key; setting it to `1` with `MODEL_API_KEY` enables an operator-funded default.
+
+Custom Base URLs must be public HTTPS endpoints supporting the selected model's native API: OpenAI Responses, Anthropic Messages, or DeepSeek Chat Completions. Changing the address does not change protocols. Redirects and private-network destinations are rejected.
+
+</details>
+
+<details>
+<summary><strong>What happens when model settings change during execution?</strong></summary>
+
+Each newly accepted message updates its conversation configuration. Before preparing context, Pi snapshots the model, thinking level, and immutable credential reference for each model call. Queued messages and later tool rounds use the current conversation configuration; prepared request checkpoints retain their original version across recovery.
+
+Saving a key or Base URL alone does not update a running conversation. The next accepted message applies that version to calls not yet prepared. Generation retries that re-enter prepare select current configuration. Compaction selects its own configuration, then retains that summary checkpoint through recovery and retries.
+
+Retired credential versions are retained for up to seven days. Removing a provider key revokes all its versions. Invalid, revoked, expired, or unavailable checkpoint credentials fail explicitly; they never silently fall back to a newer or deployment key. See the [step configuration tests](tests/workers/task-binding.test.ts).
+
+</details>
+
+<details>
+<summary><strong>What is outside the template's scope?</strong></summary>
+
+Attachments, R2 assets, cloud computers/sandboxes, per-user MCP OAuth, payments, and subscriptions are not bundled. Image/video generation requires a service extension. Interfaces may change as the template develops.
+
+</details>
+
+<details>
+<summary><strong>Does MkHarness patch its dependencies?</strong></summary>
+
+Pi Durable uses native step configuration without a patch. Two independent fixes remain in `agents`: the Skills result bridge and failed-Session cache cleanup. Their rationale and removal criteria are documented in [patch notes](patches/README.md).
+
+</details>
+
+## Development & contributing
 
 ```sh
 pnpm check                          # Lint, formatting, types, unit/workerd tests, build
@@ -163,21 +175,12 @@ pnpm test:e2e
 pnpm test:hmr
 ```
 
-Unit/workerd and browser tests use controlled model I/O. For your deployment, separately verify a real provider request, refresh/reconnect during execution, Stop, and recovery across redeployments. Mocked tests do not establish production acceptance.
+E2E uses the Cloudflare Vite production preview from isolated `.wrangler/e2e-build` output. Component fixtures are bundled separately and excluded from normal deployment artifacts; HMR tests exercise the development server separately.
 
-## Documentation
+Tests use controlled model I/O. Verify a real provider request, refresh/reconnect, Stop, and recovery across redeployments in your own environment; these tests do not establish real-cloud acceptance.
 
-- [中文快速开始](README.zh-CN.md)
-- [Server extension contracts](src/server/contributions.ts)
-- [Browser extension contracts](src/browser/extensions.ts)
-- [Example tool renderer](src/extensions/example/browser.tsx)
-- [Timing extension](src/extensions/timing/)
-- [Guest access and BYOK tests](tests/e2e/guest-byok.spec.ts)
-- [Task binding and recovery tests](tests/workers/task-binding.test.ts)
-- [Dependency patch notes](patches/README.md)
-
-Issues and pull requests are welcome. For bugs, include reproduction steps, dependency versions, and redacted logs; never include API keys or `.dev.vars`.
+[Open an issue](https://github.com/Yukee-798/mkharness/issues) or submit a pull request. Include reproduction steps, dependency versions, and redacted logs. Never include API keys or `.dev.vars`.
 
 ## License
 
-[MIT](LICENSE). Upstream dependencies and borrowed components are acknowledged in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for upstream dependencies and borrowed components.

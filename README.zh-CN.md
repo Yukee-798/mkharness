@@ -1,38 +1,18 @@
 # MkHarness
 
-**面向可扩展 Agent 应用的执行基础模板。**
+**搭建拥有持久化执行与可扩展 UI 的 Agent 应用。**
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-在一个开源应用仓库中，提供可用的聊天界面、持久化 Agent 执行，以及前后端扩展机制。MkHarness 基于 **TanStack、Cloudflare、Pi 和 assistant-ui**，帮助开发者从可运行的基础开始搭建自己的 Agent 产品。
+MkHarness 是一个开源 Agent 应用模板，提供流式聊天、持久化执行，以及工具与交互结果的扩展能力。基于 **TanStack、Cloudflare、Pi 和 assistant-ui**，帮助你从可运行的工程开始搭建自己的 Agent 产品。
 
-**本地启动，无需登录；在界面填写自己的 API Key；同一套应用可部署到 Cloudflare。**
+本地启动无需登录，在界面配置自己的 API Key，同一套应用可部署到 Cloudflare。
 
-[MIT](LICENSE)
-
-[快速开始](#快速开始) · [API Key](#免登录与-api-key) · [部署](#部署到-cloudflare) · [扩展](#扩展-mkharness) · [文档](#文档)
-
-## 适合搭建什么
-
-适合需要结合对话、工具、交互结果与远程服务的 Agent 产品，例如调研助手、数据处理工作流，或接入自有服务的创作 Agent。
-
-模板提供执行和应用基础设施。具体业务工具、图片与视频生成、计费和订阅，由开发者按产品需要实现。
-
-## 核心能力
-
-| 能力                 | 已包含能力                                                                                                        |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 免登录与个人 API Key | 默认 Better Auth 匿名会话；可选 Google 登录；客户端配置 Base URL 与 API Key。                                     |
-| 持久化 Agent 执行    | 每个聊天由独立 Durable Object 承载 PiHarness；支持排队、Stop、完整历史和 runtime 中断后重建。关闭页面只断开观察。 |
-| 流式聊天             | assistant-ui + AG-UI/SSE；思考过程、工具活动、模型与思考强度选择、聊天记录及耗时装饰。                            |
-| 前后端扩展           | 服务端使用 Pi 原生 Extension，浏览器使用 assistant-ui Toolkit，共用资源、动作与进度契约。                         |
-| 交互式生成 UI        | 可选 OpenUI 扩展；支持表单、表格、图表、输入保存和有资源限制的 QuickJS 计算。                                     |
-| 远程工具与异步服务   | 可配置 HTTPS MCP、静态 Skills，以及包含轮询、引用持久化和不确定结果处理的异步服务示例。                           |
-| Cloudflare 应用栈    | TanStack Start / Router / Query、Workers、D1 和 SQLite-backed Durable Objects，位于同一仓库。                     |
+[快速开始](#快速开始) · [核心能力](#核心能力) · [扩展](#扩展-mkharness) · [部署](#部署到-cloudflare) · [常见问题](#常见问题) · [MIT 许可证](LICENSE)
 
 ## 快速开始
 
-准备 **Node.js 24**、**pnpm 11.17.0** 和一个受支持供应商的模型 API Key。本地使用 Cloudflare 本地运行时与 SQLite 存储，**不需要 Cloudflare 登录，也不需要 Google OAuth 配置**。
+准备 **Node.js 24**、**pnpm 11.17.0** 和一个受支持的模型 API Key。本地开发不需要 Cloudflare 账号，也不需要配置 Google OAuth。
 
 ```sh
 git clone https://github.com/Yukee-798/mkharness.git
@@ -46,34 +26,51 @@ pnpm dev
 
 打开 **http://localhost:5173**：
 
-1. 在输入框选择模型，再点击侧栏底部的访客菜单 → **模型与 API Key**。
-2. 填写 **Base URL** 与 **API Key**，点击 **保存 Key**。
-3. 选择思考强度，发送消息。
+1. 在输入框选择模型。
+2. 点击侧栏底部的访客菜单 → **模型与 API Key**，填写 **Base URL** 和 **API Key**，点击 **保存 Key**。
+3. 发送第一条消息。
 
-当前应用界面使用中文，README 提供中英文版本。保存 Key 仅代表保存成功，首次模型请求才会使用它验证实际调用。自定义 Base URL 必须是公开 HTTPS 地址，并支持所选模型的原生 API 协议（OpenAI Responses、Anthropic Messages 或 DeepSeek Chat Completions）；修改地址不会切换协议。不跟随重定向，不访问私有网络地址。
+可以先试内置工具：**“请使用 `describe_text` 工具，统计‘你好世界’的字符数，只用文字回答。”** 无需搜索 Key 或 MCP 服务。
 
-`pnpm setup` 生成缺失的本地认证与加密密钥，保留已有值。`.dev.vars` 已被 Git 忽略。请统一使用 `localhost`，不要混用 `127.0.0.1`，并在重启后保留本地密钥。
+> 在界面填写的 Key 会发送给当前部署，并在服务端加密保存，用于后台执行与恢复。请在自己的部署或可信部署填写。保存 Key 不会测试连接，首次模型请求才会实际使用它。
 
-可以先试：“请使用 `describe_text` 工具，统计‘你好世界’的字符数，只用文字回答。”此示例不需要搜索 Key 或 MCP 服务。
+`pnpm setup` 生成缺失的本地认证与加密密钥。重启时保留 `.dev.vars`，该文件已被 Git 忽略。本地数据存储在 Cloudflare 本地 SQLite 中。统一使用 `localhost`，不要与 `127.0.0.1` 混用。当前应用界面使用中文，两份 README 的配置说明保持一致。
 
-## 免登录与 API Key
+## 核心能力
 
-**免登录省去了登录页面，但每个浏览器仍有独立身份。** 默认使用经过认证的匿名会话，聊天和凭据按用户隔离。清除 Cookie 或更换浏览器后无法找回原访客身份；本期不支持访客跨浏览器恢复。
+- **可用的聊天应用。** 流式回复、思考过程、工具活动、模型与思考强度选择、聊天历史，以及回复和工具耗时。使用 assistant-ui、shadcn/ui 与 Tailwind CSS。
+- **持久化 Agent 执行。** 每个聊天由独立 Durable Object 承载 PiHarness。支持提交排队、历史持久化和执行中断后重建；关闭浏览器只断开观察，Stop 是独立操作。
+- **前后端扩展。** 服务端接入 Pi 原生工具、提示词与 hooks；浏览器注册 assistant-ui Toolkit、工具标题装饰和回复 Footer。
+- **交互式生成 UI。** 可选 OpenUI 扩展支持表单、表格、图表、输入保存，以及有资源限制的 QuickJS 计算。
+- **远程集成。** 可配置 HTTPS MCP 工具、静态 Skills，以及包含 submit/query/cancel 和恢复引用保存的异步服务示例。
+- **免登录与个人 Key。** Better Auth 匿名会话隔离各浏览器的数据；用户自行配置 Base URL 与 API Key，也可启用 Google 登录和部署默认 Key。
 
-**客户端配置指在界面输入 Key，模型仍由服务端调用。** Key 会发送给当前部署，并在 D1 中使用 AES-256-GCM 加密保存；浏览器不持久保存明文，也不会写入聊天历史。部署者持有主密钥，能够解密凭据，因此请在自己的部署或可信部署填写。
+你可以在此基础上搭建调研助手、数据工作流，或调用自有服务的创作 Agent。MkHarness 提供应用与执行基础设施；业务工具、生图/视频服务、计费与订阅由你按需接入。
 
-- 同一供应商的个人 Key 优先于显式启用的部署默认 Key。
-- 每次请求接受时，冻结模型、思考强度与凭据版本；排队、后台压缩和 runtime 重建沿用该配置。
-- 修改 Base URL 或 Key 只影响新请求；已提交任务始终使用提交时的地址与 Key 版本。退休版本最多保留七天供恢复；移除该供应商的 Key 会撤销全部版本。
-- 已绑定凭据无效、撤销、过期或不可读取时，明确报错，不静默切换到服务端 Key。
+## 扩展 MkHarness
 
-默认 `ALLOW_SERVER_MODEL_KEY=0`，要求用户自行配置 Key。若需要提供部署默认 Key，显式设为 `1` 并配置 `MODEL_API_KEY`；供应商费用由该 Key 的持有者承担。
+扩展是经你审核、随应用部署发布的受信任代码。服务端能力与浏览器展示各有独立的静态装配入口，工具可以接入专属 renderer，无需在核心聊天逻辑增加工具名分支。
+
+| 扩展内容                             | 从这里开始                                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Agent 工具、提示词片段、hooks        | [`src/extensions/server.ts`](src/extensions/server.ts) — Pi 原生 Extension                              |
+| 工具 renderer、标题装饰、回复 Footer | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkit 与浏览器贡献            |
+| 生成 UI、资源、输入状态、继续动作    | [`src/extensions/openui/`](src/extensions/openui/) — 完整的可选扩展                                     |
+| 静态 Skills                          | [`src/server/skills.ts`](src/server/skills.ts)                                                          |
+| 远程 MCP 工具                        | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` 配置                                           |
+| 异步服务                             | [`src/server/remote-example.ts`](src/server/remote-example.ts) — 按实际服务契约接入 submit/query/cancel |
+
+最小工具示例可参考 [`src/server/extensions.ts`](src/server/extensions.ts) 中的 `describe_text` 及其[浏览器 renderer](src/extensions/example/browser.tsx)。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
+
+`ENABLE_GENERATIVE_UI=0` 同时关闭 OpenUI 的工具、提示词与 UI；`ENABLE_EXAMPLE_SKILL=1` 启用静态 Skill 示例。网页搜索仅在配置 `TAVILY_API_KEY` 时注册，读取网页不需要搜索 Key。
+
+具体接口与配置见[服务端契约](src/server/contributions.ts)、[浏览器契约](src/browser/extensions.ts)及 [.dev.vars.example](.dev.vars.example)。不包含运行时插件安装器或外部插件市场兼容层。
 
 ## 部署到 Cloudflare
 
-部署目标为 **Cloudflare Workers + D1 + Durable Objects**。首次部署需要创建资源和配置 Secrets；暂未提供自动化一键部署流程。
+应用运行在 **Workers + D1 + SQLite-backed Durable Objects** 上。首次部署需要完成以下资源与密钥配置。
 
-### 1. 创建数据库并配置应用
+### 1. 创建资源
 
 安装依赖后执行：
 
@@ -82,21 +79,21 @@ pnpm exec wrangler login
 pnpm exec wrangler d1 create mkharness
 ```
 
-修改 `wrangler.jsonc` 的**顶层配置**：
+修改 [`wrangler.jsonc`](wrangler.jsonc) 的**顶层配置**：
 
-| 配置                                            | 首次安装填写                                                                             |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `name`                                          | `mkharness`，或自己的唯一 Worker 名称。                                                  |
-| `d1_databases[0].database_name` / `database_id` | `d1 create` 返回的名称和 ID；全零本地占位 ID 不能用于远端。                              |
-| `vars.APP_URL`                                  | 实际公开 origin，例如 `https://mkharness.<你的子域>.workers.dev`，或已配置的自定义域名。 |
-| `vars.AUTH_MODE`                                | 保持 `guest`，无需登录即可使用。                                                         |
-| `vars.ALLOW_SERVER_MODEL_KEY`                   | 保持 `0`，只使用个人 API Key。                                                           |
+| 配置                                            | 填写内容                                                         |
+| ----------------------------------------------- | ---------------------------------------------------------------- |
+| `name`                                          | `mkharness`，或自己的 Worker 名称                                |
+| `d1_databases[0].database_name` / `database_id` | `d1 create` 返回的名称和 ID，替换全零本地占位 ID                 |
+| `vars.APP_URL`                                  | 实际公开 origin，例如 `https://mkharness.<你的子域>.workers.dev` |
+| `vars.AUTH_MODE`                                | `guest`，无需登录页面即可使用                                    |
+| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0`，只使用个人 API Key                                          |
 
-保留 `DB`、`CONVERSATIONS` binding、`ConversationAgent` 类名和迁移定义。仓库的 `env.test` 是开发参考资源；使用测试环境时必须替换为自己的资源。
+保留 `DB` 和 `CONVERSATIONS` binding、`ConversationAgent` 类名及迁移定义。仓库的 `env.test` 是开发参考资源；使用该环境时替换为自己的资源。
 
-### 2. 配置 Secrets 并部署
+### 2. 设置 Secrets 并部署
 
-编辑配置后先构建，让 Wrangler 使用正确的生成部署配置：
+编辑配置后先构建，让 Wrangler 使用对应的生成部署配置：
 
 ```sh
 pnpm build
@@ -106,36 +103,17 @@ pnpm exec wrangler d1 migrations apply DB --remote
 pnpm deploy
 ```
 
-分别用 `openssl rand -base64 32` 生成**两个独立值**，在对应的 Secret 交互提示中输入。`CREDENTIAL_ENCRYPTION_KEY` 必须是恰好 32 字节随机值的标准 Base64。设置首个 Secret 时若 Wrangler 提示创建 Worker，可同意创建。两项密钥需跨部署保留；更换加密密钥会使已有凭据无法解密。
+执行两次 `openssl rand -base64 32`，生成**两个独立密钥**，在对应的 Secret 提示中输入。加密密钥必须编码恰好 32 字节随机值。设置首个 Secret 时若 Wrangler 提示创建 Worker，可同意创建。
 
-打开部署后的网址，通过相同的侧栏菜单配置个人 API Key。访客模式**不需要 Google 凭据，也不需要部署默认模型 Key**。
+跨部署保留这两项密钥，更换加密密钥会导致已有凭据无法解密。已有安装也需要保留 Worker 名称、数据库 ID 与 Durable Object 身份。[环境在构建时选择](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/)，修改配置或切换环境后重新构建。
 
-[Cloudflare Vite 插件](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/)在构建时选择环境。修改配置或切换环境后重新构建。已有安装升级时，保留 Worker 名称、数据库 ID 和 Durable Object 身份，以保留数据。
+### 3. 打开应用
 
-Cloudflare 与模型供应商分别有配额及费用。部署前核对账号的 [Durable Object 限制](https://developers.cloudflare.com/durable-objects/platform/limits/)；模板不包含费用硬上限或计费系统。
+访问部署网址，通过侧栏菜单配置个人 API Key。访客模式不需要 Google 凭据，也不需要部署默认模型 Key。
 
-### 可选：Google 登录
+需要 Google 登录时，设为 `AUTH_MODE=account`，通过 Secrets 配置 `GOOGLE_CLIENT_ID` 和 `GOOGLE_CLIENT_SECRET`，并注册 `https://YOUR_DOMAIN/api/auth/callback/google` 回调；来源须与 `APP_URL` 一致。
 
-设为 `AUTH_MODE=account`，通过 Secrets 配置 `GOOGLE_CLIENT_ID` 和 `GOOGLE_CLIENT_SECRET`，在 Google 注册回调：
-
-```text
-https://YOUR_DOMAIN/api/auth/callback/google
-```
-
-回调来源与 `APP_URL` 保持一致。本期不包含访客到账号的数据迁移。
-
-## 扩展 MkHarness
-
-| 扩展内容                   | 接入位置                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Agent 工具、提示词与 hooks | 在 [`src/extensions/server.ts`](src/extensions/server.ts) 静态装配 Pi 原生 Extension。                              |
-| 工具渲染与展示装饰         | 在 [`src/extensions/browser.ts`](src/extensions/browser.ts) 登记 assistant-ui Toolkit，以及工具标题 / Footer 装饰。 |
-| 交互式生成 UI              | [`src/extensions/openui/`](src/extensions/openui/)；`ENABLE_GENERATIVE_UI=0` 可同时关闭其工具、提示词与 UI。        |
-| Skills                     | [`src/server/skills.ts`](src/server/skills.ts)；`ENABLE_EXAMPLE_SKILL=1` 启用静态示例。                             |
-| 远程 MCP 工具              | `MCP_SERVERS` 配置 server ID、HTTPS endpoint、工具白名单与凭据变量名。                                              |
-| 异步服务                   | [`src/server/remote-example.ts`](src/server/remote-example.ts)；按供应商实际契约改造 submit/query/cancel。          |
-
-`example` 和 `timing` 展示工具与 UI 装饰的接入方式。扩展是经审核并随部署发布的代码，本期不支持运行时安装或外部插件市场。宿主契约定义见 [`src/server/contributions.ts`](src/server/contributions.ts) 和 [`src/browser/extensions.ts`](src/browser/extensions.ts)。
+Cloudflare 与模型调用分别计费，请核对账号的 [Durable Object 限制](https://developers.cloudflare.com/durable-objects/platform/limits/)。资源需要手动创建，模板不提供自动化一键部署或费用硬上限。
 
 ## 架构
 
@@ -148,13 +126,47 @@ flowchart LR
   DO --> Tools[Pi Extensions / Skills / MCP / 远程服务]
 ```
 
-Pi 负责执行历史与结果；Query 负责读取缓存；assistant-ui 负责聊天展示。提交、观察和 Stop 独立。远程副作用恢复需要验证供应商的幂等或调和契约，持久化本身不保证操作只执行一次。
+**Pi 负责执行历史与结果，Query 负责读取缓存，assistant-ui 负责聊天展示。** 提交、观察与 Stop 独立。远程副作用需要供应商提供幂等或调和能力，持久化执行本身不保证操作只执行一次。
 
-## 开发与范围
+## 常见问题
 
-**MkHarness 聚焦 Agent 基础设施。** 附件、R2 素材、云端电脑/沙箱、每用户 MCP OAuth、支付和订阅不在本期范围。图片/视频生成需要接入对应服务扩展，模板未内置生成供应商。接口可能随迭代调整。
+<details>
+<summary><strong>访客身份和 API Key 如何保存？</strong></summary>
 
-当前保留两个用于逐任务模型配置的依赖补丁，原因及移除条件见 [`patches/README.md`](patches/README.md)。
+每个浏览器拥有经过认证的 Better Auth 匿名会话。清除 Cookie 或更换浏览器后无法找回原访客身份；不包含跨浏览器恢复和访客到账号的数据迁移。
+
+Key 在 D1 中使用 AES-256-GCM 加密保存，不持久保存到浏览器，也不写入聊天历史。部署者持有加密密钥，可以解密凭据。同一供应商的个人 Key 优先于显式启用的部署默认 Key。默认 `ALLOW_SERVER_MODEL_KEY=0` 要求用户提供 Key；设为 `1` 并配置 `MODEL_API_KEY` 可提供由部署者承担费用的默认 Key。
+
+自定义 Base URL 必须是公开 HTTPS 地址，并支持所选模型的原生协议：OpenAI Responses、Anthropic Messages 或 DeepSeek Chat Completions。修改地址不切换协议；拒绝重定向和私有网络地址。
+
+</details>
+
+<details>
+<summary><strong>执行过程中修改模型设置会怎样？</strong></summary>
+
+每条新接受的消息更新当前会话配置。Pi 在每次模型调用准备上下文前，快照模型、思考强度和不可变凭据引用。排队消息和工具后的下一轮使用当前会话配置；已准备的请求 checkpoint 在恢复时保留原版本。
+
+单独保存 Key 或 Base URL 不更新运行中的会话，下一条新接受的消息才将该版本应用到尚未准备的调用。生成重试重新进入 prepare 时使用当前配置；压缩独立选择配置，之后的恢复和重试保留其摘要 checkpoint。
+
+退休凭据版本最多保留七天。移除 Key 会撤销该供应商全部版本。快照凭据无效、撤销、过期或不可读取时明确失败，不静默回退到新 Key 或部署默认 Key。行为验证见[逐步骤配置测试](tests/workers/task-binding.test.ts)。
+
+</details>
+
+<details>
+<summary><strong>模板不包含哪些能力？</strong></summary>
+
+未内置附件、R2 素材、云端电脑/沙箱、每用户 MCP OAuth、支付和订阅。图片与视频生成需要接入服务扩展。接口可能随模板迭代调整。
+
+</details>
+
+<details>
+<summary><strong>是否对依赖打了补丁？</strong></summary>
+
+Pi Durable 使用未打补丁的原生逐步骤配置。`agents` 仅保留两个独立修复：Skills 结果桥接和失败 Session 缓存释放。原因及移除条件见[补丁说明](patches/README.md)。
+
+</details>
+
+## 开发与贡献
 
 ```sh
 pnpm check                          # lint、格式、类型、unit/workerd 测试及构建
@@ -163,20 +175,11 @@ pnpm test:e2e
 pnpm test:hmr
 ```
 
-unit/workerd 与浏览器测试使用受控模型 I/O。部署后需独立验收真实供应商请求、运行中刷新/重连、Stop 和跨部署恢复；模拟测试不代表生产验收通过。
+E2E 使用隔离的 `.wrangler/e2e-build` 产物运行 Cloudflare Vite 生产预览。组件夹具单独打包，不进入正常部署产物；HMR 测试独立验证开发服务器。
 
-## 文档
+测试使用受控模型 I/O。请在自己的环境验收真实供应商请求、刷新/重连、Stop 和跨部署恢复；这些测试不代表真实云端验收。
 
-- [English README](README.md)
-- [服务端扩展契约](src/server/contributions.ts)
-- [浏览器扩展契约](src/browser/extensions.ts)
-- [示例工具 renderer](src/extensions/example/browser.tsx)
-- [耗时扩展](src/extensions/timing/)
-- [免登录与 BYOK 测试](tests/e2e/guest-byok.spec.ts)
-- [任务绑定与恢复测试](tests/workers/task-binding.test.ts)
-- [依赖补丁说明](patches/README.md)
-
-欢迎提交 Issue 和 Pull Request。报告问题时请提供复现步骤、依赖版本和脱敏日志，不要附带 API Key 或 `.dev.vars`。
+欢迎[提交 Issue](https://github.com/Yukee-798/mkharness/issues) 或 Pull Request。报告问题时附上复现步骤、依赖版本与脱敏日志，不要包含 API Key 或 `.dev.vars`。
 
 ## 许可证
 
