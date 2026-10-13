@@ -28,7 +28,11 @@ import { Alert, AlertDescription } from './ui/alert';
 import { MarkdownText } from './markdown-text';
 import { Reasoning, ReasoningRoot, ReasoningContent, ReasoningText } from './reasoning.aui';
 import { ModelPicker } from './model-picker';
-import type { ModelCatalog, ModelSelection } from '../shared/model-selection';
+import {
+  resolveModelSelection,
+  type ModelCatalog,
+  type ModelSelection,
+} from '../shared/model-selection';
 import type { RemoteProgress } from '../shared/remote-progress';
 import { TooltipIconButton } from './tooltip-icon-button';
 import { ToolActivity } from './tool-activity';
@@ -115,7 +119,9 @@ export function Chat({
   const [remote, setRemote] = useState<RemoteProgress[]>([]);
   const [remoteSending, setRemoteSending] = useState(false);
   const catalog = settings.data?.modelCatalog ?? snapshot?.modelCatalog;
-  const selected = selection ?? snapshot?.selection ?? catalog?.defaultSelection;
+  const selected = catalog
+    ? resolveModelSelection(catalog, selection ?? snapshot?.selection)
+    : undefined;
   useEffect(() => {
     onModelProviderChange?.(selected?.provider);
   }, [selected?.provider, onModelProviderChange]);
@@ -711,9 +717,35 @@ function AssistantText(part: TextMessagePartProps) {
     return <TraceLine live label="正在思考…" icon={<Brain />} />;
   return <MarkdownText />;
 }
-function Assistant() {
+// GroupedParts is for adjacent runs; the native clustering primitive is retained
+// specifically for non-adjacent parts. Tool calls still use GroupedParts below.
+const groupReasoningParts = (parts: readonly { type: string }[]) => {
+  const indices = parts.flatMap((part, index) => (part.type === 'reasoning' ? [index] : []));
+  return indices.length ? [{ groupKey: 'reasoning', indices }] : [];
+};
+function AssistantReasoning({ children }: { children?: ReactNode }) {
+  const { activity } = useExtensionContext();
+  const parts = useAuiState((s) => s.message.parts);
+  const running = parts.some((part) => part.type === 'reasoning' && part.status.type === 'running');
+  const hasTools = parts.some(
+    (part) => part.type === 'tool-call' && activity[part.toolName] !== 'hidden',
+  );
+  return (
+    <ReasoningRoot variant="ghost" streaming={running && !hasTools} className="mb-0">
+      <DisclosureTrigger
+        icon={<Brain />}
+        live={running}
+        label={running ? '正在思考…' : '思考过程'}
+      />
+      <ReasoningContent aria-busy={running} className={disclosureContentClass}>
+        <ReasoningText className="ps-0">{children}</ReasoningText>
+      </ReasoningContent>
+    </ReasoningRoot>
+  );
+}
+const reasoningComponents = { Group: AssistantReasoning, Reasoning };
+export function Assistant() {
   const content = useAuiState((s) => s.message.content);
-  const [reasoningOpen, setReasoningOpen] = useState<Record<number, boolean>>({});
   const { activity, toolkit } = useExtensionContext();
   const groupAssistantParts = useMemo(
     () =>
@@ -745,20 +777,28 @@ function Assistant() {
       data-trace-tail={traceTail}
       className="group/message mb-6 flex min-w-0 flex-col gap-2 text-sm leading-relaxed wrap-anywhere empty:hidden data-[trace-tail=true]:mb-2 has-[+[data-slot=assistant-message]]:mb-2"
     >
-      {/* Both live parts and restored snapshots use the same reading order, while
-          original part scopes keep tool results and actions bound to their calls. */}
-      {(['reasoning', 'tools', 'content'] as const).map((section) => (
+      {/* Non-adjacent reasoning belongs to one stable disclosure per model round.
+          GroupedParts intentionally only coalesces adjacent parts, so use the SDK's
+          supported clustering primitive here rather than rebuilding a message runtime. */}
+      {content.some((part) => part.type === 'reasoning') && (
+        <MessagePrimitive.Unstable_PartsGrouped
+          groupingFunction={groupReasoningParts}
+          components={reasoningComponents}
+        />
+      )}
+      {/* Tool scopes and registered standalone content retain their native identities. */}
+      {(['tools', 'content'] as const).map((section) => (
         <MessagePrimitive.GroupedParts
           key={section}
           groupBy={groupAssistantParts}
-          indicator={section === 'reasoning' ? 'no-text' : 'never'}
+          indicator={section === 'tools' ? 'empty' : 'never'}
         >
           {({ part, children }) => {
             const target =
               part.type === 'group-reasoning' ||
               part.type === 'reasoning' ||
               part.type === 'indicator'
-                ? 'reasoning'
+                ? 'tools'
                 : part.type === 'group-tool' ||
                     (part.type === 'tool-call' && toolkit[part.toolName]?.display !== 'standalone')
                   ? 'tools'
@@ -768,53 +808,30 @@ function Assistant() {
             if (target !== section) return <></>;
             switch (part.type) {
               case 'group-tool':
-                if (part.indices.length === 1) return <>{children}</>;
+                // Keep the same ancestry from the first call onward. Switching a lone
+                // call's fragment to a disclosure remounts its renderer, loses user
+                // state and replays all row entrance animations during streaming.
                 return (
                   <ToolGroupRoot variant="ghost" defaultOpen>
-                    <DisclosureTrigger
-                      icon={<Wrench />}
-                      live={part.status.type === 'running'}
-                      label={part.status.type === 'running' ? '正在调用' : '已调用'}
-                      detail={`${part.indices.length} 个工具`}
-                      data-slot="tool-group-trigger"
-                    />
-                    <ToolGroupContent className={`${disclosureContentClass} [&>div]:gap-2!`}>
+                    {part.indices.length > 1 && (
+                      <DisclosureTrigger
+                        icon={<Wrench />}
+                        live={part.status.type === 'running'}
+                        label={part.status.type === 'running' ? '正在调用' : '已调用'}
+                        detail={`${part.indices.length} 个工具`}
+                        data-slot="tool-group-trigger"
+                      />
+                    )}
+                    <ToolGroupContent
+                      className={`${part.indices.length > 1 ? disclosureContentClass : '[&>div]:mt-0!'} [&>div]:gap-2!`}
+                    >
                       {children}
                     </ToolGroupContent>
                   </ToolGroupRoot>
                 );
-              case 'group-reasoning': {
-                // Native group keys follow raw part positions. Preserve manual disclosure
-                // choices by reasoning ordinal when a committed snapshot moves those parts.
-                const ordinal = content
-                  .slice(0, part.indices[0])
-                  .filter((item) => item.type === 'reasoning').length;
-                return (
-                  <ReasoningRoot
-                    variant="ghost"
-                    streaming={part.status.type === 'running'}
-                    open={reasoningOpen[ordinal]}
-                    onOpenChange={(open) =>
-                      setReasoningOpen((previous) => ({ ...previous, [ordinal]: open }))
-                    }
-                    className="mb-0"
-                  >
-                    <DisclosureTrigger
-                      icon={<Brain />}
-                      live={part.status.type === 'running'}
-                      label={part.status.type === 'running' ? '正在思考…' : '思考过程'}
-                    />
-                    <ReasoningContent
-                      aria-busy={part.status.type === 'running'}
-                      className={disclosureContentClass}
-                    >
-                      <ReasoningText className="ps-0">{children}</ReasoningText>
-                    </ReasoningContent>
-                  </ReasoningRoot>
-                );
-              }
+              case 'group-reasoning':
               case 'reasoning':
-                return <Reasoning {...part} />;
+                return <></>;
               case 'text':
                 return <AssistantText {...part} />;
               case 'tool-call':

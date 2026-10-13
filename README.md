@@ -27,7 +27,7 @@ pnpm dev
 Open **http://localhost:5173**:
 
 1. Select a model in the composer.
-2. Open the visitor menu at the bottom of the sidebar → **模型与 API Key** (Models & API Key). Configure **Base URL** and **API Key**, then click **保存 Key** (Save Key).
+2. Open the visitor menu at the bottom of the sidebar → **模型与 API Key** (Models & API Key). Configure **Model name**, **Base URL** and **API Key**, then click **保存配置** (Save settings).
 3. Send your first message.
 
 Try the included tool: **“Use `describe_text` to count the characters in `Hello world`. Reply with text only.”** It needs no search key or MCP server.
@@ -43,7 +43,7 @@ Try the included tool: **“Use `describe_text` to count the characters in `Hell
 - **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, and message footers in the browser.
 - **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
 - **Remote integrations.** Configured HTTPS MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.
-- **Guest access and personal keys.** Better Auth anonymous sessions isolate each browser's data. Users configure their own Base URL and API Key; Google sign-in and a deployment default key are optional.
+- **Guest access and personal keys.** Better Auth anonymous sessions isolate each browser's data. Users configure their own model name, Base URL and API Key; Google sign-in and a deployment default key are optional.
 
 Use this foundation for research assistants, data workflows, or creative Agents that call your services. MkHarness provides application and execution infrastructure; product-specific tools, image/video services, billing, and subscriptions are yours to add.
 
@@ -135,7 +135,9 @@ flowchart LR
 
 Each browser gets an authenticated anonymous Better Auth session. Clearing cookies or switching browsers loses access to that guest identity; cross-browser recovery and guest-to-account migration are not included.
 
-Keys are encrypted in D1 with AES-256-GCM, not persistently stored in the browser or included in chat history. The deployment operator holds the encryption secret and can decrypt them. Personal keys take precedence over an explicitly enabled deployment key for the same provider. The default `ALLOW_SERVER_MODEL_KEY=0` requires users to supply a key; setting it to `1` with `MODEL_API_KEY` enables an operator-funded default.
+Keys are encrypted in D1 with AES-256-GCM, excluded from chat history. Browser storage is opt-in: “Remember API Key” keeps a plaintext copy in localStorage for this identity, cleared on sign-out; it is never automatically re-uploaded. The deployment operator holds the encryption secret and can decrypt them. Personal keys take precedence over an explicitly enabled deployment key for the same provider. The default `ALLOW_SERVER_MODEL_KEY=0` requires users to supply a key; setting it to `1` with `MODEL_API_KEY` enables an operator-funded default.
+
+The default model list contains only DeepSeek-V4.1-Flash (`deepseek-flash`). A saved model name must be registered in Pi's native catalog; configure `MODEL_IDS` to expose additional models.
 
 Custom Base URLs must be public HTTPS endpoints supporting the selected model's native API: OpenAI Responses, Anthropic Messages, or DeepSeek Chat Completions. Changing the address does not change protocols. Redirects and private-network destinations are rejected.
 

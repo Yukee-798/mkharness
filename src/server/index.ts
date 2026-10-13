@@ -7,7 +7,8 @@ import { z } from 'zod';
 import { ModelCredentials } from './model-credentials';
 import {
   applicationModels,
-  applicationModelCatalog,
+  configuredModelCatalog,
+  validateModelSelection,
   modelProviders,
   registeredProvider,
 } from './models';
@@ -37,12 +38,17 @@ app.get('/api/capabilities', (c) => c.json({ extensionIds: extensionIds(c.env) }
 app.get('/api/settings/models', async (c) => {
   const credentials = new ModelCredentials(c.env, c.get('userId'));
   return c.json({
-    providers: modelProviders.map(({ id, name, factory }) => ({
+    providers: modelProviders.map(({ id, name, factory, defaultModel }) => ({
       id,
       name,
       baseUrl: factory().baseUrl!,
+      defaultModelId: defaultModel,
     })),
-    modelCatalog: applicationModelCatalog(c.env, applicationModels(c.env)),
+    modelCatalog: configuredModelCatalog(
+      c.env,
+      applicationModels(c.env),
+      await credentials.configuredModels(),
+    ),
     credentials: await Promise.all(modelProviders.map((p) => credentials.metadata(p.id))),
     credentialStorageReady: credentials.storageReady,
   });
@@ -64,18 +70,39 @@ app.on(['PUT', 'DELETE'], '/api/settings/model-credentials/:provider', async (c)
           .object({
             apiKey: z.string(),
             baseUrl: z.string().max(2048).optional(),
+            modelId: z.string().trim().min(1).max(200).optional(),
             expectedCurrentId: expected,
           })
           .strict()
       : z.object({ expectedCurrentId: expected }).strict();
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw new AppError(400, 'invalid_credential_request');
+  if (
+    'apiKey' in parsed.data &&
+    'modelId' in parsed.data &&
+    typeof parsed.data.modelId === 'string'
+  ) {
+    const models = applicationModels(c.env);
+    const model = models.getModel(provider, parsed.data.modelId);
+    if (!model)
+      throw new AppError(
+        400,
+        'unknown_model',
+        '模型名未在当前 Pi 目录注册，请填写受支持的 API 模型名',
+      );
+    validateModelSelection(c.env, models, { provider, modelId: model.id, thinkingLevel: 'off' });
+  }
   const credentials = new ModelCredentials(c.env, c.get('userId'));
   return c.json(
     'apiKey' in parsed.data
       ? await credentials.save(
           provider,
-          parsed.data as { apiKey: string; baseUrl?: string; expectedCurrentId: string | null },
+          parsed.data as {
+            apiKey: string;
+            baseUrl?: string;
+            modelId?: string;
+            expectedCurrentId: string | null;
+          },
         )
       : await credentials.remove(provider, parsed.data.expectedCurrentId),
   );

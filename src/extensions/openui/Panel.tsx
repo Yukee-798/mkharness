@@ -22,6 +22,7 @@ import { request } from '../../browser/api';
 import { type ResourceDraft, type SaveStatus } from '../../browser/draft';
 import { useResourceDrafts } from '../../browser/ResourceDrafts';
 import { Button } from '../../browser/ui/button';
+import { inputState } from './state';
 export type PanelBundle = {
   panelRef: string;
   ui: string;
@@ -190,9 +191,9 @@ export function Panel({
   const change = useCallback(
     (raw: Record<string, unknown>) => {
       try {
-        finiteJson(raw);
-        if (userEvent.current && !jsonEqual(raw, state.current)) markUserCommit();
-        state.current = raw as RawState;
+        const next = inputState(raw);
+        if (userEvent.current && !jsonEqual(next, state.current)) markUserCommit();
+        state.current = next;
         guard.ready = !bundle?.program || !!tools?.ready();
         if (mounted.current) setGuardTick((n) => n + 1);
         saver?.update(state.current);
@@ -224,8 +225,7 @@ export function Panel({
       }
       try {
         const params = actionParams(event.params);
-        const inputs = structuredClone({ ...state.current, ...event.formState });
-        finiteJson(inputs);
+        const inputs = inputState({ ...state.current, ...event.formState });
         void submit(event.humanFriendlyMessage || 'Analyze the current inputs', {
           action: 'extension_action',
           extensionId: 'openui',

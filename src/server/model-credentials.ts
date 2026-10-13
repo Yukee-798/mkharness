@@ -43,10 +43,15 @@ export class ModelCredentials {
   }
   private current(provider: string) {
     return this.env.DB.prepare(
-      'SELECT id,created_at,base_url FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL',
+      'SELECT id,created_at,base_url,model_id FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL',
     )
       .bind(this.owner, provider)
-      .first<{ id: string; created_at: number; base_url: string | null }>();
+      .first<{
+        id: string;
+        created_at: number;
+        base_url: string | null;
+        model_id: string | null;
+      }>();
   }
   async metadata(provider: string): Promise<CredentialMetadata> {
     const row = await this.current(provider),
@@ -55,11 +60,20 @@ export class ModelCredentials {
       provider,
       currentId: row?.id ?? null,
       baseUrl: row?.base_url ?? null,
+      modelId: row?.model_id ?? null,
       configured: !!row,
       updatedAt: row?.created_at ?? null,
       effectiveSource: row ? 'user' : serverDefaultAllowed ? 'server' : 'none',
       serverDefaultAllowed,
     };
+  }
+  async configuredModels() {
+    const { results } = await this.env.DB.prepare(
+      'SELECT provider,model_id AS modelId FROM model_credentials WHERE owner=? AND retired_at IS NULL AND model_id IS NOT NULL',
+    )
+      .bind(this.owner)
+      .all<{ provider: string; modelId: string }>();
+    return results;
   }
   private cleanup(time: number) {
     return this.env.DB.prepare(
@@ -68,7 +82,7 @@ export class ModelCredentials {
   }
   async save(
     provider: string,
-    input: { apiKey: string; baseUrl?: string; expectedCurrentId: string | null },
+    input: { apiKey: string; baseUrl?: string; modelId?: string; expectedCurrentId: string | null },
   ): Promise<CredentialMetadata> {
     const text = input.apiKey.trim();
     if (
@@ -94,7 +108,7 @@ export class ModelCredentials {
         'UPDATE model_credentials SET retired_at=? WHERE owner=? AND provider=? AND id=? AND retired_at IS NULL AND (SELECT COUNT(*) FROM model_credentials WHERE owner=? AND provider=?)<20',
       ).bind(time, this.owner, provider, input.expectedCurrentId, this.owner, provider),
       this.env.DB.prepare(
-        'INSERT INTO model_credentials(id,owner,provider,ciphertext,nonce,envelope_version,created_at,base_url) SELECT ?,?,?,?,?,1,?,? WHERE (changes()=1 OR (? IS NULL AND NOT EXISTS(SELECT 1 FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL))) AND (SELECT COUNT(*) FROM model_credentials WHERE owner=? AND provider=?)<20 RETURNING id',
+        'INSERT INTO model_credentials(id,owner,provider,ciphertext,nonce,envelope_version,created_at,base_url,model_id) SELECT ?,?,?,?,?,1,?,?,? WHERE (changes()=1 OR (? IS NULL AND NOT EXISTS(SELECT 1 FROM model_credentials WHERE owner=? AND provider=? AND retired_at IS NULL))) AND (SELECT COUNT(*) FROM model_credentials WHERE owner=? AND provider=?)<20 RETURNING id',
       ).bind(
         id,
         this.owner,
@@ -103,6 +117,7 @@ export class ModelCredentials {
         encode(nonce),
         time,
         baseUrl,
+        input.modelId ?? null,
         input.expectedCurrentId,
         this.owner,
         provider,

@@ -1,3 +1,5 @@
+@reference 'tailwindcss';
+
 /* Small appearance adjustments; native OpenUI state and actions remain intact. */
 /* OpenUI inline code uses body font tokens; keep it independent of prose weight. */
 .generated-panel :is(pre, code) {
@@ -5,6 +7,13 @@
 }
 .generated-panel .openui-card-sunk {
   box-shadow: none;
+}
+/* Explicit form actions share the available width; inline/link actions stay compact. */
+.generated-panel [role='form'] > .openui-buttons {
+  @apply w-full;
+}
+.generated-panel [role='form'] > .openui-buttons > .openui-button-base {
+  @apply min-w-0 flex-1;
 }
 .generated-panel :is(.openui-input-medium, .openui-select-trigger-md, .openui-button-base-medium) {
   min-height: 2.25rem;

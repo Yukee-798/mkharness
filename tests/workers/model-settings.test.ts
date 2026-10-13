@@ -38,12 +38,10 @@ it('reads the static provider catalog without a key, supplier request, or DO', a
     'deepseek',
   ]);
   expect(settings.modelCatalog.defaultSelection).toMatchObject({
-    provider: 'openai',
-    modelId: 'gpt-5-mini',
+    provider: 'deepseek',
+    modelId: 'deepseek-flash',
   });
-  expect(settings.modelCatalog.models.some((model: any) => model.provider === 'deepseek')).toBe(
-    true,
-  );
+  expect(settings.modelCatalog.models.map((model: any) => model.id)).toEqual(['deepseek-flash']);
   expect(
     settings.credentials.every((credential: any) => credential.effectiveSource === 'none'),
   ).toBe(true);
@@ -139,4 +137,55 @@ it('enforces session, Origin, registered providers and bounded strict input befo
     expect(
       (await app.request(url + 'openai', { method: 'PUT', headers, body }, settingsEnv)).status,
     ).toBe(400);
+});
+
+it('saves a registered API model name, narrows public choices and rejects unknown names before rotating the key', async () => {
+  const { settingsEnv, headers } = await guest();
+  const url = origin + '/api/settings/model-credentials/deepseek';
+  const save = await app.request(
+    url,
+    {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        apiKey: 'model-name-canary',
+        modelId: 'deepseek-v4-pro',
+        baseUrl: 'https://api.deepseek.com',
+        expectedCurrentId: null,
+      }),
+    },
+    settingsEnv,
+  );
+  expect(save.status).toBe(200);
+  const saved = (await save.json()) as any;
+  expect(saved.modelId).toBe('deepseek-v4-pro');
+  const settings = (await (
+    await app.request(origin + '/api/settings/models', { headers }, settingsEnv)
+  ).json()) as any;
+  expect(settings.modelCatalog.models.map((model: any) => model.id)).toEqual(['deepseek-v4-pro']);
+  expect(settings.modelCatalog.defaultSelection).toMatchObject({
+    modelId: 'deepseek-v4-pro',
+    thinkingLevel: 'high',
+  });
+  expect(JSON.stringify(settings)).not.toContain('model-name-canary');
+  const invalid = await app.request(
+    url,
+    {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        apiKey: 'replacement',
+        modelId: 'not-registered',
+        expectedCurrentId: saved.currentId,
+      }),
+    },
+    settingsEnv,
+  );
+  expect(invalid.status).toBe(400);
+  const unchanged = (await (
+    await app.request(origin + '/api/settings/models', { headers }, settingsEnv)
+  ).json()) as any;
+  expect(unchanged.credentials.find((item: any) => item.provider === 'deepseek').currentId).toBe(
+    saved.currentId,
+  );
 });

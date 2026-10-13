@@ -74,7 +74,7 @@ test('metadata-only settings, credential preflight and saved Base URL survive re
   expect(calls.filter((p) => p === 'POST /api/conversations')).toHaveLength(0);
   await page.getByLabel('Base URL', { exact: true }).fill('https://custom.example.com/v1');
   await page.getByLabel('API Key', { exact: true }).fill('E2E-CANARY-PERSONAL');
-  await page.getByRole('button', { name: '保存 Key' }).click();
+  await page.getByRole('button', { name: '保存配置' }).click();
   await expect(page.getByText('已保存，尚未验证连接')).toBeVisible();
   const data = await (await context.request.get('/api/settings/models')).json();
   expect(data.credentials.find((c: any) => c.provider === 'deepseek')).toMatchObject({

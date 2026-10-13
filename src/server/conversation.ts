@@ -47,7 +47,12 @@ import { observeRun } from './observe';
 import { browserEntries } from '../shared/stream';
 import { restoreToolProgress, toolProjector } from './tool-progress';
 import { createExtensionProjection } from './extension-state';
-import { applicationModels, applicationModelCatalog, validateModelSelection } from './models';
+import {
+  applicationModels,
+  applicationModelCatalog,
+  configuredModelCatalog,
+  validateModelSelection,
+} from './models';
 import { ModelCredentials } from './model-credentials';
 import {
   bindStoredExecution,
@@ -252,10 +257,12 @@ export class ConversationAgent extends Agent<Env> {
     if (!owner) throw new AppError(404, 'not_found');
     return new ModelCredentials(this.env, owner);
   }
-  private modelCatalog() {
-    return applicationModelCatalog(
+  private async modelCatalog() {
+    const preferences = (await (await this.credentials()).configuredModels?.()) ?? [];
+    return configuredModelCatalog(
       this.env as Env & { MODEL_IDS?: string; MODEL_THINKING_LEVEL?: string },
       this.models(),
+      preferences,
     );
   }
   private selection(config?: ModelSelection) {
@@ -376,7 +383,7 @@ export class ConversationAgent extends Agent<Env> {
     if (this.deleting) throw new AppError(404, 'not_found');
     const pi = await this.harness.pi();
     if (this.deleting) throw new AppError(404, 'not_found');
-    const selection = this.modelCatalog().defaultSelection;
+    const selection = applicationModelCatalog(this.env, this.models()).defaultSelection;
     return pi.root(BG, {
       agent: {
         model: { provider: selection.provider, modelId: selection.modelId },
@@ -459,7 +466,9 @@ export class ConversationAgent extends Agent<Env> {
           }
         }
         // Freeze this configuration update and source context across the host/Pi acceptance gap.
-        const selection = this.selection(command.config);
+        const selection = this.selection(
+          command.config ?? (await this.modelCatalog()).defaultSelection,
+        );
         const execution = {
           ...selection,
           credentialRef: await (await this.credentials()).select(selection.provider),
@@ -795,7 +804,7 @@ export class ConversationAgent extends Agent<Env> {
       }
     }
     const history = firstHistory ?? (await this.history(cursor));
-    const modelCatalog = this.modelCatalog();
+    const modelCatalog = await this.modelCatalog();
     const lastRequest = this.rows<{ payload: string }>(
       'SELECT payload FROM app_requests WHERE accepted<>-1 ORDER BY rowid DESC LIMIT 1',
     )[0];

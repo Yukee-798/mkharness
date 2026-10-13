@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
 import { ScrollArea } from './ui/scroll-area';
 import { ModelSettingsDialog } from './ModelSettings';
+import { retainModelKeys } from './local-model-key';
 import { ChatLoading } from './chat-loading';
 import { cn } from './ui/utils';
 import {
@@ -35,6 +36,9 @@ export function App() {
   });
   const queryClient = useQueryClient();
   const sessionId = session?.user.id;
+  useEffect(() => {
+    if (!isPending && !sessionError) retainModelKeys(sessionId);
+  }, [isPending, sessionId, sessionError]);
   useEffect(() => {
     // Clear the previous account, without cancelling reads mounted for the new one.
     queryClient.removeQueries({
@@ -240,6 +244,7 @@ function Workspace({
     try {
       const result = await authClient.signOut();
       if (result.error) throw new Error(result.error.message ?? '退出失败');
+      retainModelKeys();
     } catch (e) {
       setError((e as Error).message);
     } finally {

@@ -32,7 +32,7 @@ type ModelEnvironment = {
   MODEL_THINKING_LEVEL?: string;
 };
 export function applicationModelCatalog(env: ModelEnvironment, models: Models): ModelCatalog {
-  const provider = env.MODEL_PROVIDER?.trim() || 'openai';
+  const provider = env.MODEL_PROVIDER?.trim() || 'deepseek';
   const modelId =
     env.MODEL_ID?.trim() || modelProviders.find((p) => p.id === provider)?.defaultModel || '';
   const initial = models.getModel(provider, modelId);
@@ -109,4 +109,39 @@ export function applicationModels(env: ModelEnvironment): Models {
     });
   applicationModelCatalog(env, models);
   return models;
+}
+
+/** Public choices are explicit configuration, not the entire installed SDK catalog. */
+export function configuredModelCatalog(
+  env: ModelEnvironment,
+  models: Models,
+  preferences: readonly { provider: string; modelId: string }[] = [],
+): ModelCatalog {
+  const available = applicationModelCatalog(env, models);
+  const configured = preferences.filter((preference) =>
+    available.models.some(
+      (model) => model.provider === preference.provider && model.id === preference.modelId,
+    ),
+  );
+  const preferred = configured.find((p) => p.provider === available.defaultSelection.provider);
+  const selection = preferred
+    ? { ...available.defaultSelection, modelId: preferred.modelId }
+    : available.defaultSelection;
+  const ids = env.MODEL_IDS?.split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const choices = available.models.filter(
+    (model) =>
+      configured.some((p) => p.provider === model.provider && p.modelId === model.id) ||
+      (model.provider === selection.provider &&
+        (ids?.length ? ids.includes(model.id) : model.id === selection.modelId)),
+  );
+  const selected = models.getModel(selection.provider, selection.modelId)!;
+  return {
+    models: choices,
+    defaultSelection: {
+      ...selection,
+      thinkingLevel: clampThinkingLevel(selected, selection.thinkingLevel),
+    },
+  };
 }

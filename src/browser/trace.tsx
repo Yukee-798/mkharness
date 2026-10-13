@@ -51,17 +51,10 @@ export function TraceLine({
         </span>
       )}
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
-        {live ? (
-          <ShimmerLabel>
-            {label}
-            {detail ? ` ${detail}` : null}
-          </ShimmerLabel>
-        ) : (
-          <>
-            {label}
-            {detail ? ` ${detail}` : null}
-          </>
-        )}
+        <ShimmerLabel active={live}>
+          {label}
+          {detail ? ` ${detail}` : null}
+        </ShimmerLabel>
       </span>
       {meta ? <span className="text-muted-foreground/50 shrink-0">{meta}</span> : null}
     </div>
@@ -98,17 +91,10 @@ export function DisclosureTrigger({
         </span>
       )}
       <span className="text-muted-foreground group-hover/trigger:text-foreground min-w-0 truncate transition-colors">
-        {live ? (
-          <ShimmerLabel>
-            {label}
-            {detail ? ` ${detail}` : null}
-          </ShimmerLabel>
-        ) : (
-          <>
-            {label}
-            {detail ? ` ${detail}` : null}
-          </>
-        )}
+        <ShimmerLabel active={live}>
+          {label}
+          {detail ? ` ${detail}` : null}
+        </ShimmerLabel>
       </span>
       <DisclosureChevron />
     </CollapsibleTrigger>

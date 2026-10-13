@@ -27,7 +27,7 @@ pnpm dev
 打开 **http://localhost:5173**：
 
 1. 在输入框选择模型。
-2. 点击侧栏底部的访客菜单 → **模型与 API Key**，填写 **Base URL** 和 **API Key**，点击 **保存 Key**。
+2. 点击侧栏底部的访客菜单 → **模型与 API Key**，填写 **模型名**、**Base URL** 和 **API Key**，点击 **保存配置**。
 3. 发送第一条消息。
 
 可以先试内置工具：**“请使用 `describe_text` 工具，统计‘你好世界’的字符数，只用文字回答。”** 无需搜索 Key 或 MCP 服务。
@@ -43,7 +43,7 @@ pnpm dev
 - **前后端扩展。** 服务端接入 Pi 原生工具、提示词与 hooks；浏览器注册 assistant-ui Toolkit、工具标题装饰和回复 Footer。
 - **交互式生成 UI。** 可选 OpenUI 扩展支持表单、表格、图表、输入保存，以及有资源限制的 QuickJS 计算。
 - **远程集成。** 可配置 HTTPS MCP 工具、静态 Skills，以及包含 submit/query/cancel 和恢复引用保存的异步服务示例。
-- **免登录与个人 Key。** Better Auth 匿名会话隔离各浏览器的数据；用户自行配置 Base URL 与 API Key，也可启用 Google 登录和部署默认 Key。
+- **免登录与个人 Key。** Better Auth 匿名会话隔离各浏览器的数据；用户自行配置模型名、Base URL 与 API Key，也可启用 Google 登录和部署默认 Key。
 
 你可以在此基础上搭建调研助手、数据工作流，或调用自有服务的创作 Agent。MkHarness 提供应用与执行基础设施；业务工具、生图/视频服务、计费与订阅由你按需接入。
 
@@ -135,7 +135,9 @@ flowchart LR
 
 每个浏览器拥有经过认证的 Better Auth 匿名会话。清除 Cookie 或更换浏览器后无法找回原访客身份；不包含跨浏览器恢复和访客到账号的数据迁移。
 
-Key 在 D1 中使用 AES-256-GCM 加密保存，不持久保存到浏览器，也不写入聊天历史。部署者持有加密密钥，可以解密凭据。同一供应商的个人 Key 优先于显式启用的部署默认 Key。默认 `ALLOW_SERVER_MODEL_KEY=0` 要求用户提供 Key；设为 `1` 并配置 `MODEL_API_KEY` 可提供由部署者承担费用的默认 Key。
+Key 在 D1 中使用 AES-256-GCM 加密保存，不写入聊天历史。可选的“在此浏览器记住 API Key”会将明文副本保存在当前身份的 localStorage，退出时清除；不会自动重新上传。部署者持有加密密钥，可以解密凭据。同一供应商的个人 Key 优先于显式启用的部署默认 Key。默认 `ALLOW_SERVER_MODEL_KEY=0` 要求用户提供 Key；设为 `1` 并配置 `MODEL_API_KEY` 可提供由部署者承担费用的默认 Key。
+
+默认模型列表只显示 DeepSeek-V4.1-Flash（`deepseek-flash`）。填写的模型名必须已在 Pi 原生目录中注册；可通过 `MODEL_IDS` 配置额外模型。
 
 自定义 Base URL 必须是公开 HTTPS 地址，并支持所选模型的原生协议：OpenAI Responses、Anthropic Messages 或 DeepSeek Chat Completions。修改地址不切换协议；拒绝重定向和私有网络地址。
 

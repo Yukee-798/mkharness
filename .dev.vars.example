@@ -6,12 +6,12 @@ CREDENTIAL_ENCRYPTION_KEY=
 BETTER_AUTH_SECRET=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
-MODEL_PROVIDER=openai
-MODEL_ID=gpt-5-mini
+MODEL_PROVIDER=deepseek
+MODEL_ID=deepseek-flash
 # Optional deployment default; requires ALLOW_SERVER_MODEL_KEY=1.
 MODEL_API_KEY=
 # Optional
-# Comma-separated model allowlist for this provider; omitted = installed provider catalog.
+# Comma-separated model allowlist for this provider; omitted = only the configured model.
 # Must include MODEL_ID. Example for deepseek: deepseek-flash,deepseek-v4-pro
 MODEL_IDS=
 MODEL_THINKING_LEVEL=low

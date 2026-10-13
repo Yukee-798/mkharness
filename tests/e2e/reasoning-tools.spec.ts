@@ -78,6 +78,7 @@ test('tool rows have consistent spacing within a group and between standalone Pi
     .poll(() =>
       page
         .locator('[data-slot="tool-group-content"]')
+        .first()
         .evaluate((element) =>
           element
             .getAnimations({ subtree: true })
@@ -153,9 +154,9 @@ test('collapsed reasoning, tool groups and single tools share spacing across Pi 
   const group = page.getByRole('button', { name: '已调用 2 个工具', exact: true });
   await group.click();
   await expect(group).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('[data-slot="tool-group-content"]')).not.toBeVisible();
+  await expect(group.locator('..').locator('[data-slot="tool-group-content"]')).not.toBeVisible();
   const rows = page.locator(
-    '[data-slot="reasoning-trigger"], [data-slot="tool-group-trigger"], [data-slot="assistant-message"] > [data-slot="tool-call"] > button',
+    '[data-slot="reasoning-trigger"], [data-slot="tool-group-trigger"], [data-slot="tool-call"] > button:visible',
   );
   await expect(rows).toHaveCount(6);
   const expectEqualSpacing = async () => {

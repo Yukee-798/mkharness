@@ -20,7 +20,8 @@ import {
   type CompactionCheckpoint,
   type Cursor,
 } from '@earendil-works/pi-durable';
-export type CredentialAccess = Pick<ModelCredentials, 'select' | 'resolve'>;
+export type CredentialAccess = Pick<ModelCredentials, 'select' | 'resolve'> &
+  Partial<Pick<ModelCredentials, 'configuredModels'>>;
 const boundProviders = new WeakMap<MutableModels, Map<string, string>>();
 export function executionModels(base: Models) {
   const models = createModels({

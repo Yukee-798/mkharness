@@ -5,13 +5,14 @@ export type CredentialMetadata = {
   provider: string;
   currentId: string | null;
   baseUrl: string | null;
+  modelId?: string | null;
   configured: boolean;
   updatedAt: number | null;
   effectiveSource: 'user' | 'server' | 'none';
   serverDefaultAllowed: boolean;
 };
 export type ModelSettings = {
-  providers: { id: string; name: string; baseUrl: string }[];
+  providers: { id: string; name: string; baseUrl: string; defaultModelId?: string }[];
   modelCatalog: ModelCatalog;
   credentials: CredentialMetadata[];
   credentialStorageReady: boolean;
