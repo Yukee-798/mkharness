@@ -13,3 +13,6 @@ test-results/
 *.tsbuildinfo
 .tanstack/
 src/routeTree.gen.ts
+
+# Local research, plans, and validation notes.
+/docs/

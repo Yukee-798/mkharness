@@ -135,7 +135,7 @@ Use the same origin as `APP_URL`. Guest-to-account data migration is not include
 | Remote MCP tools                | `MCP_SERVERS` configuration with server IDs, HTTPS endpoints, tool allowlists, and secret names.                                                |
 | Async service integration       | [`src/server/remote-example.ts`](src/server/remote-example.ts); adapt submit/query/cancel to the provider's actual contract.                    |
 
-The `example` and `timing` extensions demonstrate tools and presentation decorations. Extensions are reviewed code shipped with your deployment; runtime installation and an external plugin marketplace are not included. Read the [extension guide](docs/extensions/README.md) for resource/CAS, action normalization, and progress contracts.
+The `example` and `timing` extensions demonstrate tools and presentation decorations. Extensions are reviewed code shipped with your deployment; runtime installation and an external plugin marketplace are not included. The host contracts are defined in [`src/server/contributions.ts`](src/server/contributions.ts) and [`src/browser/extensions.ts`](src/browser/extensions.ts).
 
 ## Architecture
 
@@ -163,16 +163,18 @@ pnpm test:e2e
 pnpm test:hmr
 ```
 
-Local regression evidence and real-provider/cloud acceptance are recorded separately. Mocked model I/O is not proof of a successful production deployment; use the [cloud acceptance checklist](docs/validation/acceptance.md) for your installation.
+Unit/workerd and browser tests use controlled model I/O. For your deployment, separately verify a real provider request, refresh/reconnect during execution, Stop, and recovery across redeployments. Mocked tests do not establish production acceptance.
 
 ## Documentation
 
 - [中文快速开始](README.zh-CN.md)
-- [Extension contracts and examples](docs/extensions/README.md)
-- [Architecture, configuration, and operations reference (中文)](docs/architecture.md)
-- [Guest access and BYOK verification](docs/validation/2026-10-12-guest-byok.md)
-- [Recovery and draft validation](docs/validation/2026-10-13-p2-recovery-and-drafts.md)
-- [Cloud acceptance checklist](docs/validation/acceptance.md)
+- [Server extension contracts](src/server/contributions.ts)
+- [Browser extension contracts](src/browser/extensions.ts)
+- [Example tool renderer](src/extensions/example/browser.tsx)
+- [Timing extension](src/extensions/timing/)
+- [Guest access and BYOK tests](tests/e2e/guest-byok.spec.ts)
+- [Task binding and recovery tests](tests/workers/task-binding.test.ts)
+- [Dependency patch notes](patches/README.md)
 
 Issues and pull requests are welcome. For bugs, include reproduction steps, dependency versions, and redacted logs; never include API keys or `.dev.vars`.
 

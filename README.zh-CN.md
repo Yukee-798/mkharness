@@ -135,7 +135,7 @@ https://YOUR_DOMAIN/api/auth/callback/google
 | 远程 MCP 工具              | `MCP_SERVERS` 配置 server ID、HTTPS endpoint、工具白名单与凭据变量名。                                              |
 | 异步服务                   | [`src/server/remote-example.ts`](src/server/remote-example.ts)；按供应商实际契约改造 submit/query/cancel。          |
 
-`example` 和 `timing` 展示工具与 UI 装饰的接入方式。扩展是经审核并随部署发布的代码，本期不支持运行时安装或外部插件市场。资源/CAS、动作规范化与进度契约见[扩展接入说明](docs/extensions/README.md)。
+`example` 和 `timing` 展示工具与 UI 装饰的接入方式。扩展是经审核并随部署发布的代码，本期不支持运行时安装或外部插件市场。宿主契约定义见 [`src/server/contributions.ts`](src/server/contributions.ts) 和 [`src/browser/extensions.ts`](src/browser/extensions.ts)。
 
 ## 架构
 
@@ -163,16 +163,18 @@ pnpm test:e2e
 pnpm test:hmr
 ```
 
-本地回归与真实供应商/云端验收分别记录。模拟模型 I/O 不代表生产部署已验证；请使用[云端验收清单](docs/validation/acceptance.md)验收自己的部署。
+unit/workerd 与浏览器测试使用受控模型 I/O。部署后需独立验收真实供应商请求、运行中刷新/重连、Stop 和跨部署恢复；模拟测试不代表生产验收通过。
 
 ## 文档
 
 - [English README](README.md)
-- [扩展契约与示例](docs/extensions/README.md)
-- [架构、配置与运维参考](docs/architecture.md)
-- [免登录与 BYOK 验证](docs/validation/2026-10-12-guest-byok.md)
-- [恢复与草稿验证](docs/validation/2026-10-13-p2-recovery-and-drafts.md)
-- [云端验收清单](docs/validation/acceptance.md)
+- [服务端扩展契约](src/server/contributions.ts)
+- [浏览器扩展契约](src/browser/extensions.ts)
+- [示例工具 renderer](src/extensions/example/browser.tsx)
+- [耗时扩展](src/extensions/timing/)
+- [免登录与 BYOK 测试](tests/e2e/guest-byok.spec.ts)
+- [任务绑定与恢复测试](tests/workers/task-binding.test.ts)
+- [依赖补丁说明](patches/README.md)
 
 欢迎提交 Issue 和 Pull Request。报告问题时请提供复现步骤、依赖版本和脱敏日志，不要附带 API Key 或 `.dev.vars`。
 
