@@ -74,6 +74,20 @@ for (const mobile of [false, true]) {
     await page.getByRole('button', { name: 'Account: Test User', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+    await expect(dialog.getByRole('button', { name: 'System', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await dialog.getByRole('button', { name: 'Dark', exact: true }).click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    await dialog.getByRole('button', { name: 'Light', exact: true }).click();
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await dialog.getByRole('button', { name: 'System', exact: true }).click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
     await expect(dialog.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -100,9 +114,12 @@ for (const mobile of [false, true]) {
     const key = await dialog.getByLabel('API Key', { exact: true }).elementHandle();
     await dialog.getByRole('tab', { name: 'General', exact: true }).click();
     const before = calls.length;
+    await dialog.getByRole('button', { name: 'Dark', exact: true }).click();
     await dialog.getByRole('button', { name: 'Language', exact: true }).click();
     await page.getByRole('menuitemradio', { name: '中文', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    expect(await page.evaluate(() => localStorage.getItem('mkharness.theme'))).toBe('dark');
     await expect(page.getByRole('dialog', { name: '设置', exact: true })).toBeVisible();
     await page.getByRole('tab', { name: '模型与 API Key', exact: true }).click();
     await expect(page.getByLabel('API Key', { exact: true })).toHaveValue('UNSAVED-E2E-CANARY');
@@ -117,6 +134,7 @@ for (const mobile of [false, true]) {
     await page.reload();
     await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+    await expect(page.locator('html')).toHaveClass(/dark/);
     // Opt-out: unsaved credentials are not persisted while the language preference is.
     expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).not.toContain(
       'UNSAVED-E2E-CANARY',
@@ -124,7 +142,9 @@ for (const mobile of [false, true]) {
   });
 }
 
-test('language switching preserves the active SSE observer and runtime', async ({ page }) => {
+test('language and theme switching preserve the active SSE observer and runtime', async ({
+  page,
+}) => {
   let observations = 0,
     snapshots = 0,
     submissions = 0;
@@ -180,6 +200,9 @@ test('language switching preserves the active SSE observer and runtime', async (
     const before = snapshots;
     await page.getByRole('button', { name: 'Account: Test User', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Dark', exact: true }).click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    await page.getByRole('button', { name: 'System', exact: true }).click();
     await page.getByRole('button', { name: 'Language', exact: true }).click();
     await page.getByRole('menuitemradio', { name: '中文', exact: true }).click();
     await page.getByRole('button', { name: '关闭', exact: true }).click();

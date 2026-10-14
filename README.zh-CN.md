@@ -32,7 +32,7 @@ pnpm dev
 2. 点击侧栏底部的访客菜单 → **Settings → Models & API Key**，填写 **模型名**、**Base URL** 和 **API Key**，点击 **Save configuration**。
 3. 发送第一条消息。
 
-应用界面默认英文。可在 **Settings → General → Language** 切换中文，语言选择保存在当前浏览器。
+应用界面默认英文。可在 **Settings → General → Language** 切换中文，在 **Appearance** 选择浅色、深色或跟随系统。偏好保存在当前浏览器，默认主题跟随系统。
 
 可以先试内置工具：**“请使用 `describe_text` 工具，统计‘你好世界’的字符数，只用文字回答。”** 无需搜索 Key 或 MCP 服务。
 

@@ -1,7 +1,8 @@
-import { ChevronDown, Languages, Settings2, KeyRound } from 'lucide-react';
+import { ChevronDown, Languages, Settings2, KeyRound, Sun, Moon, Monitor } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { ModelSettingsForm } from './ModelSettings';
 import { useLocale, type Locale } from './locale';
+import { useTheme } from './theme';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
@@ -105,6 +106,7 @@ function SettingsSections({
       <ScrollArea className="min-h-0 min-w-0 flex-1">
         <TabsContent value="general" className="px-6 pb-8 pt-6 md:px-10 md:pt-2">
           <LanguageSettings />
+          <AppearanceSettings />
         </TabsContent>
         <TabsContent
           value="models"
@@ -121,6 +123,39 @@ function SettingsSections({
         </TabsContent>
       </ScrollArea>
     </Tabs>
+  );
+}
+function AppearanceSettings() {
+  const { t } = useLocale();
+  const { theme = 'system', setTheme } = useTheme();
+  const options = [
+    { value: 'light', label: t('浅色'), Icon: Sun },
+    { value: 'dark', label: t('深色'), Icon: Moon },
+    { value: 'system', label: t('跟随系统'), Icon: Monitor },
+  ];
+  return (
+    <section className="space-y-4 border-b py-8">
+      <div className="space-y-2">
+        <h2 className="font-medium">{t('外观')}</h2>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {t('选择浅色、深色或跟随系统，设置保存在此浏览器中。')}
+        </p>
+      </div>
+      <div role="group" aria-label={t('外观')} className="grid grid-cols-3 gap-3">
+        {options.map(({ value, label, Icon }) => (
+          <Button
+            key={value}
+            variant="outline"
+            aria-pressed={theme === value}
+            onClick={() => setTheme(value)}
+            className="h-24 min-w-0 flex-col gap-3 rounded-xl px-2 shadow-none aria-pressed:border-foreground/30 aria-pressed:bg-muted md:h-28"
+          >
+            <Icon className="size-5" />
+            {label}
+          </Button>
+        ))}
+      </div>
+    </section>
   );
 }
 function LanguageSettings() {

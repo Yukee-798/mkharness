@@ -32,7 +32,7 @@ Open **http://localhost:5173**:
 2. Open the visitor menu at the bottom of the sidebar → **Settings → Models & API Key**. Configure **Model name**, **Base URL** and **API Key**, then click **Save configuration**.
 3. Send your first message.
 
-The interface defaults to English. Switch to Chinese in **Settings → General → Language**; your choice is remembered in this browser.
+The interface defaults to English. Switch to Chinese in **Settings → General → Language**, and choose **Light**, **Dark**, or **System** in **Appearance**. These preferences are remembered in this browser; the default theme follows your system.
 
 Try the included tool: **“Use `describe_text` to count the characters in `Hello world`. Reply with text only.”** It needs no search key or MCP server.
 

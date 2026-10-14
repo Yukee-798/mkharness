@@ -5,6 +5,12 @@ export const english: Record<string, string> = {
   通用: 'General',
   '管理此浏览器的偏好与模型配置。': 'Manage browser preferences and model configuration.',
   语言: 'Language',
+  外观: 'Appearance',
+  浅色: 'Light',
+  深色: 'Dark',
+  跟随系统: 'System',
+  '选择浅色、深色或跟随系统，设置保存在此浏览器中。':
+    'Choose light, dark, or follow your system. This preference is saved in this browser.',
   '选择界面语言，设置保存在此浏览器中。':
     'Choose the interface language. This preference is saved in this browser.',
   '模型与 API Key': 'Models & API Key',
