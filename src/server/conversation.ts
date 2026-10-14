@@ -80,16 +80,29 @@ class RequestRecovery extends LifecycleCapability {
     if (this.owner.needsRecovery()) await this.schedule();
   }
   schedule() {
+    // Keep a condemned object's deadline across retries and cold alarm wakes.
+    if (this.owner.deleting && this.lifecycle.jobs.get('reconcile')?.exclusive)
+      return this.lifecycle.jobs.rearm();
     return this.lifecycle.jobs.push({
       id: 'reconcile',
       fn: 'reconcile',
-      time: Date.now(),
+      // Like the SDK's deferred destruction, teardown needs its own invocation.
+      // Leave the short admission RPC time to return before destroy aborts the isolate.
+      time: Date.now() + (this.owner.deleting ? 1000 : 0),
       singleflight: true,
+      exclusive: this.owner.deleting,
       recoveryLoop: true,
     });
   }
   async onJob() {
     await this.owner.reconcile();
+  }
+  onJobError() {
+    if (!this.owner.deleting) return;
+    // The public directory may already be gone, so no request will wake cleanup.
+    // Preserve the same native job after retry exhaustion, without a hot retry loop.
+    console.error(JSON.stringify({ stage: 'deletion', error: 'cleanup_retry' }));
+    return { rescheduleAt: Date.now() + 60_000 };
   }
 }
 export class ConversationAgent extends Agent<Env> {
@@ -98,6 +111,7 @@ export class ConversationAgent extends Agent<Env> {
   private admission: Promise<unknown> = Promise.resolve();
   private recovery: RequestRecovery;
   private stopWork?: Promise<void>;
+  private deleteCloseWork?: Promise<void>;
   private deletionId?: string;
   private mcpPrepared?: Awaited<ReturnType<typeof buildMcp>>;
   private deleteWork?: Promise<void>;
@@ -125,6 +139,7 @@ export class ConversationAgent extends Agent<Env> {
     this.harness = new PiHarness({
       defaults: { model: { provider: env.MODEL_PROVIDER, id: env.MODEL_ID } },
       harness: async ({ storage: nativeStorage, context }) => {
+        if (this.deleting) throw new AppError(404, 'not_found');
         const runtime: { pi?: Harness; superseded: boolean } = { superseded: false };
         const storage = claimPiStorage(nativeStorage, ctx.storage, () => {
           runtime.superseded = true;
@@ -246,7 +261,9 @@ export class ConversationAgent extends Agent<Env> {
       },
     });
     this.recovery = new RequestRecovery(this);
-    this.lifecycle.use(this.harness).use(this.recovery);
+    // A condemned object must not resume models or replay tools on a cleanup wake.
+    if (!this.deleting) this.lifecycle.use(this.harness);
+    this.lifecycle.use(this.recovery);
   }
   protected models(): Models {
     return applicationModels(this.env);
@@ -623,13 +640,24 @@ export class ConversationAgent extends Agent<Env> {
       this.deletionId = id;
       this.setStopping(true);
       await this.recovery.schedule();
+      // Seal Pi now; the alarm joins the same close before erasing storage.
+      this.ctx.waitUntil(this.closeForDelete());
     });
-    await this.finishDelete();
+  }
+  private closeForDelete(): Promise<void> {
+    return (this.deleteCloseWork ??= (async () => {
+      // Close only an existing runtime: native close seals admission, signals and joins
+      // invocations before closing Storage. Never open Pi just to erase a condemned DO.
+      if (this.stopWork) await this.stopWork;
+      await this.harness.dispose();
+    })().catch((error) => {
+      this.deleteCloseWork = undefined;
+      throw error;
+    }));
   }
   private finishDelete(): Promise<void> {
     return (this.deleteWork ??= (async () => {
-      // Wait for tools to settle before disposing Pi and erasing the DO database.
-      await this.finishStop();
+      await this.closeForDelete();
       await this.env.DB.prepare('DELETE FROM conversations WHERE id=?')
         .bind(this.deletionId!)
         .run();

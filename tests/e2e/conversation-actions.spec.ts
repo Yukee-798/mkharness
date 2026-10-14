@@ -39,7 +39,7 @@ async function workspace(page: Page) {
         });
       }
       chats.splice(chats.indexOf(chat), 1);
-      return route.fulfill({ json: { deleted: true } });
+      return route.fulfill({ status: 202, json: { deleting: true } });
     }
     return route.fulfill({ status: 400, json: { error: { code: 'unexpected' } } });
   });
@@ -95,10 +95,8 @@ for (const mobile of [false, true]) {
       .click();
     await page.getByRole('menuitem', { name: '删除聊天' }).click();
     await page.getByRole('button', { name: '确认删除', exact: true }).click();
-    await expect(
-      page.getByRole('heading', { name: '今天想解决什么问题？', exact: true }),
-    ).toBeVisible();
-    expect(new URL(page.url()).searchParams.has('chat')).toBe(false);
+    await expect(page.getByText('今天想解决什么问题？', { exact: true })).toBeVisible();
+    await expect(page).not.toHaveURL(/[?&]chat=/);
     expect(mutations).toEqual(['PATCH', 'DELETE', 'DELETE']);
   });
 }
@@ -122,8 +120,6 @@ test('a failed deletion remains retryable and a chat deleted elsewhere closes on
   expect(mutations).toEqual(['DELETE', 'DELETE']);
   chats.length = 0;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(
-    page.getByRole('heading', { name: '今天想解决什么问题？', exact: true }),
-  ).toBeVisible();
-  expect(new URL(page.url()).searchParams.has('chat')).toBe(false);
+  await expect(page.getByText('今天想解决什么问题？', { exact: true })).toBeVisible();
+  await expect(page).not.toHaveURL(/[?&]chat=/);
 });

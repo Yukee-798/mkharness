@@ -167,7 +167,12 @@ app.delete('/api/conversations/:id', async (c) => {
   await c.env.CONVERSATIONS.getByName(c.get('conversationId')).deleteConversation(
     c.get('conversationId'),
   );
-  return c.json({ deleted: true });
+  // The DO has durably accepted teardown; remove access from outside its aborting
+  // invocation. Its recovery job repeats this idempotently before wiping storage.
+  await c.env.DB.prepare('DELETE FROM conversations WHERE id=? AND owner=?')
+    .bind(c.get('conversationId'), c.get('userId'))
+    .run();
+  return c.json({ deleting: true }, 202);
 });
 app.post('/api/conversations/:id/runs', async (c) => {
   let raw: string;

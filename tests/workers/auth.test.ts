@@ -1,5 +1,5 @@
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
-import { beforeAll, it, expect } from 'vitest';
+import { beforeAll, it, expect, vi } from 'vitest';
 import { makeSignature } from 'better-auth/crypto';
 import app from '../../src/server/index';
 const cookie = async (token: string) =>
@@ -161,7 +161,44 @@ it('renames only owned chats, validates titles and preserves explicit names on s
   await env.CONVERSATIONS.getByName(id).stopConversation();
 });
 
-it('deletes owned chats only, waits for running tools, withdraws the queue and erases durable content', async () => {
+it('accepts empty-chat deletion without running destructive teardown inside the RPC', async () => {
+  const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
+  const created = await app.request(
+    'http://localhost:5173/api/conversations',
+    { method: 'POST', headers },
+    env,
+  );
+  const { id } = (await created.json()) as { id: string };
+  const target = env.CONVERSATIONS.getByName(id);
+  let destroyed = false;
+  await runInDurableObject(target, (instance) => {
+    const destroy = instance.destroy.bind(instance);
+    instance.destroy = async () => {
+      destroyed = true;
+      await destroy();
+    };
+  });
+  const response = await app.request(
+    `http://localhost:5173/api/conversations/${id}`,
+    { method: 'DELETE', headers },
+    env,
+  );
+  // Workerd may deliver a reply before ctx.abort; production consistently loses it.
+  // Lock down the cause rather than depend on the local RPC-abort timing.
+  expect(destroyed).toBe(false);
+  expect(response.status).toBe(202);
+  expect(await response.json()).toEqual({ deleting: true });
+  expect(
+    await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
+  ).toBeNull();
+  await runInDurableObject(target, async (instance) => {
+    // A late observer or model-preparation callback cannot start another runtime.
+    await expect(instance.harness.pi()).rejects.toMatchObject({ code: 'not_found' });
+  });
+  await vi.waitFor(() => expect(destroyed).toBe(true), { timeout: 5000, interval: 20 });
+});
+
+it('deletes owned chats only, stops running work and erases durable content', async () => {
   const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
   const created = await app.request(
     'http://localhost:5173/api/conversations',
@@ -195,6 +232,14 @@ it('deletes owned chats only, waits for running tools, withdraws the queue and e
       Date.now(),
     );
   });
+  let erased = false;
+  await runInDurableObject(target, (_instance, state) => {
+    const deleteAll = state.storage.deleteAll.bind(state.storage);
+    state.storage.deleteAll = async () => {
+      await deleteAll();
+      erased = true;
+    };
+  });
   const deleting = app.request(url, { method: 'DELETE', headers }, env);
   for (let i = 0; i < 100; i++) {
     if (await runInDurableObject(target, (instance) => instance.deleting)) break;
@@ -203,11 +248,14 @@ it('deletes owned chats only, waits for running tools, withdraws the queue and e
   expect(
     await target.submitRun({ runId: crypto.randomUUID(), text: 'racing submit' }),
   ).toMatchObject({ error: { status: 404 } });
-  expect((await deleting).status).toBe(200);
+  const response = await deleting;
+  expect(response.status).toBe(202);
+  expect(await response.json()).toEqual({ deleting: true });
   expect(
     await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
   ).toBeNull();
   expect((await app.request(url + '/snapshot', { headers }, env)).status).toBe(404);
+  await vi.waitFor(() => expect(erased).toBe(true), { timeout: 5000, interval: 20 });
   await abortAllDurableObjects();
   const fresh = env.CONVERSATIONS.get(target.id);
   await runInDurableObject(fresh, (_instance, state) => {
@@ -217,7 +265,7 @@ it('deletes owned chats only, waits for running tools, withdraws the queue and e
   expect(JSON.parse(await fresh.snapshot()).entries).toEqual([]);
 });
 
-it('resumes a persisted deletion after eviction without restoring a directory entry', async () => {
+it('retains failed cleanup after native retry exhaustion until teardown can succeed', async () => {
   const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
   const created = await app.request(
     'http://localhost:5173/api/conversations',
@@ -226,44 +274,126 @@ it('resumes a persisted deletion after eviction without restoring a directory en
   );
   const { id } = (await created.json()) as { id: string };
   const target = env.CONVERSATIONS.getByName(id);
-  await runInDurableObject(target, (_instance, state) => {
-    state.storage.sql.exec('INSERT INTO app_meta(key,value) VALUES(?,?)', 'deleting', id);
+  let attempts = 0;
+  let restore = () => {};
+  let erased = false;
+  await runInDurableObject(target, (instance, state) => {
+    const spy = vi.spyOn(instance, 'destroy').mockImplementation(async () => {
+      attempts++;
+      throw new Error('fixture cleanup unavailable');
+    });
+    restore = () => spy.mockRestore();
+    const deleteAll = state.storage.deleteAll.bind(state.storage);
+    state.storage.deleteAll = async () => {
+      await deleteAll();
+      erased = true;
+    };
   });
-  await abortAllDurableObjects();
-  for (let i = 0; i < 150; i++) {
-    // Wake the same object while retaining SQLite, as an alarm or retried request would.
-    let snapshot: { entries?: unknown[]; error?: { code: string } } | undefined;
-    try {
-      snapshot = JSON.parse(await env.CONVERSATIONS.get(target.id).snapshot());
-    } catch (error) {
-      // destroy() can invalidate the very RPC that woke recovery. It is success only
-      // when the authoritative directory is already gone; other failures still fail.
-      expect((error as Error).message).toBe('destroyed');
-      expect(
-        await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
-      ).toBeNull();
-    }
-    if (!(await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first())) {
-      // D1 deletion precedes destroy(). A deleting response or the invalidated RPC
-      // is still in flight; wait for a genuinely fresh, empty SQLite instance.
-      if (!snapshot?.entries) {
-        if (snapshot) expect(snapshot.error?.code).toBe('not_found');
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        continue;
-      }
-      expect(snapshot.entries).toEqual([]);
-      expect(
-        (
-          await app.request(
-            `http://localhost:5173/api/conversations/${id}/snapshot`,
-            { headers },
-            env,
-          )
-        ).status,
-      ).toBe(404);
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error('Deletion did not recover');
+  expect(
+    (
+      await app.request(
+        `http://localhost:5173/api/conversations/${id}`,
+        { method: 'DELETE', headers },
+        env,
+      )
+    ).status,
+  ).toBe(202);
+  await vi.waitFor(
+    async () => {
+      expect(attempts).toBe(3);
+      await runInDurableObject(target, (_instance, state) => {
+        const job = state.storage.sql
+          .exec("SELECT time,running FROM cf_agents_jobs WHERE capability='app-requests'")
+          .one();
+        expect(job.running).toBe(0);
+        expect(Number(job.time)).toBeGreaterThan(Date.now() + 30_000);
+        expect(
+          state.storage.sql.exec("SELECT value FROM app_meta WHERE key='deleting'").one().value,
+        ).toBe(id);
+      });
+    },
+    { timeout: 5000, interval: 20 },
+  );
+  expect(erased).toBe(false);
+  expect(
+    await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
+  ).toBeNull();
+  restore();
+  // Bring the persisted deadline forward in this fixture, rather than wait a minute.
+  await runInDurableObject(target, async (instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE cf_agents_jobs SET time=? WHERE capability='app-requests'",
+      Date.now() + 100,
+    );
+    await instance.lifecycle.rearmAlarm();
+  });
+  await vi.waitFor(() => expect(erased).toBe(true), { timeout: 5000, interval: 20 });
 });
+
+for (const scheduled of [false, true]) {
+  it(`recovers ${scheduled ? 'scheduled' : 'interrupted admission of'} deletion after eviction without reopening Pi`, async () => {
+    const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
+    const created = await app.request(
+      'http://localhost:5173/api/conversations',
+      { method: 'POST', headers },
+      env,
+    );
+    const { id } = (await created.json()) as { id: string };
+    const target = env.CONVERSATIONS.getByName(id);
+    if (scheduled) await target.deleteConversation(id);
+    else
+      await runInDurableObject(target, (_instance, state) => {
+        state.storage.sql.exec('INSERT INTO app_meta(key,value) VALUES(?,?)', 'deleting', id);
+      });
+    const deadline = scheduled
+      ? await runInDurableObject(
+          target,
+          (_instance, state) =>
+            state.storage.sql
+              .exec("SELECT time FROM cf_agents_jobs WHERE capability='app-requests'")
+              .one().time,
+        )
+      : undefined;
+    await abortAllDurableObjects();
+    const resumed = env.CONVERSATIONS.get(target.id);
+    let erased = false;
+    await runInDurableObject(resumed, (instance, state) => {
+      expect(instance.deleting).toBe(true);
+      if (scheduled)
+        expect(
+          state.storage.sql
+            .exec("SELECT time FROM cf_agents_jobs WHERE capability='app-requests'")
+            .one().time,
+        ).toBe(deadline);
+      vi.spyOn(instance.harness, 'pi').mockImplementation(() => {
+        throw new Error('Deleting recovery must not open a runtime');
+      });
+      const deleteAll = state.storage.deleteAll.bind(state.storage);
+      state.storage.deleteAll = async () => {
+        await deleteAll();
+        erased = true;
+      };
+    });
+    expect(JSON.parse(await resumed.snapshot())).toMatchObject({ error: { code: 'not_found' } });
+    await vi.waitFor(() => expect(erased).toBe(true), { timeout: 5000, interval: 20 });
+    expect(
+      await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
+    ).toBeNull();
+    expect(
+      (
+        await app.request(
+          `http://localhost:5173/api/conversations/${id}/snapshot`,
+          { headers },
+          env,
+        )
+      ).status,
+    ).toBe(404);
+    await abortAllDurableObjects();
+    const fresh = env.CONVERSATIONS.get(target.id);
+    await runInDurableObject(fresh, (_instance, state) => {
+      expect(state.storage.sql.exec('SELECT * FROM app_meta').toArray()).toEqual([]);
+      expect(state.storage.sql.exec('SELECT * FROM app_requests').toArray()).toEqual([]);
+    });
+    expect(JSON.parse(await fresh.snapshot()).entries).toEqual([]);
+  });
+}

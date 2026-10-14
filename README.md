@@ -44,7 +44,7 @@ Try asking a question, requesting an interactive plan, or reading a public web p
 
 - **A working chat app.** Streaming responses, reasoning and tool activity, model and thinking-level selection, conversation history, and reply/tool timing. Built with assistant-ui, shadcn/ui, and Tailwind CSS.
 - **Image attachments.** Preview and remove PNG, JPEG, WebP, or GIF images using assistant-ui; send images with text or on their own to an image-capable model. Up to 4 images totaling 512 KiB per message, retained in Pi history for retries and recovery.
-- **Durable Agent execution.** Each conversation runs in its own Durable Object with PiHarness. Submissions queue, history persists, and execution can reconstruct after interruption. Closing the browser detaches observation; Stop is a separate action.
+- **Durable Agent execution.** Each conversation runs in its own Durable Object with PiHarness. Submissions queue, history persists, and execution can reconstruct after interruption. Closing the browser detaches observation; Stop is a separate action. Deletion returns `202` after durable acceptance and removal from the conversation directory; a native lifecycle alarm joins runtime shutdown and erases stored content, including after an interruption.
 - **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, and message footers in the browser.
 - **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
 - **Remote integrations.** Configured HTTPS MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.

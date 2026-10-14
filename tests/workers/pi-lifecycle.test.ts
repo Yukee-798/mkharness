@@ -116,6 +116,9 @@ it('joins application deletion before closing and deleting real storage once', a
     let closed = false;
     pi.close = async (context) => {
       await close(context);
+      // Keep close pending beyond the teardown alarm: disposal must join this
+      // very promise even though PiHarness has already released its cached handle.
+      await new Promise((resolve) => setTimeout(resolve, 1300));
       closed = true;
       await env.DB.prepare("INSERT INTO lifecycle_delete(chat,phase,closed)VALUES(?,'close',1)")
         .bind(id)
@@ -135,8 +138,19 @@ it('joins application deletion before closing and deleting real storage once', a
         .run();
     };
   });
-  // Native destroy aborts the old isolate; observe its facts in independent test D1.
-  await Promise.allSettled([stub.deleteConversation(id), stub.deleteConversation(id)]);
+  // Both admission RPCs must return normally; native teardown runs on a later alarm.
+  await Promise.all([stub.deleteConversation(id), stub.deleteConversation(id)]);
+  await vi.waitFor(
+    async () =>
+      expect(
+        await env.DB.prepare(
+          "SELECT closed FROM lifecycle_delete WHERE chat=? AND phase='remaining'",
+        )
+          .bind(id)
+          .first('closed'),
+      ).toBe(0),
+    { timeout: 5000, interval: 20 },
+  );
   expect(
     (await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).all()).results,
   ).toEqual([]);
