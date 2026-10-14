@@ -1,9 +1,15 @@
+import {
+  ImageComposer,
+  AddImage,
+  MessageImages,
+  imageAttachmentAdapter,
+} from './image-attachments';
+import { browserUserContent } from '../shared/images';
 import { useLocale } from './locale';
 import { ExtensionContext, useExtensionContext } from './extension-context';
 import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import {
   AssistantRuntimeProvider,
-  ComposerPrimitive,
   useAuiState,
   ThreadPrimitive,
   MessagePrimitive,
@@ -193,7 +199,11 @@ export function Chat({
     error ?? (latest?.status === 'error' ? latest.error : undefined) ?? query.error;
   const credentialRequired =
     visibleError instanceof ApiError && visibleError.code === 'credential_required';
-  const submit = async (message: string, source?: RunCommand['source']) => {
+  const submit = async (
+    message: string,
+    source?: RunCommand['source'],
+    images?: RunCommand['images'],
+  ) => {
     if (
       !id &&
       (!selected ||
@@ -205,7 +215,7 @@ export function Chat({
       throw new ApiError(400, 'credential_required', '请先配置所选模型的 Base URL 与 API Key');
     }
     try {
-      await send(message, source, selected);
+      await send(message, source, selected, images);
     } catch (e) {
       if (e instanceof ApiError && e.code === 'credential_required')
         onSettings?.(selected?.provider);
@@ -261,12 +271,12 @@ export function Chat({
   }, [snapshot]);
   // The wrapper uses assistant-ui focus behavior; submission deliberately stays HTTP-only.
   // Calling runtime.send/abort here would replace the live subscription or cancel a durable task.
-  const renderedSnapshot = snapshot ?? (initialSubmission ? emptySnapshot : undefined);
+  const renderedSnapshot = snapshot ?? (!id || initialSubmission ? emptySnapshot : undefined);
   const submitting = sending || latest?.status === 'pending';
   const composerReady = !id || !!renderedSnapshot;
-  const ComposerRoot = renderedSnapshot ? ComposerPrimitive.Root : 'form';
   const hasPending = !!snapshot?.pending.length || accepted.length > 0;
   const isStopping = stopSending || !!snapshot?.stopping;
+  const composerVersion = draftVersion.current;
   const footer = (
     <div className="space-y-3">
       {remote
@@ -410,104 +420,111 @@ export function Chat({
           </AlertDescription>
         </Alert>
       )}
-      <ComposerRoot
+      <ImageComposer
         className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!composerReady || !text.trim() || submitting || isStopping) return;
-          const submittedVersion = draftVersion.current;
+        onSubmit={async (images) => {
+          if (!composerReady || (!text.trim() && !images?.length) || submitting || isStopping)
+            return false;
+          const submittedVersion = composerVersion;
           setSending(true);
           try {
-            await submit(text);
+            await submit(text, undefined, images);
             if (draftVersion.current === submittedVersion) setText('');
+            return true;
           } catch (e) {
             setError(e as Error);
+            return false;
           } finally {
             setSending(false);
           }
         }}
       >
-        <label htmlFor="message" className="sr-only">
-          {t('消息')}
-        </label>
-        <Textarea
-          id="message"
-          value={text}
-          onChange={(e) => {
-            draftVersion.current++;
-            setText(e.target.value);
-          }}
-          rows={2}
-          placeholder={t('描述你的问题，或说说你想完成什么')}
-          className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
-          disabled={!composerReady || isStopping}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              e.currentTarget.form?.requestSubmit();
-            }
-          }}
-        />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            {catalog && selected ? (
-              <ModelPicker
-                catalog={catalog}
-                value={selected}
-                onChange={setSelection}
-                disabled={submitting || isStopping}
-              />
-            ) : (
-              <span className="px-1 text-[11px] text-muted-foreground">
-                {t('Shift + Enter 换行')}
-              </span>
-            )}
-          </div>
-          <Button
-            type={hasPending || isStopping ? 'button' : 'submit'}
-            size="icon"
-            className="rounded-full"
-            aria-label={
-              isStopping
-                ? t('正在停止…')
-                : submitting
-                  ? t('提交中…')
-                  : hasPending
-                    ? t('停止并撤回排队')
-                    : t('发送')
-            }
-            disabled={
-              !composerReady ||
-              submitting ||
-              isStopping ||
-              (!hasPending && (!text.trim() || (!id && settings.isPending)))
-            }
-            onClick={
-              hasPending
-                ? async () => {
-                    setStopSending(true);
-                    try {
-                      await request(`/conversations/${id}/stop`, { method: 'POST' });
-                      refresh();
-                    } catch (e) {
-                      setError(e as Error);
-                    } finally {
-                      setStopSending(false);
-                    }
-                  }
-                : undefined
-            }
-          >
-            {submitting || isStopping ? (
-              <LoaderCircle className="size-4 motion-safe:animate-spin" />
-            ) : hasPending ? (
-              <Square className="size-4" />
-            ) : (
-              <ArrowUp className="size-4" />
-            )}
-          </Button>
-        </div>
-      </ComposerRoot>
+        {(hasImages) => (
+          <>
+            <label htmlFor="message" className="sr-only">
+              {t('消息')}
+            </label>
+            <Textarea
+              id="message"
+              value={text}
+              onChange={(e) => {
+                draftVersion.current++;
+                setText(e.target.value);
+              }}
+              rows={2}
+              placeholder={t('描述你的问题，或说说你想完成什么')}
+              className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
+              disabled={!composerReady || isStopping}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <AddImage disabled={!composerReady || submitting || isStopping} />
+              <div className="min-w-0 flex-1">
+                {catalog && selected ? (
+                  <ModelPicker
+                    catalog={catalog}
+                    value={selected}
+                    onChange={setSelection}
+                    disabled={submitting || isStopping}
+                  />
+                ) : (
+                  <span className="px-1 text-[11px] text-muted-foreground">
+                    {t('Shift + Enter 换行')}
+                  </span>
+                )}
+              </div>
+              <Button
+                type={hasPending || isStopping ? 'button' : 'submit'}
+                size="icon"
+                className="rounded-full"
+                aria-label={
+                  isStopping
+                    ? t('正在停止…')
+                    : submitting
+                      ? t('提交中…')
+                      : hasPending
+                        ? t('停止并撤回排队')
+                        : t('发送')
+                }
+                disabled={
+                  !composerReady ||
+                  submitting ||
+                  isStopping ||
+                  (!hasPending && ((!text.trim() && !hasImages) || (!id && settings.isPending)))
+                }
+                onClick={
+                  hasPending
+                    ? async () => {
+                        setStopSending(true);
+                        try {
+                          await request(`/conversations/${id}/stop`, { method: 'POST' });
+                          refresh();
+                        } catch (e) {
+                          setError(e as Error);
+                        } finally {
+                          setStopSending(false);
+                        }
+                      }
+                    : undefined
+                }
+              >
+                {submitting || isStopping ? (
+                  <LoaderCircle className="size-4 motion-safe:animate-spin" />
+                ) : hasPending ? (
+                  <Square className="size-4" />
+                ) : (
+                  <ArrowUp className="size-4" />
+                )}
+              </Button>
+            </div>
+          </>
+        )}
+      </ImageComposer>
     </div>
   );
   return (
@@ -520,6 +537,7 @@ export function Chat({
             userId={userId}
             snapshot={renderedSnapshot}
             initialSubmission={initialSubmission}
+            busy={submitting || hasPending || isStopping}
             restoration={restoration}
             submit={submit}
             done={refresh}
@@ -528,25 +546,21 @@ export function Chat({
             progress={setRemote}
             footer={footer}
           />
-        ) : !id ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 py-10">
-            <div className="w-full max-w-3xl space-y-8">
-              <div className="text-center">
-                <MessageSquare className="mx-auto mb-5 size-8 text-muted-foreground" />
-                <h1 className="text-2xl font-semibold tracking-tight">
-                  {t('今天想解决什么问题？')}
-                </h1>
-                <p className="mt-3 text-sm text-muted-foreground">
-                  {t('直接提问，或描述你想完成的内容。')}
-                </p>
-              </div>
-              {footer}
-            </div>
-          </div>
         ) : (
           <>
             <ChatLoading />
-            <div className="mx-auto w-full max-w-3xl px-4 pb-4">{footer}</div>
+            <div className="mx-auto w-full max-w-3xl px-4 pb-4">
+              {visibleError && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {t(visibleError.message)}
+                    <Button variant="outline" size="sm" onClick={refresh}>
+                      {t('重新连接')}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -558,6 +572,7 @@ function Runtime({
   userId,
   snapshot,
   initialSubmission,
+  busy,
   restoration,
   submit,
   done,
@@ -570,6 +585,7 @@ function Runtime({
   userId: string;
   snapshot: Snapshot;
   initialSubmission?: ReturnType<typeof useSubmission>['latest'];
+  busy: boolean;
   restoration: number;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
   done: () => void;
@@ -601,7 +617,7 @@ function Runtime({
       source.push({
         id: `submitting:${optimistic.command.runId}`,
         role: 'user',
-        content: optimistic.command.text,
+        content: browserUserContent(optimistic.command.text, optimistic.command.images),
       });
     const messages = fromAgUiMessages(source, {
       showThinking: true,
@@ -666,6 +682,7 @@ function Runtime({
   );
   const runtime = useAgUiRuntime({
     agent,
+    adapters: { attachments: imageAttachmentAdapter },
     showThinking: true,
     autoCancelPendingToolCalls: false,
     onError: (e) => callbacks.current.reconnect(e instanceof StreamReplaced),
@@ -681,8 +698,9 @@ function Runtime({
         parentId: history.headId,
         runConfig: { custom: { mode: 'attach', runId: activeRunId } },
       });
-    // AttachAgent cancellation closes observation only; durable work continues on the server.
-    return () => runtime.thread.cancelRun();
+    // Native resume supersedes observation; useAgUiRuntime detaches on unmount.
+    // cancelRun is a user action that rolls the unanswered message into the composer,
+    // so history refresh must not invoke it.
   }, [runtime, history, activeRunId, restoration]);
   return (
     <AssistantRuntimeProvider runtime={runtime} config={extensions.config}>
@@ -692,6 +710,7 @@ function Runtime({
             id,
             userId,
             submit,
+            busy,
             activity: extensions.activity,
             toolkit: extensions.toolkit,
             ui: extensions.ui,
@@ -924,6 +943,7 @@ function User() {
   const status = useAuiState((s) => s.message.metadata.custom.submissionStatus);
   return (
     <MessagePrimitive.Root className="mb-8 ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
+      <MessageImages />
       <MessagePrimitive.Parts />
       {typeof status === 'string' && (
         <p

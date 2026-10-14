@@ -46,7 +46,7 @@ export const test = base.extend<{ uiLocale: 'en' | 'zh-CN' }>({
           },
         });
       if (path === '/api/capabilities')
-        return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
+        return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example', 'reply'] } });
       await route.fallback();
     });
     await use(page);

@@ -2,7 +2,7 @@ import { useLocale } from './locale';
 import { ActionBarPrimitive, ActionBarMorePrimitive, useAuiState } from '@assistant-ui/react';
 import { Copy, Check, Download, Ellipsis } from 'lucide-react';
 import { TooltipIconButton } from './tooltip-icon-button';
-import { AssistantFooterExtensions } from './extension-ui';
+import { AssistantFooterExtensions, AssistantActionExtensions } from './extension-ui';
 
 /** Official assistant-ui message actions; HTTP submission and SSE attachment stay separate. */
 export function AssistantFooter() {
@@ -32,6 +32,7 @@ export function AssistantFooter() {
             <Check className="hidden size-4 group-data-[copied]/copy:block" />
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
+        <AssistantActionExtensions />
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton tooltip={t('更多操作')} className="size-7">

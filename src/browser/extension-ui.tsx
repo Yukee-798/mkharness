@@ -31,3 +31,14 @@ export function AssistantFooterExtensions() {
     ) : null,
   );
 }
+/** Decorations compose inside the native assistant-ui action bar. */
+export function AssistantActionExtensions() {
+  const context = useContext(ExtensionContext);
+  return context?.ui?.map(({ id, assistantActions: Actions }) =>
+    Actions ? (
+      <DecorationBoundary key={id}>
+        <Actions />
+      </DecorationBoundary>
+    ) : null,
+  );
+}

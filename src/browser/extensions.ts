@@ -2,6 +2,7 @@ import type { Toolkit, ToolCallMessagePartProps } from '@assistant-ui/react';
 import type { ComponentType } from 'react';
 export type ExtensionUI = {
   toolTitleMeta?: ComponentType<{ part: ToolCallMessagePartProps }>;
+  assistantActions?: ComponentType;
   assistantFooter?: ComponentType;
 };
 export type ExtensionDecoration = ExtensionUI & { id: string };

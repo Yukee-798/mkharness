@@ -7,6 +7,7 @@ export type ExtensionContextValue = {
   id: string;
   userId: string;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
+  busy?: boolean;
   toolkit: Toolkit;
   activity: Readonly<Record<string, 'visible' | 'hidden'>>;
   ui?: readonly ExtensionDecoration[];
@@ -18,4 +19,8 @@ export function useExtensionContext() {
   const context = useContext(ExtensionContext);
   if (!context) throw new Error('Extension renderer requires a conversation context');
   return context;
+}
+export function canonicalMessageId(id: string, aliases?: ReadonlyMap<string, string>) {
+  for (const [canonical, live] of aliases ?? []) if (live === id) return canonical;
+  return id;
 }

@@ -34,7 +34,7 @@ Open **http://localhost:5173**:
 
 The interface defaults to English. Switch to Chinese in **Settings → General → Language**, and choose **Light**, **Dark**, or **System** in **Appearance**. These preferences are remembered in this browser; the default theme follows your system.
 
-Try the included tool: **“Use `describe_text` to count the characters in `Hello world`. Reply with text only.”** It needs no search key or MCP server.
+Try asking a question, requesting an interactive plan, or reading a public web page. Web search requires a separate search key; the `describe_text` sample is opt-in.
 
 > Keys entered through the UI are sent to your deployment and encrypted on the server for background execution and recovery. Use your own deployment or one you trust. Saving a key does not test the connection; the first model request uses it.
 
@@ -43,6 +43,7 @@ Try the included tool: **“Use `describe_text` to count the characters in `Hell
 ## Features
 
 - **A working chat app.** Streaming responses, reasoning and tool activity, model and thinking-level selection, conversation history, and reply/tool timing. Built with assistant-ui, shadcn/ui, and Tailwind CSS.
+- **Image attachments.** Preview and remove PNG, JPEG, WebP, or GIF images using assistant-ui; send images with text or on their own to an image-capable model. Up to 4 images totaling 512 KiB per message, retained in Pi history for retries and recovery.
 - **Durable Agent execution.** Each conversation runs in its own Durable Object with PiHarness. Submissions queue, history persists, and execution can reconstruct after interruption. Closing the browser detaches observation; Stop is a separate action.
 - **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, and message footers in the browser.
 - **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
@@ -64,7 +65,9 @@ Extensions are trusted code that you review and ship with your application. Serv
 | Remote MCP tools                                           | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` configuration                                                |
 | An async service                                           | [`src/server/remote-example.ts`](src/server/remote-example.ts) — adapt to your service's submit/query/cancel contract |
 
-For a small example, follow the `describe_text` tool in [`src/server/extensions.ts`](src/server/extensions.ts) and its [browser renderer](src/extensions/example/browser.tsx). The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
+For a small example, add `exampleDefinition` to the static `definitions` array in [`src/extensions/server.ts`](src/extensions/server.ts). Its `describe_text` tool and [browser renderer](src/extensions/example/browser.tsx) are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
+
+Successful web reads and searches populate Sources cards from committed Pi results. The reply extension adds native assistant-ui follow-up buttons and Regenerate to the action bar. Follow-ups are localized common prompts and require no background model call. Regenerate submits a new operation referring to the original committed input, including its form context; the original answer stays in history. It uses current model settings and does not authorize replay of an unknown remote side effect.
 
 Set `ENABLE_GENERATIVE_UI=0` to disable OpenUI's tools, prompts, and UI together. Set `ENABLE_EXAMPLE_SKILL=1` to try the static Skill example. Web search is registered only when `TAVILY_API_KEY` is configured; reading web pages needs no search key.
 

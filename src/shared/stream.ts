@@ -1,3 +1,4 @@
+import { browserUserContent } from './images';
 import type { AgentEvent, EntryRecord } from '@earendil-works/pi-durable';
 import type { AssistantMessage, Message as PiMessage } from '@earendil-works/pi-ai';
 import { EventType, type BaseEvent, type Message, type ToolCallResultEvent } from '@ag-ui/core';
@@ -288,7 +289,16 @@ export function toMessages(
         result.push({
           id,
           role: 'user',
-          content: text(message).split(USER_ACTION_CONTEXT)[0],
+          content: browserUserContent(
+            text(message).split(USER_ACTION_CONTEXT)[0]!,
+            typeof message.content === 'string'
+              ? undefined
+              : message.content.flatMap((part) =>
+                  part.type === 'image'
+                    ? [{ name: 'image', data: part.data, mimeType: part.mimeType }]
+                    : [],
+                ),
+          ),
         });
       else if (message.role === 'assistant') {
         for (const [blockIndex, block] of message.content.entries())

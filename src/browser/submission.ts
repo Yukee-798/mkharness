@@ -6,11 +6,17 @@ export function createSubmitter(
   previous?: () => RunCommand | null | undefined,
 ) {
   let uncertain: RunCommand | undefined;
-  return async (text: string, source?: RunCommand['source'], config?: RunCommand['config']) => {
+  return async (
+    text: string,
+    source?: RunCommand['source'],
+    config?: RunCommand['config'],
+    images?: RunCommand['images'],
+  ) => {
     const input = {
       text: text.trim(),
       ...(source ? { source } : {}),
       ...(config ? { config } : {}),
+      ...(images?.length ? { images: structuredClone(images) } : {}),
     };
     // A navigation may replace the composer while its HTTP receipt is pending.
     // Query's mutation cache retains that failed command for the next composer.
@@ -24,6 +30,7 @@ export function createSubmitter(
           text: uncertain.text,
           ...(uncertain.source ? { source: uncertain.source } : {}),
           ...(uncertain.config ? { config: uncertain.config } : {}),
+          ...(uncertain.images ? { images: uncertain.images } : {}),
         },
         input,
       )

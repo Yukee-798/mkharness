@@ -5,7 +5,7 @@ import type {
   SubmissionRecord,
 } from '@earendil-works/pi-durable';
 import type { Json as JsonValue } from '../shared/compute';
-import { AppError } from '../shared/contracts';
+import { AppError, type RunCommand } from '../shared/contracts';
 import { validateExtensions } from './extensions';
 import type { successfulTool } from '../shared/references';
 
@@ -13,6 +13,14 @@ import type { successfulTool } from '../shared/references';
 export type ReadContext = {
   entries: () => Promise<readonly EntryRecord[]>;
   successfulTool: (ref: string, name: string) => Promise<ReturnType<typeof successfulTool>>;
+  acceptedInput: (entryId: number) => Promise<
+    | {
+        text: string;
+        source?: RunCommand['source'];
+        context?: JsonValue;
+      }
+    | undefined
+  >;
 };
 /** Committed native facts, never a second execution runtime or a writable Pi handle. */
 export type ProjectionContext = {

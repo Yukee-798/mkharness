@@ -413,10 +413,7 @@ function ModelSelectorEffort({
   return (
     <div
       data-slot="model-selector-effort"
-      className={cn(
-        'flex cursor-default items-center justify-between gap-3 border-t px-3 py-2',
-        className,
-      )}
+      className={cn('flex cursor-default flex-col gap-2 border-t px-3 py-3', className)}
       onKeyDown={(e) => {
         onKeyDown?.(e);
         if (e.defaultPrevented) return;
@@ -436,20 +433,20 @@ function ModelSelectorEffort({
       }}
       {...props}
     >
-      <span className="text-muted-foreground text-xs">{label}</span>
+      <span className="text-muted-foreground text-xs whitespace-nowrap">{label}</span>
       <RadioGroupPrimitive.Root
         value={effort ?? ''}
         onValueChange={setEffort}
         orientation="horizontal"
         aria-label={typeof label === 'string' ? label : 'Reasoning effort'}
-        className="flex items-center gap-0.5"
+        className="flex min-w-0 flex-wrap items-center gap-1"
       >
         {efforts.map((option) => (
           <RadioGroupPrimitive.Item
             key={option.id}
             value={option.id}
             className={cn(
-              'focus-visible:ring-ring/50 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-1',
+              'focus-visible:ring-ring/50 text-muted-foreground hover:bg-muted hover:text-foreground min-w-max flex-1 cursor-pointer rounded-md px-2 py-1 text-center text-xs whitespace-nowrap transition-colors outline-none focus-visible:ring-1',
               'data-[state=checked]:bg-accent data-[state=checked]:text-accent-foreground data-[state=checked]:font-medium',
             )}
           >

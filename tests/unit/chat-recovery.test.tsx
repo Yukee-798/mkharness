@@ -7,13 +7,23 @@ import { Chat } from '../../src/browser/Chat';
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 it('keeps an unconfigured new chat local rather than reconnecting an empty conversation ID', async () => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   const requests: string[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const path = String(input);
     requests.push(path);
+    if (path === '/api/capabilities') return Response.json({ extensionIds: [] });
     if (path === '/api/settings/models')
       return Response.json({
         modelCatalog: {

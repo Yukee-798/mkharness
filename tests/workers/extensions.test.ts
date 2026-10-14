@@ -65,7 +65,10 @@ it('optional UI can be disabled without removing local tools or base rules', asy
     async () => [],
   );
   validateExtensions(extensions);
-  expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).toContain('describe_text');
+  expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).toContain('read_web');
+  expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).not.toContain(
+    'describe_text',
+  );
   expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).not.toContain(
     'present_openui',
   );

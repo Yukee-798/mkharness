@@ -1,3 +1,4 @@
+import { exampleExtension } from '../../src/server/extensions';
 import { ConversationAgent } from '../../src/server/conversation';
 import { executionModels } from '../../src/server/execution-models';
 import { applicationModels } from '../../src/server/models';
@@ -14,6 +15,9 @@ export class OpenRouterProbe extends ConversationAgent {
       ALLOW_SERVER_MODEL_KEY: '1',
       MODEL_API_KEY: 'free-canary',
     });
+  }
+  protected override async extensions() {
+    return [...(await super.extensions()), exampleExtension()];
   }
   protected override models(): Models {
     const models = executionModels(applicationModels(this.env));

@@ -28,6 +28,7 @@ const metadata: ExtensionDecoration = {
   id: 'metadata',
   toolTitleMeta: ({ part }) => <span>Metadata for {part.toolName}</span>,
   assistantFooter: () => <span>Optional footer</span>,
+  assistantActions: () => <button>Optional reply action</button>,
 };
 function StatefulFooter() {
   const [count, setCount] = useState(0);
@@ -77,6 +78,8 @@ it('composes independent decorations for any shared tool and footer without repl
   const view = render(<App ui={[metadata, independent]} />);
   await waitFor(() => expect(view.queryByText('Optional footer')).not.toBeNull());
   const copy = view.getByRole('button', { name: 'Copy response' });
+  const action = view.getByRole('button', { name: 'Optional reply action' });
+  expect(copy.parentElement?.contains(action)).toBe(true);
   const tool = view.getByRole('button', { name: 'Completed: another_extension_tool' });
   expect(tool.textContent).toContain('Metadata for another_extension_tool');
   fireEvent.click(tool);
@@ -84,6 +87,7 @@ it('composes independent decorations for any shared tool and footer without repl
   fireEvent.click(view.getByRole('button', { name: 'Footer 2: 0' }));
   view.rerender(<App ui={[independent]} />);
   expect(view.queryByText('Optional footer')).toBeNull();
+  expect(view.queryByRole('button', { name: 'Optional reply action' })).toBeNull();
   expect(view.queryByText('Metadata for another_extension_tool')).toBeNull();
   expect(view.queryByText('Original tool result')).not.toBeNull();
   expect(view.queryByRole('button', { name: 'Footer 2: 1' })).not.toBeNull();

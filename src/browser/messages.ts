@@ -1,5 +1,24 @@
 // Application copy only; model output and resource content are never translated.
 export const english: Record<string, string> = {
+  添加图片: 'Add images',
+  移除图片: 'Remove image',
+  '仅支持 PNG、JPEG、WebP 或 GIF 图片': 'Only PNG, JPEG, WebP, or GIF images are supported.',
+  '仅支持有效的 PNG、JPEG、WebP 或 GIF 图片':
+    'Please select a valid PNG, JPEG, WebP, or GIF image.',
+  '图片总大小不能超过 512 KiB': 'Images must total 512 KiB or less.',
+  '最多添加 4 张图片，总大小不能超过 512 KiB': 'Add up to 4 images, totaling 512 KiB or less.',
+  图片文件名过长: 'The image filename is too long.',
+  '所选模型不支持图片，请选择支持图片的模型':
+    'This model does not support images. Select an image-capable model.',
+
+  来源: 'Sources',
+  在新标签页打开: 'Opens in a new tab',
+  重新生成回复: 'Regenerate response',
+  总结这段回答: 'Summarize this answer',
+  举一个具体例子: 'Show me a concrete example',
+  接下来可以做什么: 'What can I do next?',
+  reply_not_found: 'The original reply is unavailable. Reopen this conversation and try again.',
+  reply_context_unavailable: 'The original input is unavailable. Please send your question again.',
   重试提交: 'Retry submission',
   提交未确认: 'Submission unconfirmed',
   已提交: 'Submitted',

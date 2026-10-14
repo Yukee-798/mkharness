@@ -4,6 +4,7 @@ import {
   type MutableModels,
   type Provider,
 } from '@earendil-works/pi-ai/models';
+import { imageModelError } from '../shared/images';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
 import { AppError, type StoredRequest } from '../shared/contracts';
@@ -62,14 +63,48 @@ export function executionModels(base: Models) {
     })();
     return out;
   };
+  const imagesUnsupported = (
+    model: Parameters<Models['streamSimple']>[0],
+    context: Parameters<Models['streamSimple']>[1],
+  ) => {
+    const user = context.messages.findLast((message) => message.role === 'user');
+    return (
+      !model.input.includes('image') &&
+      Array.isArray(user?.content) &&
+      user.content.some((part) => part.type === 'image')
+    );
+  };
+  const imageError = (model: Parameters<Models['streamSimple']>[0]) => {
+    const result: AssistantMessage = {
+      role: 'assistant',
+      content: [],
+      api: model.api,
+      provider: providers.get(model.provider) ?? model.provider,
+      model: model.id,
+      usage: emptyUsage,
+      stopReason: 'error',
+      errorMessage: imageModelError,
+      timestamp: Date.now(),
+    };
+    const out = new AssistantMessageEventStream();
+    out.push({ type: 'error', reason: 'error', error: result });
+    out.end(result);
+    return out;
+  };
+  // A queued input can inherit a newer step configuration. Check at the public
+  // model boundary as well as admission so Pi never silently drops its images.
   models.streamSimple = (model, context, options) =>
-    providers.has(model.provider)
-      ? relay(simple(model, context, options), providers.get(model.provider)!)
-      : simple(model, context, options);
+    imagesUnsupported(model, context)
+      ? imageError(model)
+      : providers.has(model.provider)
+        ? relay(simple(model, context, options), providers.get(model.provider)!)
+        : simple(model, context, options);
   models.stream = (model, context, options) =>
-    providers.has(model.provider)
-      ? relay(stream(model, context, options), providers.get(model.provider)!)
-      : stream(model, context, options);
+    imagesUnsupported(model, context)
+      ? imageError(model)
+      : providers.has(model.provider)
+        ? relay(stream(model, context, options), providers.get(model.provider)!)
+        : stream(model, context, options);
   return models;
 }
 async function executionProviderId(execution: StoredRequest['execution']) {

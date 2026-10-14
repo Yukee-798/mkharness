@@ -1,4 +1,5 @@
 import { ConversationAgent as Base } from '../../src/server/conversation';
+import { exampleExtension } from '../../src/server/extensions';
 import { staticSkills, exampleSkillSource } from '../../src/server/skills';
 import { fixtureModels } from '../fixture-model';
 import { Type } from '@earendil-works/pi-ai';
@@ -102,6 +103,7 @@ export class ConversationAgent extends Base {
   protected override async extensions() {
     const extensions: Extension[] = [
       ...(await super.extensions()),
+      exampleExtension(),
       await staticSkills([exampleSkillSource()]),
       {
         name: 'fixture',

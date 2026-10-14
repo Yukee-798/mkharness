@@ -192,7 +192,12 @@ app.post('/api/conversations/:id/runs', async (c) => {
   await c.env.DB.prepare(
     "UPDATE conversations SET title=CASE WHEN title_custom=0 AND title='新聊天' THEN ? ELSE title END,updated_at=? WHERE id=? AND owner=?",
   )
-    .bind(parsed.data.text.slice(0, 60), Date.now(), c.get('conversationId'), c.get('userId'))
+    .bind(
+      (parsed.data.text || parsed.data.images?.[0]?.name || '新聊天').slice(0, 60),
+      Date.now(),
+      c.get('conversationId'),
+      c.get('userId'),
+    )
     .run();
   return c.json(result, 202);
 });

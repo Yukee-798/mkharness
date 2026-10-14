@@ -93,10 +93,7 @@ export function ModelPicker({
             ))}
           </ModelSelectorGroup>
         </ModelSelectorList>
-        <ModelSelectorEffort
-          label={t('思考强度')}
-          className="[&_[role=radiogroup]]:flex-wrap [&_[role=radiogroup]]:justify-end"
-        />
+        <ModelSelectorEffort label={t('思考强度')} />
       </ModelSelectorContent>
     </ModelSelectorRoot>
   );

@@ -8,6 +8,15 @@ type Definition = {
   create: (context: Context) => Promise<ServerContribution>;
 };
 
+/** Add to definitions to opt into the sample; declaring a tool is not installing it. */
+export const exampleDefinition: Definition = {
+  id: 'example',
+  create: async () => {
+    const { exampleExtension } = await import('../server/extensions');
+    return { id: 'example', extension: exampleExtension() };
+  },
+};
+
 /** The only server activation list. Listing IDs never executes a factory. */
 export const definitions: readonly Definition[] = [
   {
@@ -21,9 +30,11 @@ export const definitions: readonly Definition[] = [
     id: 'web',
     create: async ({ env }) => {
       const { webTools } = await import('../server/web');
+      const { projectSources } = await import('./web/sources');
       return {
         id: 'web',
         extension: webTools((env as Env & { TAVILY_API_KEY?: string }).TAVILY_API_KEY),
+        projectState: projectSources,
       };
     },
   },
@@ -36,10 +47,10 @@ export const definitions: readonly Definition[] = [
     },
   },
   {
-    id: 'example',
+    id: 'reply',
     create: async () => {
-      const { exampleExtension } = await import('../server/extensions');
-      return { id: 'example', extension: exampleExtension() };
+      const { replyContribution } = await import('./reply/server');
+      return replyContribution();
     },
   },
   {

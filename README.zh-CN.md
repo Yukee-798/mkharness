@@ -34,7 +34,7 @@ pnpm dev
 
 应用界面默认英文。可在 **Settings → General → Language** 切换中文，在 **Appearance** 选择浅色、深色或跟随系统。偏好保存在当前浏览器，默认主题跟随系统。
 
-可以先试内置工具：**“请使用 `describe_text` 工具，统计‘你好世界’的字符数，只用文字回答。”** 无需搜索 Key 或 MCP 服务。
+可以先尝试提问、生成交互式计划或读取公开网页。网页搜索需要单独配置搜索 Key；`describe_text` 示例默认关闭。
 
 > 在界面填写的 Key 会发送给当前部署，并在服务端加密保存，用于后台执行与恢复。请在自己的部署或可信部署填写。保存 Key 不会测试连接，首次模型请求才会实际使用它。
 
@@ -42,6 +42,7 @@ pnpm dev
 
 ## 核心能力
 
+- **图片附件。** 复用 assistant-ui 预览与移除 PNG、JPEG、WebP、GIF；支持图片加文字或纯图片提交，需选择支持图片的模型。每条消息最多 4 张、合计 512 KiB，随 Pi 历史保留，用于重试和恢复。
 - **可用的聊天应用。** 流式回复、思考过程、工具活动、模型与思考强度选择、聊天历史，以及回复和工具耗时。使用 assistant-ui、shadcn/ui 与 Tailwind CSS。
 - **持久化 Agent 执行。** 每个聊天由独立 Durable Object 承载 PiHarness。支持提交排队、历史持久化和执行中断后重建；关闭浏览器只断开观察，Stop 是独立操作。
 - **前后端扩展。** 服务端接入 Pi 原生工具、提示词与 hooks；浏览器注册 assistant-ui Toolkit、工具标题装饰和回复 Footer。
@@ -64,7 +65,9 @@ pnpm dev
 | 远程 MCP 工具                        | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` 配置                                           |
 | 异步服务                             | [`src/server/remote-example.ts`](src/server/remote-example.ts) — 按实际服务契约接入 submit/query/cancel |
 
-最小工具示例可参考 [`src/server/extensions.ts`](src/server/extensions.ts) 中的 `describe_text` 及其[浏览器 renderer](src/extensions/example/browser.tsx)。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
+最小工具示例可将 `exampleDefinition` 加入 [`src/extensions/server.ts`](src/extensions/server.ts) 的静态 `definitions` 数组。其 `describe_text` 及[浏览器 renderer](src/extensions/example/browser.tsx) 默认不启用。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
+
+成功的网页读取和搜索从 Pi 已提交结果生成 Sources 来源卡片。回复扩展使用 assistant-ui 原生后续提问按钮，并在操作栏增加重新生成。后续提问是随语言切换的通用提示，不额外调用模型。重新生成以新操作引用原始提交内容（含表单上下文），保留原回答，使用当前模型设置；它不会授权自动重放结果未知的远端副作用。
 
 `ENABLE_GENERATIVE_UI=0` 同时关闭 OpenUI 的工具、提示词与 UI；`ENABLE_EXAMPLE_SKILL=1` 启用静态 Skill 示例。网页搜索仅在配置 `TAVILY_API_KEY` 时注册，读取网页不需要搜索 Key。
 

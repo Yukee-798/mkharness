@@ -1,19 +1,15 @@
 import { useLocale } from '../../browser/locale';
 import { useAuiState, type ToolCallMessagePartProps } from '@assistant-ui/react';
-import { useExtensionContext } from '../../browser/extension-context';
+import { canonicalMessageId, useExtensionContext } from '../../browser/extension-context';
 import type { BrowserExtension } from '../../browser/extensions';
 import { formatDuration, type TimingState } from './contracts';
 
-function canonicalMessage(id: string, aliases?: ReadonlyMap<string, string>) {
-  for (const [canonical, live] of aliases ?? []) if (live === id) return canonical;
-  return id;
-}
 function ToolDuration({ part }: { part: ToolCallMessagePartProps }) {
   const { t } = useLocale();
   const { state, messageIds } = useExtensionContext();
   const boundary = part.toolCallId.indexOf('.');
   const id =
-    canonicalMessage(part.toolCallId.slice(0, boundary), messageIds) +
+    canonicalMessageId(part.toolCallId.slice(0, boundary), messageIds) +
     part.toolCallId.slice(boundary);
   const span = (state?.timing as TimingState | undefined)?.tools?.[id];
   if (span?.endedAt === undefined) return null;
@@ -32,7 +28,7 @@ function ReplyTiming() {
   const messageId = useAuiState((s) => s.message.id);
   const { state, messageIds } = useExtensionContext();
   const span = (state?.timing as TimingState | undefined)?.replies?.[
-    canonicalMessage(messageId, messageIds)
+    canonicalMessageId(messageId, messageIds)
   ];
   if (span?.endedAt === undefined) return null;
   return (

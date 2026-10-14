@@ -367,6 +367,7 @@ export function fixtureModels(contextWindow = model.contextWindow) {
         ...model,
         contextWindow,
         id: 'fixture-pro',
+        input: ['text', 'image'],
         name: 'Test Pro',
         thinkingLevelMap: { ...model.thinkingLevelMap, low: null },
       },

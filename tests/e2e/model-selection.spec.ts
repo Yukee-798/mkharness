@@ -106,3 +106,65 @@ test('keyboard selection, model capability changes and a mobile popover stay usa
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test.describe('English reasoning layout', () => {
+  test.use({ uiLocale: 'en' });
+  for (const width of [320, 375, 1280]) {
+    test(`five effort choices fit below the label at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 812 });
+      const modelCatalog = {
+        models: [
+          {
+            id: 'free',
+            name: 'Free Models Router',
+            provider: 'openrouter',
+            thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high'],
+          },
+        ],
+        defaultSelection: { provider: 'openrouter', modelId: 'free', thinkingLevel: 'high' },
+      };
+      await page.route('**/api/conversations/**', (route) =>
+        route.fulfill({
+          json: { entries: [], pending: [], stopping: false, modelCatalog },
+        }),
+      );
+      await page.goto('/tests/browser/chat.html');
+      await page.getByRole('combobox', { name: 'Model and reasoning effort' }).click();
+      const effort = page.locator('[data-slot="model-selector-effort"]');
+      const layout = await effort.evaluate((element) => {
+        const label = element.querySelector('span')!.getBoundingClientRect();
+        const group = element.querySelector('[role="radiogroup"]')!.getBoundingClientRect();
+        return {
+          belowLabel: group.top >= label.bottom,
+          choices: [...element.querySelectorAll('[role="radio"]')].map((button) => {
+            const rect = button.getBoundingClientRect();
+            return {
+              top: rect.top,
+              leftOverflow: group.left - rect.left,
+              rightOverflow: rect.right - group.right,
+              textOverflow: button.scrollWidth - button.clientWidth,
+            };
+          }),
+        };
+      });
+      expect(layout.belowLabel).toBe(true);
+      expect(layout.choices).toHaveLength(5);
+      expect(new Set(layout.choices.map((choice) => choice.top)).size).toBe(1);
+      // Flex distributes fractional pixels; clientWidth/scrollWidth are rounded integers.
+      for (const choice of layout.choices) {
+        expect(choice.leftOverflow).toBeLessThanOrEqual(1);
+        expect(choice.rightOverflow).toBeLessThanOrEqual(1);
+        expect(choice.textOverflow).toBeLessThanOrEqual(1);
+      }
+      await expect(page.getByRole('radio', { name: 'High', exact: true })).toHaveAttribute(
+        'data-state',
+        'checked',
+      );
+      await page.getByRole('radio', { name: 'Minimal', exact: true }).click();
+      await expect(page.getByRole('radio', { name: 'Minimal', exact: true })).toHaveAttribute(
+        'data-state',
+        'checked',
+      );
+    });
+  }
+});

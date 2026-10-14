@@ -1,3 +1,4 @@
+import { userContent, imageModelError } from '../shared/images';
 import { Agent } from 'agents';
 import { LifecycleCapability } from 'agents/lifecycle';
 import { PiHarness } from 'agents/harness/pi';
@@ -469,6 +470,11 @@ export class ConversationAgent extends Agent<Env> {
         const selection = this.selection(
           command.config ?? (await this.modelCatalog()).defaultSelection,
         );
+        if (
+          command.images?.length &&
+          !this.models().getModel(selection.provider, selection.modelId)?.input.includes('image')
+        )
+          throw new AppError(400, 'model_images_unsupported', imageModelError);
         const execution = {
           ...selection,
           credentialRef: await (
@@ -567,7 +573,7 @@ export class ConversationAgent extends Agent<Env> {
       },
       BG,
     );
-    await this.harness.submit(text, {
+    await this.harness.submit(userContent(text, command.images), {
       session: '1',
       operationId: command.runId,
       whenBusy: 'followUp',
@@ -740,6 +746,27 @@ export class ConversationAgent extends Agent<Env> {
       entries: () => this.allEntries(),
       successfulTool: async (ref, name) =>
         readSuccessfulTool(await this.harness.pi(), ref, name, BG),
+      acceptedInput: async (entryId) => {
+        // Resolve native input identity against the existing host receipts. Expose
+        // only user text/action context, never execution or credential metadata.
+        const records = this.rows<{ id: string; payload: string }>(
+          'SELECT id,payload FROM app_requests WHERE accepted=1',
+        );
+        const root = await this.root();
+        const index = await root.commit(async (tx) => {
+          const submissions = await Promise.all(
+            records.map((record) => tx.submissionByRequest(root.id, record.id)),
+          );
+          return submissions.findIndex((submission) => Number(submission?.entry) === entryId);
+        }, BG);
+        if (index < 0) return;
+        const stored = storedRequestSchema.parse(JSON.parse(records[index]!.payload));
+        return {
+          text: stored.request.text,
+          ...(stored.request.source ? { source: stored.request.source } : {}),
+          ...(stored.sourceContext !== undefined ? { context: stored.sourceContext } : {}),
+        };
+      },
     };
   }
   async allEntries(): Promise<EntryRecord[]> {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { jsonText, type Json } from './compute';
+import { imagesSchema } from './images';
 import { thinkingLevels } from './model-selection';
 const finitePayload = z.custom<Json>((value) => {
   try {
@@ -14,7 +15,8 @@ export const USER_ACTION_CONTEXT =
 export const commandSchema = z
   .object({
     runId: z.uuid(),
-    text: z.string().trim().min(1).max(32000),
+    text: z.string().trim().max(32000),
+    images: imagesSchema.optional(),
     config: z
       .object({
         provider: z.string().min(1).max(200),
@@ -42,7 +44,8 @@ export const commandSchema = z
       ])
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((command) => !!command.text || !!command.images?.length, '消息不能为空');
 export type RunCommand = z.infer<typeof commandSchema>;
 export const storedRequestSchema = z
   .object({

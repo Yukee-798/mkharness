@@ -5,6 +5,8 @@ export type Locale = 'en' | 'zh-CN';
 export const localeStorageKey = 'mkharness.locale';
 type Values = Record<string, string | number>;
 const chinese: Record<string, string> = {
+  reply_not_found: '原回答不可用，请重新打开当前聊天后再试。',
+  reply_context_unavailable: '原始输入不可用，请重新发送问题。',
   关闭思考: '关闭',
   Today: '今天',
   Earlier: '更早',
