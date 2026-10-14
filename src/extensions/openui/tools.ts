@@ -11,6 +11,7 @@ import { toolRef, successfulTool } from '../../shared/references';
 import { jsonText, jsonEqual, finiteJson, type Program, type Json } from '../../shared/compute';
 import { computeProgram } from '../../server/compute';
 import { validateSlider } from './slider';
+import { validateProgress } from './progress';
 import { UI_ACTION_RULE, validateUIActions } from './contracts';
 import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/tool-output';
 function difference(
@@ -97,6 +98,8 @@ export async function validateUI(ui: string, hasProgram: boolean) {
     const v = value as Record<string, unknown>;
     if (v.typeName === 'Slider' && !v.hasDynamicProps)
       validateSlider(v.props as Record<string, unknown>);
+    if (v.typeName === 'Progress' && !v.hasDynamicProps)
+      validateProgress(v.props as Record<string, unknown>);
     if (hasProgram && v.typeName === 'StateSync' && !(v.props as Record<string, unknown>)?.computed)
       throw new Error('StateSync requires computation provenance {result,inputs}');
     for (const child of Object.values(v))
@@ -232,6 +235,7 @@ export function panelTools(
               'Use the smallest useful composition: a static explanation usually needs only a few sections, such as a key distinction, a comparison table and an example. Do not expand every answer into a dashboard. For qualitative topics use comparisons or diagrams rather than inventing numeric scores or radar charts, unless the user explicitly requests a hypothetical scoring model. Follow component signatures exactly. Card children must be component nodes, not nested arrays; flatten the nodes or wrap a list in Stack. Avoid trailing commas in component argument lists.',
               'Content with a programRef MUST declare a Query("run_program",inputs,fallback). Declare editable inputs as $variables seeded from initialInputs or submitted sourceContext.inputs; bind controls to those variables using the catalog signatures, and include them in Query arguments. Display computed values from the Query result, not copied constants from the initial result. The fallback must match the output shape. Query result variables are ordinary identifiers, not $bindings.',
               'Use native @Set($variable,value) and @Reset($variable,...) on declared bindings. @Reset takes variables, never a Form name or string. Prefer text inputs for numeric parameters when preserving unfinished decimal edits matters. Keep @Each templates inline so their row variable remains in scope.',
+              'For bounded numeric choices use Slider(name,variant,min,max,step,defaultValue,label,rules,value). Declare an array binding such as $amount=[40] and pass it as value: Slider("amount","continuous",0,100,1,null,"Amount",null,$amount). For a range use two values, such as $range=[20,80]. Use discrete only for a small set of steps (at most 256 options). Progress(value,label,max,showValue) is read-only: Progress($amount[0],"Target reached",100,true) reflects a slider locally, and null represents unknown progress. Use actual measured or computed values, never fabricated Agent completion. SwitchGroup with SwitchItem is available for boolean choices, DatePicker for dates and TextArea for longer input. Reuse these catalog components rather than inventing HTML controls. Editing controls and displaying progress must not submit an Agent request.',
               'Only the bound run_program Query is available, and only in content with a programRef. Its arguments are compute(inputs,data) inputs, with data supplied by the bound program. This is browser-local computation, not an Agent tool or a network request. Mutation and other tools are unavailable. Never invent a tool, business function, script or action handler. Use Action([@ToAssistant("Analyze with these inputs")]) for another agent request; parameter edits calculate locally without model requests.',
               'Show assumptions, units and source descriptions. StateSync(value,next,enabled,{result:theFullQueryResult,inputs:theSameCurrentQueryArguments}) is optional for automatic parameter normalization, not required for derived display values. For StateSync with a program, return an object from compute and pass its complete Query result and current inputs so the host can reject stale or mismatched writeback.',
               'Complete required research and computation before calling present_openui alone as the final tool. The host validates the content and ends the reply only after a successful commit; a failure returns an error for repair. A textual UI description, fenced code or <ui> block is never rendered content in this application.',

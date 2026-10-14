@@ -205,6 +205,17 @@ function Workspace({
   const { chat: id = '' } = useSearch({ from: '/' });
   const navigate = useNavigate({ from: '/' });
   const client = useQueryClient();
+  useEffect(
+    () => () => {
+      // HTTP receipts are transient workspace state, never shared across accounts.
+      for (const mutation of client.getMutationCache().findAll({
+        mutationKey: userKeys(userId).submissions,
+        exact: true,
+      }))
+        client.getMutationCache().remove(mutation);
+    },
+    [client, userId],
+  );
   const directoryQuery = useInfiniteQuery(directoryOptions(userId));
   const items = directoryQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const next = directoryQuery.hasNextPage;
@@ -233,6 +244,13 @@ function Workspace({
   );
   const deleted = (value: string) => {
     client.removeQueries({ queryKey: userKeys(userId).snapshot(value) });
+    for (const mutation of client.getMutationCache().findAll({
+      mutationKey: userKeys(userId).submissions,
+      exact: true,
+      predicate: (mutation) =>
+        (mutation.state.variables as { id?: string } | undefined)?.id === value,
+    }))
+      client.getMutationCache().remove(mutation);
     if (id === value) choose(items.find((item) => item.id !== value)?.id ?? '', true);
     refreshDirectory();
   };

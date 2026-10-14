@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { durableReload } from './config/durable-reload';
+import { unstable_readConfig, unstable_getVarsForDev } from 'wrangler';
 // Miniflare's local trace store has no retention policy. Keep console diagnostics,
 // but only collect persistent spans/logs when explicitly requested for debugging.
 process.env.X_LOCAL_OBSERVABILITY ??= 'false';
 const browserTests = process.env.AGENT_E2E_FIXTURES === '1';
+const configPath = browserTests ? 'tests/e2e/worker.jsonc' : undefined;
 export default defineConfig({
   // Exercise bundled assets in E2E without mixing test fixtures into deploy output.
   ...(browserTests ? { build: { outDir: '.wrangler/e2e-build' } } : {}),
@@ -27,7 +29,21 @@ export default defineConfig({
     },
   },
   plugins: [
-    openuiServerCatalog(),
+    openuiServerCatalog(() => {
+      // Use Wrangler's own precedence for config/.dev.vars; disabled OpenUI
+      // must not evaluate the browser catalog during development startup.
+      const env = process.env.CLOUDFLARE_ENV;
+      const config = unstable_readConfig({ config: configPath, env }, { hideWarnings: true });
+      const vars = unstable_getVarsForDev(
+        config.configPath,
+        undefined,
+        config.vars,
+        env,
+        true,
+        config.secrets,
+      );
+      return vars.ENABLE_GENERATIVE_UI?.value !== '0';
+    }),
     durableReload(),
     {
       name: 'browser-test-fixtures',
@@ -47,7 +63,7 @@ export default defineConfig({
       },
     },
     cloudflare({
-      configPath: process.env.AGENT_E2E_FIXTURES === '1' ? 'tests/e2e/worker.jsonc' : undefined,
+      configPath,
       viteEnvironment: { name: 'ssr' },
       persistState: process.env.AGENT_E2E_FIXTURES === '1' ? { path: '.wrangler/e2e' } : true,
     }),

@@ -21,7 +21,7 @@ import { ResourceDrafts } from './ResourceDrafts';
 import { request, ApiError } from './api';
 import { useQuery } from '@tanstack/react-query';
 import { userKeys, modelSettingsOptions } from './queries';
-import { createSubmitter } from './submission';
+import { useSubmission } from './use-submission';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { ChatLoading } from './chat-loading';
@@ -67,6 +67,7 @@ export type Snapshot = {
   remote?: RemoteProgress[];
   runtimeIssues?: RuntimeIssue[];
 };
+const emptySnapshot: Snapshot = { entries: [], pending: [], stopping: false };
 export async function loadSnapshot(id: string, signal?: AbortSignal) {
   const first = await request<Snapshot>(`/conversations/${id}/snapshot`, { signal });
   let cursor = first.cursor;
@@ -107,7 +108,8 @@ export function Chat({
     enabled: !!id,
   });
   const settings = useQuery(modelSettingsOptions(userId));
-  const createdId = useRef(id);
+  const { send, retry: retrySubmission, latest } = useSubmission(userId, id, onCreated);
+  const initialSubmission = latest?.submission?.initial ? latest : undefined;
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
     [restoration, setRestoration] = useState(0),
@@ -120,9 +122,17 @@ export function Chat({
   const [selection, setSelection] = useState<ModelSelection>();
   const [remote, setRemote] = useState<RemoteProgress[]>([]);
   const [remoteSending, setRemoteSending] = useState(false);
+  const [stopSending, setStopSending] = useState(false);
   const catalog = settings.data?.modelCatalog ?? snapshot?.modelCatalog;
   const selected = catalog
-    ? resolveModelSelection(catalog, selection ?? snapshot?.selection)
+    ? resolveModelSelection(
+        catalog,
+        selection ??
+          (initialSubmission?.status !== 'success'
+            ? initialSubmission?.submission?.command.config
+            : undefined) ??
+          snapshot?.selection,
+      )
     : undefined;
   useEffect(() => {
     onModelProviderChange?.(selected?.provider);
@@ -179,26 +189,13 @@ export function Chat({
   }, [query.error]);
   // Query owns read errors; keep submission/action errors separate so a successful
   // refetch clears stale read failures without hiding an unconfirmed submission.
-  const visibleError = error ?? query.error;
+  const visibleError =
+    error ?? (latest?.status === 'error' ? latest.error : undefined) ?? query.error;
   const credentialRequired =
     visibleError instanceof ApiError && visibleError.code === 'credential_required';
-  const send = useMemo(
-    () =>
-      createSubmitter(async (command) => {
-        if (!createdId.current)
-          createdId.current = (
-            await request<{ id: string }>('/conversations', { method: 'POST' })
-          ).id;
-        return request(`/conversations/${createdId.current}/runs`, {
-          method: 'POST',
-          body: JSON.stringify(command),
-        });
-      }),
-    [],
-  );
   const submit = async (message: string, source?: RunCommand['source']) => {
     if (
-      !createdId.current &&
+      !id &&
       (!selected ||
         !settings.data ||
         settings.data.credentials.find((c) => c.provider === selected.provider)?.effectiveSource ===
@@ -214,10 +211,7 @@ export function Chat({
         onSettings?.(selected?.provider);
       throw e;
     }
-    if (!id) {
-      onCreated?.(createdId.current);
-      return;
-    }
+    if (!id) return;
     onDirectoryChange?.();
     setAccepted((a) => [...a, message]);
     retries.current = 0;
@@ -267,8 +261,12 @@ export function Chat({
   }, [snapshot]);
   // The wrapper uses assistant-ui focus behavior; submission deliberately stays HTTP-only.
   // Calling runtime.send/abort here would replace the live subscription or cancel a durable task.
-  const composerReady = !id || !!snapshot;
-  const ComposerRoot = snapshot ? ComposerPrimitive.Root : 'form';
+  const renderedSnapshot = snapshot ?? (initialSubmission ? emptySnapshot : undefined);
+  const submitting = sending || latest?.status === 'pending';
+  const composerReady = !id || !!renderedSnapshot;
+  const ComposerRoot = renderedSnapshot ? ComposerPrimitive.Root : 'form';
+  const hasPending = !!snapshot?.pending.length || accepted.length > 0;
+  const isStopping = stopSending || !!snapshot?.stopping;
   const footer = (
     <div className="space-y-3">
       {remote
@@ -342,14 +340,14 @@ export function Chat({
           </div>
         </aside>
       )}
-      {(!!snapshot?.pending.length || connection) && (
+      {connection && (
         <div
           role="status"
           data-slot="connection-status"
-          data-state={snapshot?.stopping ? 'stopping' : (connection ?? 'running')}
+          data-state={connection}
           className="flex min-h-8 items-center gap-2 rounded-lg border border-border/60 px-3 py-1.5 text-xs text-muted-foreground"
         >
-          {connection === 'recovered' && !snapshot?.stopping ? (
+          {connection === 'recovered' ? (
             <Check className="size-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
           ) : (
             <LoaderCircle
@@ -358,13 +356,7 @@ export function Chat({
             />
           )}
           <span className="flex-1">
-            {snapshot?.stopping
-              ? t('正在停止…')
-              : connection === 'reconnecting'
-                ? t('正在重新连接…')
-                : connection === 'recovered'
-                  ? t('已恢复连接')
-                  : t('任务运行中')}
+            {connection === 'reconnecting' ? t('正在重新连接…') : t('已恢复连接')}
           </span>
           {!!snapshot?.pending.some((p) => p.status === 'queued') && (
             <span className="tabular-nums">
@@ -385,6 +377,22 @@ export function Chat({
                   {t('配置模型与 API Key')}
                 </Button>
               )
+            ) : latest?.status === 'error' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  setError(undefined);
+                  try {
+                    await retrySubmission();
+                    if (!initialSubmission) refresh();
+                  } catch (e) {
+                    setError(e as Error);
+                  }
+                }}
+              >
+                {t('重试提交')}
+              </Button>
             ) : id ? (
               <Button
                 variant="outline"
@@ -406,7 +414,7 @@ export function Chat({
         className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (!composerReady || !text.trim() || sending || snapshot?.stopping) return;
+          if (!composerReady || !text.trim() || submitting || isStopping) return;
           const submittedVersion = draftVersion.current;
           setSending(true);
           try {
@@ -432,7 +440,7 @@ export function Chat({
           rows={2}
           placeholder={t('描述你的问题，或说说你想完成什么')}
           className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
-          disabled={!composerReady || snapshot?.stopping}
+          disabled={!composerReady || isStopping}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -447,7 +455,7 @@ export function Chat({
                 catalog={catalog}
                 value={selected}
                 onChange={setSelection}
-                disabled={sending || snapshot?.stopping}
+                disabled={submitting || isStopping}
               />
             ) : (
               <span className="px-1 text-[11px] text-muted-foreground">
@@ -455,47 +463,49 @@ export function Chat({
               </span>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {!!snapshot?.pending.length && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                aria-label={t('停止并撤回排队')}
-                disabled={snapshot.stopping}
-                onClick={async () => {
-                  try {
-                    await request(`/conversations/${id}/stop`, { method: 'POST' });
-                    refresh();
-                  } catch (e) {
-                    setError(e as Error);
+          <Button
+            type={hasPending || isStopping ? 'button' : 'submit'}
+            size="icon"
+            className="rounded-full"
+            aria-label={
+              isStopping
+                ? t('正在停止…')
+                : submitting
+                  ? t('提交中…')
+                  : hasPending
+                    ? t('停止并撤回排队')
+                    : t('发送')
+            }
+            disabled={
+              !composerReady ||
+              submitting ||
+              isStopping ||
+              (!hasPending && (!text.trim() || (!id && settings.isPending)))
+            }
+            onClick={
+              hasPending
+                ? async () => {
+                    setStopSending(true);
+                    try {
+                      await request(`/conversations/${id}/stop`, { method: 'POST' });
+                      refresh();
+                    } catch (e) {
+                      setError(e as Error);
+                    } finally {
+                      setStopSending(false);
+                    }
                   }
-                }}
-              >
-                <Square className="size-3" />
-                {t('停止')}
-              </Button>
+                : undefined
+            }
+          >
+            {submitting || isStopping ? (
+              <LoaderCircle className="size-4 motion-safe:animate-spin" />
+            ) : hasPending ? (
+              <Square className="size-4" />
+            ) : (
+              <ArrowUp className="size-4" />
             )}
-            <Button
-              type="submit"
-              size="icon"
-              className="rounded-full"
-              aria-label={sending ? t('提交中…') : t('发送')}
-              disabled={
-                !composerReady ||
-                !text.trim() ||
-                sending ||
-                snapshot?.stopping ||
-                (!id && settings.isPending)
-              }
-            >
-              {sending ? (
-                <LoaderCircle className="size-4 motion-safe:animate-spin" />
-              ) : (
-                <ArrowUp className="size-4" />
-              )}
-            </Button>
-          </div>
+          </Button>
         </div>
       </ComposerRoot>
     </div>
@@ -503,12 +513,13 @@ export function Chat({
   return (
     <ResourceDrafts>
       <div className="chat flex min-h-0 flex-1 flex-col">
-        {snapshot ? (
+        {renderedSnapshot ? (
           <Runtime
             key={`${userId}:${id}`}
             id={id}
             userId={userId}
-            snapshot={snapshot}
+            snapshot={renderedSnapshot}
+            initialSubmission={initialSubmission}
             restoration={restoration}
             submit={submit}
             done={refresh}
@@ -546,6 +557,7 @@ function Runtime({
   id,
   userId,
   snapshot,
+  initialSubmission,
   restoration,
   submit,
   done,
@@ -557,6 +569,7 @@ function Runtime({
   id: string;
   userId: string;
   snapshot: Snapshot;
+  initialSubmission?: ReturnType<typeof useSubmission>['latest'];
   restoration: number;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
   done: () => void;
@@ -574,10 +587,36 @@ function Runtime({
   );
   // Commit aliases belong to this runtime only. Fresh mounts restore canonical Pi IDs.
   const messageIds = useMemo(() => new Map<string, string>(), []);
+  const optimistic =
+    !snapshot.pending.length &&
+    !snapshot.entries.some((e) => e.model?.some((m) => m.role === 'user'))
+      ? initialSubmission?.submission
+      : undefined;
+  const optimisticStatus = optimistic ? initialSubmission?.status : undefined;
   const history = useMemo(() => {
-    const messages = fromAgUiMessages(toMessages(snapshot.entries, messageIds), {
+    const source = toMessages(snapshot.entries, messageIds);
+    // This is the first message of a just-created chat. Once Pi exposes a user
+    // entry (or accepted work), its history takes over without text-based matching.
+    if (optimistic)
+      source.push({
+        id: `submitting:${optimistic.command.runId}`,
+        role: 'user',
+        content: optimistic.command.text,
+      });
+    const messages = fromAgUiMessages(source, {
       showThinking: true,
-    }).map((m) => fromThreadMessageLike(m, m.id!, { type: 'complete', reason: 'stop' }));
+    }).map((m) =>
+      fromThreadMessageLike(
+        {
+          ...m,
+          ...(m.id?.startsWith('submitting:')
+            ? { metadata: { custom: { submissionStatus: optimisticStatus } } }
+            : {}),
+        },
+        m.id!,
+        { type: 'complete', reason: 'stop' },
+      ),
+    );
     return {
       messages: messages.map((message, i) => ({
         parentId: i ? messages[i - 1].id : null,
@@ -585,7 +624,7 @@ function Runtime({
       })),
       headId: messages.at(-1)?.id ?? null,
     };
-  }, [snapshot.entries, messageIds]);
+  }, [snapshot.entries, messageIds, optimistic, optimisticStatus]);
   const callbacks = useRef({ done, reconnect, connected, progress, snapshot });
   callbacks.current = { done, reconnect, connected, progress, snapshot };
   const agent = useMemo(
@@ -881,9 +920,22 @@ export function Assistant() {
   );
 }
 function User() {
+  const { t } = useLocale();
+  const status = useAuiState((s) => s.message.metadata.custom.submissionStatus);
   return (
     <MessagePrimitive.Root className="mb-8 ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
       <MessagePrimitive.Parts />
+      {typeof status === 'string' && (
+        <p
+          role="status"
+          className="mt-2 flex items-center justify-end gap-1 text-xs text-muted-foreground"
+        >
+          {status === 'pending' && (
+            <LoaderCircle className="size-3 motion-safe:animate-spin" aria-hidden="true" />
+          )}
+          {status === 'pending' ? t('提交中…') : status === 'error' ? t('提交未确认') : t('已提交')}
+        </p>
+      )}
     </MessagePrimitive.Root>
   );
 }

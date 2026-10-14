@@ -30,3 +30,21 @@ it('includes model settings in idempotent retries and makes a new command when t
   expect(commands[2].runId).not.toBe(commands[0].runId);
   expect(commands[2].config.thinkingLevel).toBe('high');
 });
+it('inherits an uncertain command across composers and clears it after an external retry succeeds', async () => {
+  const config = { provider: 'fixture', modelId: 'flash', thinkingLevel: 'low' as const };
+  const retained = { runId: '11111111-1111-4111-8111-111111111111', text: 'same', config };
+  let previous: typeof retained | null = retained;
+  const commands: any[] = [];
+  const send = createSubmitter(
+    async (command) => {
+      commands.push(command);
+      throw new Error('ack lost');
+    },
+    () => previous,
+  );
+  await expect(send('same', undefined, config)).rejects.toThrow('ack lost');
+  expect(commands[0]).toEqual(retained);
+  previous = null; // The native mutation retained by another composer acknowledged the retry.
+  await expect(send('same', undefined, config)).rejects.toThrow('ack lost');
+  expect(commands[1].runId).not.toBe(retained.runId);
+});

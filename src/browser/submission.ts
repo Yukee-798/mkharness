@@ -1,7 +1,10 @@
 import type { RunCommand } from '../shared/contracts';
 import { jsonEqual } from '../shared/compute';
 /** Retain an unacknowledged command so explicit retry uses the same Pi operation id. */
-export function createSubmitter(post: (command: RunCommand) => Promise<unknown>) {
+export function createSubmitter(
+  post: (command: RunCommand) => Promise<unknown>,
+  previous?: () => RunCommand | null | undefined,
+) {
   let uncertain: RunCommand | undefined;
   return async (text: string, source?: RunCommand['source'], config?: RunCommand['config']) => {
     const input = {
@@ -9,6 +12,11 @@ export function createSubmitter(post: (command: RunCommand) => Promise<unknown>)
       ...(source ? { source } : {}),
       ...(config ? { config } : {}),
     };
+    // A navigation may replace the composer while its HTTP receipt is pending.
+    // Query's mutation cache retains that failed command for the next composer.
+    // null means acknowledged elsewhere; undefined keeps local create uncertainty.
+    const retained = previous?.();
+    if (retained !== undefined) uncertain = retained ?? undefined;
     if (
       !uncertain ||
       !jsonEqual(

@@ -1,5 +1,8 @@
 // Application copy only; model output and resource content are never translated.
 export const english: Record<string, string> = {
+  重试提交: 'Retry submission',
+  提交未确认: 'Submission unconfirmed',
+  已提交: 'Submitted',
   关闭思考: 'Off',
   设置: 'Settings',
   通用: 'General',
@@ -146,7 +149,6 @@ export const english: Record<string, string> = {
   '正在停止…': 'Stopping…',
   '正在重新连接…': 'Reconnecting…',
   已恢复连接: 'Reconnected',
-  任务运行中: 'Task running',
   '{count} 项排队': '{count} queued',
   '配置模型与 API Key': 'Configure model & API key',
   重新连接: 'Reconnect',

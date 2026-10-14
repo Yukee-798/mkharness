@@ -22,6 +22,7 @@ import { openuiLibrary } from '@openuidev/react-ui';
 import { z } from 'zod';
 import { finiteJson, jsonEqual } from '../../shared/compute';
 import { validateSlider } from './slider';
+import { Progress } from './progress-component';
 export type PanelGuard = {
   epoch: number;
   ready: boolean;
@@ -121,6 +122,7 @@ export const library = createLibrary({
   components: [
     ...Object.values(openuiLibrary.components).filter((component) => component.name !== 'Slider'),
     Slider,
+    Progress,
     StateSync,
   ],
 });

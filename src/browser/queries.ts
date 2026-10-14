@@ -5,6 +5,7 @@ export type Directory = { items: Conversation[]; next: string | null };
 export const userKeys = (userId: string) => ({
   models: ['user', userId, 'model-settings'] as const,
   directory: ['user', userId, 'directory'] as const,
+  submissions: ['user', userId, 'submission'] as const,
   snapshot: (id: string) => ['user', userId, 'chat', id, 'snapshot'] as const,
 });
 export const directoryOptions = (userId: string) =>

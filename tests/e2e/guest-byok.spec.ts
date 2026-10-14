@@ -35,7 +35,9 @@ test('native anonymous identity survives reload, shares tabs and isolates browse
   try {
     const tab = await other.newPage();
     await tab.goto('/');
-    await expect(tab.getByLabel('消息', { exact: true })).toBeVisible();
+    await expect(
+      tab.getByPlaceholder('Describe your question or what you want to do'),
+    ).toBeVisible();
     const another = await (await other.request.get('/api/auth/get-session')).json();
     expect(another.user.id).not.toBe(first.user.id);
   } finally {
@@ -100,7 +102,7 @@ test('first submission retains conversation and run identity after an uncertain 
 }) => {
   await page.goto('/');
   await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
-  await context.request.put('/api/settings/model-credentials/openai', {
+  await context.request.put('/api/settings/model-credentials/deepseek', {
     headers: { Origin: 'http://localhost:5174' },
     data: { apiKey: 'E2E-CANARY-PERSONAL', expectedCurrentId: null },
   });
@@ -122,12 +124,13 @@ test('first submission retains conversation and run identity after an uncertain 
   );
   await page.getByLabel('消息', { exact: true }).fill('hello');
   await page.getByRole('button', { name: '发送', exact: true }).click();
-  await expect(page.getByRole('button', { name: '发送', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: '发送', exact: true }).click();
   await expect(page).toHaveURL(/chat=/);
+  await expect(page.getByRole('button', { name: '重试提交', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '重试提交', exact: true }).click();
+  await expect.poll(() => commands.length).toBe(2);
   expect(creates).toBe(1);
   expect(commands).toHaveLength(2);
   expect(commands[0]).toEqual(commands[1]);
-  expect(commands[0].config.provider).toBe('openai');
+  expect(commands[0].config.provider).toBe('deepseek');
   expect(commands[0]).not.toHaveProperty('credentialRef');
 });

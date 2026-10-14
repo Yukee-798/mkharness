@@ -13,7 +13,7 @@
   @apply w-full;
 }
 .generated-panel [role='form'] > .openui-buttons > .openui-button-base {
-  @apply min-w-0 flex-1;
+  @apply min-w-0 flex-1 justify-center text-center;
 }
 .generated-panel :is(.openui-input-medium, .openui-select-trigger-md, .openui-button-base-medium) {
   min-height: 2.25rem;

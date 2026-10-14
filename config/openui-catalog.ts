@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 /** Derive server metadata from the browser's native library at build time.
  * Workers only receive JSON: React components and random library IDs never execute there. */
-export function openuiServerCatalog(): Plugin {
+export function openuiServerCatalog(prepareOnStart: () => boolean = () => true): Plugin {
   const id = 'virtual:mkharness-openui-catalog',
     resolved = '\0' + id;
   const catalog = fileURLToPath(new URL('../src/extensions/openui/catalog.tsx', import.meta.url));
@@ -31,6 +31,11 @@ export function openuiServerCatalog(): Plugin {
   };
   return {
     name: 'openui-server-catalog',
+    async configureServer() {
+      // Finish dev-only metadata preparation before listening. load() shares the
+      // same promise, so the first Agent request never starts a second generator.
+      if (prepareOnStart()) await (generated ??= generate());
+    },
     resolveId(source) {
       if (source === id) return resolved;
     },

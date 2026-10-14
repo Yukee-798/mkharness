@@ -68,6 +68,18 @@ For a small example, follow the `describe_text` tool in [`src/server/extensions.
 
 Set `ENABLE_GENERATIVE_UI=0` to disable OpenUI's tools, prompts, and UI together. Set `ENABLE_EXAMPLE_SKILL=1` to try the static Skill example. Web search is registered only when `TAVILY_API_KEY` is configured; reading web pages needs no search key.
 
+OpenUI's form catalog includes sliders (single value or range), switches, dates, selects, checkboxes, and text fields. `Progress` uses shadcn/ui to display measured or computed progress. For example, the following document updates the progress bar locally as the slider changes; editing does not call the Agent:
+
+```text
+$amount = [40]
+root = Stack([
+  Slider("amount", "continuous", 0, 100, 1, null, "Amount", null, $amount),
+  Progress($amount[0], "Target", 100, true)
+])
+```
+
+Use two slider values for a range, such as `[20, 80]`. Use `Progress(null, "Waiting for data")` when progress is unknown; it does not track background Agent tasks automatically.
+
 See the [server contracts](src/server/contributions.ts), [browser contracts](src/browser/extensions.ts), and [.dev.vars.example](.dev.vars.example) for the available interfaces and configuration. Runtime plugin installation and marketplace compatibility are not included.
 
 ## Deploy to Cloudflare

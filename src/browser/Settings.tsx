@@ -141,16 +141,16 @@ function AppearanceSettings() {
           {t('选择浅色、深色或跟随系统，设置保存在此浏览器中。')}
         </p>
       </div>
-      <div role="group" aria-label={t('外观')} className="grid grid-cols-3 gap-3">
+      <div role="group" aria-label={t('外观')} className="grid w-full max-w-sm grid-cols-3 gap-2">
         {options.map(({ value, label, Icon }) => (
           <Button
             key={value}
             variant="outline"
             aria-pressed={theme === value}
             onClick={() => setTheme(value)}
-            className="h-24 min-w-0 flex-col gap-3 rounded-xl px-2 shadow-none aria-pressed:border-foreground/30 aria-pressed:bg-muted md:h-28"
+            className="h-10 min-w-0 gap-1.5 rounded-lg px-2 text-xs shadow-none aria-pressed:border-foreground/30 aria-pressed:bg-muted sm:gap-2 sm:px-3 sm:text-sm"
           >
-            <Icon className="size-5" />
+            <Icon className="size-4 shrink-0" />
             {label}
           </Button>
         ))}

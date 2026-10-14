@@ -56,7 +56,9 @@ test('refresh, switching and three queued tasks only attach; a completed chat ne
   await page.goto('/tests/browser/chat.html');
   for (const text of ['first', 'second', 'third']) {
     await page.getByLabel('消息', { exact: true }).fill(text);
-    await page.getByRole('button', { name: '发送', exact: true }).click();
+    // The single composer button stops active work; Enter still queues messages.
+    if (text === 'first') await page.getByRole('button', { name: '发送', exact: true }).click();
+    else await page.getByLabel('消息', { exact: true }).press('Enter');
     await expect(page.getByLabel('消息', { exact: true })).toHaveValue('');
   }
   expect(submissions).toBe(3);
@@ -70,6 +72,81 @@ test('refresh, switching and three queued tasks only attach; a completed chat ne
   await expect(page.getByText('completed', { exact: false })).toHaveCount(3);
   expect(submissions).toBe(count);
   expect(observations).toBeGreaterThanOrEqual(3);
+});
+
+test('one composer action switches from send to stop without a running banner', async ({
+  page,
+}) => {
+  let pending = false,
+    stopping = false,
+    submissions = 0,
+    stops = 0;
+  let releaseStop = () => {};
+  const stopResponse = new Promise<void>((resolve) => (releaseStop = resolve));
+  let finish = () => {};
+  const completed = new Promise<void>((resolve) => (finish = resolve));
+  const runId = '11111111-1111-4111-8111-111111111111';
+  await page.route('**/api/conversations/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/runs')) {
+      submissions++;
+      pending = true;
+      return route.fulfill({ status: 202, json: { runId, accepted: true } });
+    }
+    if (path.endsWith('/snapshot'))
+      return route.fulfill({
+        json: {
+          entries: [],
+          pending: pending ? [{ operationId: runId, status: 'running' }] : [],
+          stopping,
+        },
+      });
+    if (path.endsWith('/stop')) {
+      stops++;
+      await stopResponse;
+      stopping = true;
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (path.endsWith('/events')) {
+      await completed;
+      return route.fulfill({
+        contentType: 'text/event-stream',
+        body: `data: ${JSON.stringify({ type: 'RUN_STARTED', threadId: 'a', runId })}\n\ndata: ${JSON.stringify({ type: 'RUN_FINISHED', threadId: 'a', runId })}\n\n`,
+      });
+    }
+    return route.fulfill({ status: 404, json: { error: { code: 'not_found' } } });
+  });
+  try {
+    await page.goto('/tests/browser/chat.html');
+    const input = page.getByLabel('消息', { exact: true });
+    const action = page.locator('form button');
+    await input.fill('Start a task');
+    await expect(action).toHaveCount(1);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const stop = page.getByRole('button', { name: '停止并撤回排队', exact: true });
+    await expect(stop).toBeEnabled();
+    await expect(action).toHaveCount(1);
+    await expect(page.locator('[data-slot="connection-status"]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '发送', exact: true })).toHaveCount(0);
+    await input.fill('Keep this draft');
+    await stop.click();
+    await expect(page.getByRole('button', { name: '正在停止…', exact: true })).toBeDisabled();
+    expect(stops).toBe(1);
+    expect(submissions).toBe(1);
+    releaseStop();
+    await expect.poll(() => stopping).toBe(true);
+    await expect(input).toBeDisabled();
+    pending = stopping = false;
+    finish();
+    await expect(page.getByRole('button', { name: '发送', exact: true })).toBeEnabled();
+    await expect(input).toHaveValue('Keep this draft');
+    await expect(action).toHaveCount(1);
+    expect(stops).toBe(1);
+    expect(submissions).toBe(1);
+  } finally {
+    releaseStop();
+    finish();
+  }
 });
 
 test('a genuine streaming response renders an inert native preview before the tool commits', async ({

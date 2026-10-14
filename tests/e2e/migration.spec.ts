@@ -6,7 +6,7 @@ test('the Start entry serves an application shell before browser JavaScript runs
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
   await page.goto('/?chat=existing-chat');
-  await expect(page.getByRole('main', { name: '聊天应用' })).toBeVisible();
+  await expect(page.getByRole('main', { name: 'Chat application' })).toBeVisible();
   await expect(page.getByRole('status')).toBeVisible();
   await context.close();
 });

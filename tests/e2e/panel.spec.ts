@@ -1,5 +1,66 @@
-import { resource } from './fixtures';
-import { test, expect } from '@playwright/test';
+import { resource, test, expect } from './fixtures';
+
+test('sliders update progress locally, restore saved values and submit only on confirmation', async ({
+  page,
+}) => {
+  const saved = new Map<string, { state: Record<string, unknown>; revision: number }>();
+  const ui = [
+    '$amount=[40]',
+    '$range=[20,80]',
+    'root=Form("goals",Buttons([Button("Use my goals",Action([@ToAssistant("Use my goals")]))]),[Slider("amount","continuous",0,100,1,null,"Amount",null,$amount),Progress($amount[0],"Budget goal",100,true),Slider("range","continuous",0,100,1,null,"Range",null,$range),Progress($range[1]-$range[0],"Range width",100,true),Progress(null,"Waiting for data")])',
+  ].join('\n');
+  await page.route('**/api/conversations/test/extensions/openui/resources/**', async (route) => {
+    const ref = route.request().url().includes('2.same') ? '2.same' : '8.same';
+    if (route.request().method() === 'PATCH') {
+      const { state, expectedRevision } = route.request().postDataJSON();
+      const revision = expectedRevision + 1;
+      saved.set(ref, { state, revision });
+      return route.fulfill({ json: { revision } });
+    }
+    return route.fulfill({
+      json: resource({ panelRef: ref, ui, program: null, revision: 0, ...saved.get(ref) }),
+    });
+  });
+  await page.goto('/tests/browser/panel.html');
+  const panel = page.getByRole('region', { name: '交互式回答' }).first();
+  const budget = panel.getByRole('progressbar', { name: 'Budget goal' });
+  await expect(budget).toHaveAttribute('aria-valuenow', '40');
+  const unknown = panel.getByRole('progressbar', { name: 'Waiting for data' });
+  await expect(unknown).toHaveAttribute('data-state', 'indeterminate');
+  await expect(unknown).not.toHaveAttribute('aria-valuenow');
+  const sliders = panel.getByRole('slider');
+  await expect(sliders).toHaveCount(3);
+  await sliders.nth(0).focus();
+  await sliders.nth(0).press('ArrowRight');
+  await expect(budget).toHaveAttribute('aria-valuenow', '41');
+  await sliders.nth(2).focus();
+  await sliders.nth(2).press('ArrowRight');
+  await expect(panel.getByRole('progressbar', { name: 'Range width' })).toHaveAttribute(
+    'aria-valuenow',
+    '61',
+  );
+  await expect.poll(() => saved.get('2.same')?.state.$range).toEqual([20, 81]);
+  expect(await page.evaluate(() => (window as any).submissions)).toEqual([]);
+  await page.reload();
+  await expect(budget).toHaveAttribute('aria-valuenow', '41');
+  await expect(panel.getByRole('progressbar', { name: 'Range width' })).toHaveAttribute(
+    'aria-valuenow',
+    '61',
+  );
+  const button = panel.getByRole('button', { name: 'Use my goals' });
+  expect(await button.evaluate((element) => getComputedStyle(element).justifyContent)).toBe(
+    'center',
+  );
+  await button.click();
+  await expect.poll(() => page.evaluate(() => (window as any).submissions.length)).toBe(1);
+  expect(
+    await page.evaluate(() => (window as any).submissions[0].source.payload.state),
+  ).toMatchObject({
+    $amount: [41],
+    $range: [20, 81],
+  });
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+});
 
 test('native links open safely during the click without submitting an agent request', async ({
   page,
