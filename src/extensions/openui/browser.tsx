@@ -1,3 +1,4 @@
+import { useLocale } from '../../browser/locale';
 import { useAuiState, type ToolCallMessagePartProps } from '@assistant-ui/react';
 import type { BrowserExtension } from '../../browser/extensions';
 import { useExtensionContext } from '../../browser/extension-context';
@@ -5,6 +6,7 @@ import { Panel } from './Panel';
 import { partialUI } from './partial';
 import { useToolProgress } from '../../browser/tool-progress';
 function Present(part: ToolCallMessagePartProps) {
+  const { t } = useLocale();
   const { id, userId, submit } = useExtensionContext();
   const progress = useToolProgress(part.toolCallId);
   const terminalFailure = useAuiState((state) => {
@@ -37,8 +39,8 @@ function Present(part: ToolCallMessagePartProps) {
     return terminalFailure ? (
       <p role="alert">
         {part.status.type === 'incomplete' && part.status.reason === 'cancelled'
-          ? '内容生成已停止。'
-          : '内容暂时无法生成。可以调整需求再试一次。'}
+          ? t('内容生成已停止。')
+          : t('内容暂时无法生成。可以调整需求再试一次。')}
       </p>
     ) : null;
   return panelRef || preview ? (

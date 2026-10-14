@@ -1,6 +1,7 @@
+'use client';
+import { useLocale } from './locale';
 // Source: https://r.assistant-ui.com/elements-reasoning.json
 // Copyright (c) 2026 AgentbaseAI Inc. (MIT); see THIRD_PARTY_NOTICES.md.
-'use client';
 
 import {
   createContext,
@@ -170,6 +171,7 @@ function ReasoningTrigger({
   active?: boolean;
   duration?: number | undefined;
 }) {
+  const { t } = useLocale();
   const durationText = duration ? ` (${duration}s)` : '';
 
   return (
@@ -192,7 +194,7 @@ function ReasoningTrigger({
           active && 'shimmer motion-reduce:animate-none',
         )}
       >
-        {active ? '正在思考…' : '思考过程'}
+        {active ? t('正在思考…') : t('思考过程')}
         {durationText}
       </span>
       <ChevronDownIcon

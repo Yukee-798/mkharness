@@ -23,6 +23,7 @@ import { type ResourceDraft, type SaveStatus } from '../../browser/draft';
 import { useResourceDrafts } from '../../browser/ResourceDrafts';
 import { Button } from '../../browser/ui/button';
 import { inputState } from './state';
+import { useLocale } from '../../browser/locale';
 export type PanelBundle = {
   panelRef: string;
   ui: string;
@@ -43,6 +44,7 @@ export function Panel({
   preview?: string;
   submit: (text: string, source?: RunCommand['source']) => Promise<void>;
 }) {
+  const { t } = useLocale();
   const [bundle, setBundle] = useState<PanelBundle>(),
     [error, setError] = useState(''),
     [status, setStatus] = useState<SaveStatus>('saved'),
@@ -256,7 +258,7 @@ export function Panel({
     <ThemeProvider lightTheme={openUITheme}>
       <section
         className="generated-panel -mx-1 min-w-0 max-w-[calc(100%+0.5rem)] overflow-x-auto p-1 whitespace-normal"
-        aria-label="Interactive answer"
+        aria-label={t('Interactive answer')}
         onChangeCapture={edit}
         onClickCapture={edit}
         onKeyDownCapture={edit}
@@ -285,13 +287,15 @@ export function Panel({
             className="save-status mt-3 text-xs leading-relaxed text-muted-foreground"
             role="status"
           >
-            {status === 'conflict'
-              ? '另一页面已更新；当前草稿已保留，整页刷新前请先复制改动'
-              : '保存失败，当前改动仍保留'}
+            {t(
+              status === 'conflict'
+                ? '另一页面已更新；当前草稿已保留，整页刷新前请先复制改动'
+                : '保存失败，当前改动仍保留',
+            )}
           </p>
         )}
-        {status === 'error' && <Button onClick={() => saver?.retry()}>重试保存</Button>}
-        {error && <p role="alert">{error}</p>}
+        {status === 'error' && <Button onClick={() => saver?.retry()}>{t('重试保存')}</Button>}
+        {error && <p role="alert">{t(error)}</p>}
       </section>
     </ThemeProvider>
   );
@@ -302,10 +306,10 @@ class RenderBoundary extends Component<{ children: ReactNode }, { error: string 
     return { error: error instanceof Error ? error.message : '内容暂时无法显示' };
   }
   render() {
-    return this.state.error ? (
-      <p role="alert">内容暂时无法显示：{this.state.error}。可继续发送消息，填写内容仍保留。</p>
-    ) : (
-      this.props.children
-    );
+    return this.state.error ? <RenderError error={this.state.error} /> : this.props.children;
   }
+}
+function RenderError({ error }: { error: string }) {
+  const { t } = useLocale();
+  return <p role="alert">{t('显示失败说明', { error })}</p>;
 }

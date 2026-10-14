@@ -55,9 +55,9 @@ it('does not evaluate unselected modules and distinguishes missing native Toolki
     );
   }
   const view = render(<App enabled />);
-  await waitFor(() => expect(view.queryByText('文字包含 3 个字符。')).not.toBeNull());
+  await waitFor(() => expect(view.queryByText('The text contains 3 characters.')).not.toBeNull());
   view.rerender(<App enabled={false} />);
-  await waitFor(() => expect(view.queryByText('文字包含 3 个字符。')).toBeNull());
+  await waitFor(() => expect(view.queryByText('The text contains 3 characters.')).toBeNull());
   expect(view.getByText('fallback')).toBeDefined();
 });
 it('detects removal of the native progress bridge instead of accepting snapshots as real-time progress', () => {

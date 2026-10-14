@@ -1,6 +1,7 @@
+'use client';
+import { useLocale } from './locale';
 // Source: https://r.assistant-ui.com/tool-fallback.json (read-only display primitives)
 // Copyright (c) 2026 AgentbaseAI Inc. (MIT); see THIRD_PARTY_NOTICES.md.
-'use client';
 import { useCallback, useRef, useState } from 'react';
 import { useScrollLock } from '@assistant-ui/react';
 import { cn } from './ui/utils';
@@ -159,6 +160,7 @@ function ToolFallbackResult({
   scrollClassName?: string;
   scrollLabel?: string;
 }) {
+  const { t } = useLocale();
   if (result === undefined) return null;
 
   return (
@@ -168,7 +170,7 @@ function ToolFallbackResult({
       {...props}
     >
       <p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">
-        结果
+        {t('结果')}
       </p>
       <pre
         role="region"

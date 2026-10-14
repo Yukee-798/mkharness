@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { useState, type ReactNode } from 'react';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import { Wrench, CircleMinus, XCircle, AlertCircle } from 'lucide-react';
@@ -15,12 +16,13 @@ export function ToolActivity({
   icon?: ReactNode;
   query?: string;
 }) {
+  const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const progress = useToolProgress(part.toolCallId);
   const name = labels ?? {
-    active: `正在执行：${part.toolName}`,
-    complete: `已完成：${part.toolName}`,
-    failed: `执行失败：${part.toolName}`,
+    active: t('正在执行：{tool}', { tool: part.toolName }),
+    complete: t('已完成：{tool}', { tool: part.toolName }),
+    failed: t('执行失败：{tool}', { tool: part.toolName }),
   };
   const running =
     progress?.status === 'failed' || progress?.status === 'complete'
@@ -32,7 +34,13 @@ export function ToolActivity({
     part.isError ||
     (part.status?.type === 'incomplete' && !cancelled);
   const waiting = part.status?.type === 'requires-action';
-  const label = cancelled ? '已停止' : failed ? name.failed : waiting ? '等待处理' : name.complete;
+  const label = cancelled
+    ? t('已停止')
+    : failed
+      ? name.failed
+      : waiting
+        ? t('等待处理')
+        : name.complete;
   const query = displayQuery ?? '';
   const result =
     part.result ?? (part.status?.type === 'incomplete' ? part.status.error : undefined);
@@ -48,7 +56,7 @@ export function ToolActivity({
         progress?.value !== undefined
           ? JSON.stringify(progress.value, null, 2)
           : progress?.truncated
-            ? '进度内容超过显示上限'
+            ? t('进度内容超过显示上限')
             : undefined
       }
       running={running}

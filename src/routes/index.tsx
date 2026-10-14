@@ -15,9 +15,9 @@ export const Route = createFileRoute('/')({
 
 function LoadingShell() {
   return (
-    <main aria-label="聊天应用" className="flex h-dvh items-center justify-center">
+    <main aria-label="Chat application" className="flex h-dvh items-center justify-center">
       <p role="status" className="text-sm text-muted-foreground">
-        正在加载应用…
+        Loading application…
       </p>
     </main>
   );

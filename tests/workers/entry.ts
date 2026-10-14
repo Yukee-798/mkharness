@@ -1,5 +1,3 @@
-// Preload real catalog in test setup: Vite serves its module graph over HTTP, unlike bundled Cloudflare modules.
-import '../../src/extensions/openui/catalog';
 import { ConversationAgent as Base } from '../../src/server/conversation';
 import { staticSkills, exampleSkillSource } from '../../src/server/skills';
 import { fixtureModels } from '../fixture-model';

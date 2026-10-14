@@ -82,9 +82,9 @@ it('keeps existing tool DOM and disclosure state as calls, arguments and results
 
 it('only shows the empty-message thinking indicator before any visible activity arrives', () => {
   const view = render(<App content={[]} />);
-  expect(view.getByText('正在思考…')).toBeTruthy();
+  expect(view.getByText('Thinking…')).toBeTruthy();
   view.rerender(<App content={[call('one')]} />);
-  expect(view.queryByText('正在思考…')).toBeNull();
+  expect(view.queryByText('Thinking…')).toBeNull();
 });
 
 it('keeps the tool renderer when a committed snapshot inserts reasoning before its calls', async () => {
@@ -200,7 +200,7 @@ it('updates the group completion label in place instead of replacing its animate
   expect(label).toBeTruthy();
   view.rerender(<App content={[call('one', '{}', 'done'), call('two', '{}', 'done')]} />);
   expect(view.container.querySelector('[data-slot="tool-group-trigger"]')).toBe(trigger);
-  expect(trigger.textContent).toBe('已调用 2 个工具');
+  expect(trigger.textContent).toBe('Called 2 tools');
   expect(trigger.contains(label)).toBe(true);
   expect(label.classList.contains('shimmer')).toBe(false);
 });

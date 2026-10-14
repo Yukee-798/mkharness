@@ -5,10 +5,8 @@ import {
   type ToolExecutionApi,
   type Harness,
 } from '@earendil-works/pi-durable';
-import { createParser } from '@openuidev/lang-core';
-// OpenUI creates random library IDs; initialize within a request, never Worker global scope.
-let catalog: Promise<typeof import('./catalog')> | undefined;
-const getLibrary = async () => (await (catalog ??= import('./catalog'))).library;
+import { createParser, generatePrompt } from '@openuidev/lang-core';
+import { schema, spec } from 'virtual:mkharness-openui-catalog';
 import { toolRef, successfulTool } from '../../shared/references';
 import { jsonText, jsonEqual, finiteJson, type Program, type Json } from '../../shared/compute';
 import { computeProgram } from '../../server/compute';
@@ -74,9 +72,8 @@ async function ref(api: ToolExecutionApi, context: Parameters<Harness['close']>[
   return toolRef(input.assistant, api.callId);
 }
 export async function validateUI(ui: string, hasProgram: boolean) {
-  const library = await getLibrary();
   if (new TextEncoder().encode(ui).length > 262144) throw new Error('UI exceeds 256 KiB');
-  const parsed = createParser(library.toJSONSchema()).parse(ui);
+  const parsed = createParser(schema).parse(ui);
   if (
     !parsed.root ||
     parsed.meta.incomplete ||
@@ -219,7 +216,8 @@ export function panelTools(
       {
         key: 'openui-catalog',
         render: async () =>
-          (await getLibrary()).prompt({
+          generatePrompt({
+            ...spec,
             preamble:
               'Use present_openui to show visual content as part of your answer. This application renders that content only through an actual tool call; never print OpenUI code in chat, markdown fences, <ui> tags or text that imitates a tool call. This catalog describes only the ui argument of present_openui. Keep normal conversation outside that string. The ui string must be a complete valid OpenUI Lang document, without markdown fences. Generic library examples below describe UI syntax, not the Agent response format.',
             toolCalls: true,
@@ -227,6 +225,7 @@ export function panelTools(
             tools: ['run_program'],
             additionalRules: [
               UI_ACTION_RULE,
+              'Component calls use positional arguments only, never keyword arguments or name=value syntax. To skip an optional argument before a later argument, put null in its position. Stack and Card take an array of children as their first argument. A complete minimal document is: root = Stack([TextContent("## Result\\n4 characters")]). Do not add invented props such as size="small" or gap="m" as named arguments; use only the catalog signatures.',
               'For explanations longer than a brief answer, recommendations, comparisons, plans and data exploration, show the answer with present_openui instead of a lengthy Markdown answer followed by an offer to create UI. Use native cards, tables, steps, charts and images to organize the answer, with concise supporting text. Static explanations and clarification forms need neither programRef nor Query: use present_openui directly. For complex computation, first prepare_program and wait for success, then present_openui referencing its programRef. This does not wait for a browser.',
               'For clarification, use Form(name,buttons,fields) and FormControl(label,input,hint) with native RadioGroup or Select for single choice, CheckBoxGroup for multiple choice, and Input or TextArea for other details. Form buttons must be Buttons([Button(...)]) rather than a bare Button. Bind answers to declared $variables so edits persist. RadioGroup value is a string; CheckBoxGroup value is an object mapping item names to booleans, not an array. Leave unanswered choices empty unless the user has already supplied them; never set defaultChecked:true merely because an option is recommended. Use rules to mark genuinely required fields. Provide an explicit submit Button with Action([@ToAssistant("Continue using my answers")]); use the user\'s language for its label and message. Local selection and editing must not invoke the Agent; only explicit submission does. The host includes click-time raw bindings and form state as sourceContext.inputs and the action context/selected card details as sourceContext.params (finite JSON, at most 16 KiB) with the new request, so do not hardcode selections into the action message or invent a submit tool. Treat this state and context as the user\'s answers, then continue without asking the same questions again.',
               'Use appropriate visual components, not just a long paragraph placed in a card. Charts must represent actual data or clearly labeled assumptions, with units and sources. Use Image, ImageBlock, ImageGallery or ImageText only with real image URLs supplied by the user or available in trustworthy source data; include meaningful alt text and source context. There is no image generation or image search tool in this application. When no usable image source is available, use native steps, comparisons, tables or other suitable visuals instead of inventing image URLs.',

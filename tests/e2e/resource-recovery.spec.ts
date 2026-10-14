@@ -30,7 +30,7 @@ test('lost save receipt reconciles through GET and saves the newer edit once', a
   try {
     await page.goto('/tests/browser/panel.html');
     const input = page
-      .getByRole('region', { name: 'Interactive answer' })
+      .getByRole('region', { name: '交互式回答' })
       .first()
       .getByPlaceholder('Value');
     await input.fill('1.');

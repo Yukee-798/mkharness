@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test';
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => localStorage.setItem('mkharness.locale', 'zh-CN'));
+});
 test('native anonymous identity survives reload, shares tabs and isolates browsers', async ({
   page,
   context,
@@ -57,7 +60,8 @@ test('metadata-only settings, credential preflight and saved Base URL survive re
     await page.getByPlaceholder('搜索模型…').fill(selected.name);
   await page.getByRole('option', { name: selected.name, exact: true }).click();
   await page.getByRole('button', { name: '账号：此浏览器的访客' }).click();
-  await page.getByRole('menuitem', { name: '模型与 API Key' }).click();
+  await page.getByRole('menuitem', { name: '设置' }).click();
+  await page.getByRole('tab', { name: '模型与 API Key' }).click();
   await expect(page.getByLabel('Base URL', { exact: true })).toHaveValue(
     'https://api.deepseek.com',
   );

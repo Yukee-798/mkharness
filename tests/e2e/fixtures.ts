@@ -3,8 +3,13 @@ export { expect };
 export type { Locator, Page } from '@playwright/test';
 // UI-only mocks use the same deployment capability response as the test server.
 // Broad API mocks still pass capability reads through this one explicit fixture.
-export const test = base.extend({
-  page: async ({ page }, use) => {
+export const test = base.extend<{ uiLocale: 'en' | 'zh-CN' }>({
+  uiLocale: ['zh-CN', { option: true }],
+  page: async ({ page, context, uiLocale }, use) => {
+    await context.addInitScript((locale) => {
+      if (!localStorage.getItem('mkharness.locale'))
+        localStorage.setItem('mkharness.locale', locale);
+    }, uiLocale);
     await page.route('**/api/**', async (route) => {
       const path = new URL(route.request().url()).pathname;
       if (path === '/api/bootstrap') return route.fulfill({ json: { authMode: 'account' } });

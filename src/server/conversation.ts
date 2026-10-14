@@ -471,7 +471,9 @@ export class ConversationAgent extends Agent<Env> {
         );
         const execution = {
           ...selection,
-          credentialRef: await (await this.credentials()).select(selection.provider),
+          credentialRef: await (
+            await this.credentials()
+          ).select(selection.provider, selection.modelId),
         };
         const pending = await this.harness.pending({ session: '1' });
         if (!pending.length) await this.pruneCompletedRemote(command);

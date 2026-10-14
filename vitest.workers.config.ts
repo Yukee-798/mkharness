@@ -1,7 +1,9 @@
+import { openuiServerCatalog } from './config/openui-catalog';
 import { defineConfig } from 'vitest/config';
 import { cloudflareTest } from '@cloudflare/vitest-plugin';
 export default defineConfig({
   plugins: [
+    openuiServerCatalog(),
     cloudflareTest({
       main: './tests/workers/lifecycle-entry.ts',
       remoteBindings: false,
@@ -11,6 +13,7 @@ export default defineConfig({
         modulesRules: [{ type: 'CompiledWasm', include: ['**/*.wasm'], fallthrough: true }],
         durableObjects: {
           CONVERSATIONS: { className: 'ConversationAgent', useSQLite: true },
+          OPENROUTER_PROBES: { className: 'OpenRouterProbe', useSQLite: true },
           LIFECYCLE_PROBES: { className: 'LifecycleProbe', useSQLite: true },
           BYOK_PROBES: { className: 'BYOKProbe', useSQLite: true },
           BINDING_PROBES: { className: 'BindingProbe', useSQLite: true },

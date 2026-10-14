@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { useEffect, useState, type ReactNode } from 'react';
 import { MessageSquare, PanelLeft, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react';
 import { Button } from './ui/button';
@@ -31,6 +32,7 @@ export function AppShell({
   onNewChat?: () => void;
   creating?: boolean;
 }) {
+  const { t } = useLocale();
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem('agent-ui.sidebar-collapsed') === 'true';
@@ -54,14 +56,14 @@ export function AppShell({
     desktop.addEventListener('change', closeDrawer);
     return () => desktop.removeEventListener('change', closeDrawer);
   }, [onMenuChange]);
-  const toggleLabel = collapsed ? '展开侧栏' : '收起侧栏';
+  const toggleLabel = collapsed ? t('展开侧栏') : t('收起侧栏');
   const content = directory ?? (
     <div className="flex h-full flex-col gap-5 p-4">
       <Button variant="outline" className="w-full justify-start" disabled>
         <Plus />
-        新建聊天
+        {t('新建聊天')}
       </Button>
-      <p className="px-2 text-sm text-muted-foreground">登录后，在这里继续你的聊天。</p>
+      <p className="px-2 text-sm text-muted-foreground">{t('登录后，在这里继续你的聊天。')}</p>
     </div>
   );
   return (
@@ -79,11 +81,11 @@ export function AppShell({
             className="sr-only z-50 rounded-md bg-background p-3 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
             href="#conversation"
           >
-            跳到聊天
+            {t('跳到聊天')}
           </a>
           <aside
             className="hidden min-h-0 flex-col border-r bg-muted/35 md:flex"
-            aria-label="个人聊天目录"
+            aria-label={t('个人聊天目录')}
           >
             <div
               className={cn(
@@ -130,14 +132,16 @@ export function AppShell({
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="新建聊天"
+                      aria-label={t('新建聊天')}
                       disabled={!onNewChat || creating}
                       onClick={onNewChat}
                     >
                       <Plus />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="right">{creating ? '创建中…' : '新建聊天'}</TooltipContent>
+                  <TooltipContent side="right">
+                    {creating ? t('创建中…') : t('新建聊天')}
+                  </TooltipContent>
                 </Tooltip>
               </div>
             )}
@@ -150,7 +154,7 @@ export function AppShell({
                 MkHarness
               </SheetTitle>
               <SheetDescription className="sr-only">
-                选择已有聊天或开始新聊天；账号和登录位于底部
+                {t('选择已有聊天或开始新聊天；账号和登录位于底部')}
               </SheetDescription>
             </SheetHeader>
             <div className="min-h-0 flex-1 overflow-hidden">{content}</div>
@@ -167,7 +171,7 @@ export function AppShell({
                   variant="ghost"
                   size="icon-sm"
                   className="md:hidden"
-                  aria-label="打开聊天目录"
+                  aria-label={t('打开聊天目录')}
                 >
                   <PanelLeft />
                 </Button>
@@ -175,7 +179,7 @@ export function AppShell({
               {title ? (
                 <h1 className="truncate text-sm font-medium">{title}</h1>
               ) : (
-                <span className="text-sm font-medium">新聊天</span>
+                <span className="text-sm font-medium">{t('新聊天')}</span>
               )}
             </header>
             {children}

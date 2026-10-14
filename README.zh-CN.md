@@ -10,6 +10,8 @@ MkHarness 是一个开源 Agent 应用模板，提供流式聊天、持久化执
 
 [快速开始](#快速开始) · [核心能力](#核心能力) · [扩展](#扩展-mkharness) · [部署](#部署到-cloudflare) · [常见问题](#常见问题) · [MIT 许可证](LICENSE)
 
+[体验在线示例](https://template.mkharness.com)：使用 Google 登录后，无需填写 API Key 即可使用 `openrouter/free`。免费额度由示例站共享，模型效果与可用性可能波动，耗尽或限流时会停止并提示，不会切换至付费模型。个人配置可覆盖默认配置。
+
 ## 快速开始
 
 准备 **Node.js 24**、**pnpm 11.17.0** 和一个受支持的模型 API Key。本地开发不需要 Cloudflare 账号，也不需要配置 Google OAuth。
@@ -27,14 +29,16 @@ pnpm dev
 打开 **http://localhost:5173**：
 
 1. 在输入框选择模型。
-2. 点击侧栏底部的访客菜单 → **模型与 API Key**，填写 **模型名**、**Base URL** 和 **API Key**，点击 **保存配置**。
+2. 点击侧栏底部的访客菜单 → **Settings → Models & API Key**，填写 **模型名**、**Base URL** 和 **API Key**，点击 **Save configuration**。
 3. 发送第一条消息。
+
+应用界面默认英文。可在 **Settings → General → Language** 切换中文，语言选择保存在当前浏览器。
 
 可以先试内置工具：**“请使用 `describe_text` 工具，统计‘你好世界’的字符数，只用文字回答。”** 无需搜索 Key 或 MCP 服务。
 
 > 在界面填写的 Key 会发送给当前部署，并在服务端加密保存，用于后台执行与恢复。请在自己的部署或可信部署填写。保存 Key 不会测试连接，首次模型请求才会实际使用它。
 
-`pnpm setup` 生成缺失的本地认证与加密密钥。重启时保留 `.dev.vars`，该文件已被 Git 忽略。本地数据存储在 Cloudflare 本地 SQLite 中。统一使用 `localhost`，不要与 `127.0.0.1` 混用。当前应用界面使用中文，两份 README 的配置说明保持一致。
+`pnpm setup` 生成缺失的本地认证与加密密钥。重启时保留 `.dev.vars`，该文件已被 Git 忽略。本地数据存储在 Cloudflare 本地 SQLite 中。统一使用 `localhost`，不要与 `127.0.0.1` 混用。应用界面默认英文，支持在设置中切换中文；两份 README 的配置说明保持一致。
 
 ## 核心能力
 
@@ -128,6 +132,8 @@ flowchart LR
 
 **Pi 负责执行历史与结果，Query 负责读取缓存，assistant-ui 负责聊天展示。** 提交、观察与 Stop 独立。远程副作用需要供应商提供幂等或调和能力，持久化执行本身不保证操作只执行一次。
 
+如需在自己的部署提供同样的免费默认配置，设置 `MODEL_PROVIDER=openrouter`、`MODEL_ID=openrouter/free`、`MODEL_THINKING_LEVEL=off`、`ALLOW_SERVER_MODEL_KEY=1`，将 OpenRouter Key 保存为 Worker 的 `MODEL_API_KEY` Secret。部署 Key 只允许 `MODEL_ID` / `MODEL_IDS` 明确配置的模型；个人 Key 可使用其他已注册模型。未配置付费回退。Agent 每轮推理及压缩都会消耗一次供应商请求，一次聊天可能使用多次免费请求。[OpenRouter 免费路由说明](https://openrouter.ai/docs/guides/routing/routers/free-router)。
+
 ## 常见问题
 
 <details>
@@ -135,11 +141,11 @@ flowchart LR
 
 每个浏览器拥有经过认证的 Better Auth 匿名会话。清除 Cookie 或更换浏览器后无法找回原访客身份；不包含跨浏览器恢复和访客到账号的数据迁移。
 
-Key 在 D1 中使用 AES-256-GCM 加密保存，不写入聊天历史。可选的“在此浏览器记住 API Key”会将明文副本保存在当前身份的 localStorage，退出时清除；不会自动重新上传。部署者持有加密密钥，可以解密凭据。同一供应商的个人 Key 优先于显式启用的部署默认 Key。默认 `ALLOW_SERVER_MODEL_KEY=0` 要求用户提供 Key；设为 `1` 并配置 `MODEL_API_KEY` 可提供由部署者承担费用的默认 Key。
+Key 在 D1 中使用 AES-256-GCM 加密保存，不写入聊天历史。可选的“在此浏览器记住 API Key”会将明文副本保存在当前身份的 localStorage，退出时清除；不会自动重新上传。部署者持有加密密钥，可以解密凭据。最近保存的个人模型成为新提交的默认选择；同一供应商的个人 Key 优先于部署默认 Key。默认 `ALLOW_SERVER_MODEL_KEY=0` 要求用户提供 Key；设为 `1` 并配置 `MODEL_API_KEY` 可提供由部署者承担费用的默认 Key。
 
-默认模型列表只显示 DeepSeek-V4.1-Flash（`deepseek-flash`）。填写的模型名必须已在 Pi 原生目录中注册；可通过 `MODEL_IDS` 配置额外模型。
+本地模板的默认模型列表只显示 DeepSeek-V4.1-Flash（`deepseek-flash`）。填写的模型名必须已在 Pi 原生目录中注册；可通过 `MODEL_IDS` 配置额外模型。
 
-自定义 Base URL 必须是公开 HTTPS 地址，并支持所选模型的原生协议：OpenAI Responses、Anthropic Messages 或 DeepSeek Chat Completions。修改地址不切换协议；拒绝重定向和私有网络地址。
+已知供应商地址会选择对应的 Pi 原生供应商。自定义 Base URL 必须是公开 HTTPS 地址，并支持所选供应商的 API 协议；修改自定义网关地址不会推断其他协议。拒绝重定向和私有网络地址。
 
 </details>
 

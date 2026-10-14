@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { ExtensionContext, useExtensionContext } from './extension-context';
 import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import {
@@ -96,6 +97,7 @@ export function Chat({
   onSettings?: (provider?: string) => void;
   onModelProviderChange?: (provider: string | undefined) => void;
 }) {
+  const { t } = useLocale();
   const unavailable = useRef(onUnavailable);
   unavailable.current = onUnavailable;
   const query = useQuery({
@@ -109,7 +111,7 @@ export function Chat({
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
     [restoration, setRestoration] = useState(0),
-    [error, setError] = useState(''),
+    [error, setError] = useState<Error>(),
     [text, setText] = useState(''),
     [accepted, setAccepted] = useState<string[]>([]),
     [sending, setSending] = useState(false);
@@ -151,7 +153,7 @@ export function Chat({
     setRemote(query.data.remote ?? []);
   }, [id, revision, query.data, query.isSuccess, snapshot]);
   useEffect(() => {
-    if (revision === 0) return;
+    if (!id || revision === 0) return;
     let active = true;
     void refetchSnapshot().then(({ data: s, isSuccess }) => {
       // A failed Query refetch retains cached data. Only a successful read may restore
@@ -168,7 +170,7 @@ export function Chat({
     return () => {
       active = false;
     };
-  }, [revision, refetchSnapshot]);
+  }, [id, revision, refetchSnapshot]);
   useEffect(() => {
     const e = query.error;
     if (!e) return;
@@ -177,7 +179,9 @@ export function Chat({
   }, [query.error]);
   // Query owns read errors; keep submission/action errors separate so a successful
   // refetch clears stale read failures without hiding an unconfirmed submission.
-  const visibleError = error || query.error?.message;
+  const visibleError = error ?? query.error;
+  const credentialRequired =
+    visibleError instanceof ApiError && visibleError.code === 'credential_required';
   const send = useMemo(
     () =>
       createSubmitter(async (command) => {
@@ -201,7 +205,7 @@ export function Chat({
           'none')
     ) {
       onSettings?.(selected?.provider);
-      throw new Error('请先配置所选模型的 Base URL 与 API Key');
+      throw new ApiError(400, 'credential_required', '请先配置所选模型的 Base URL 与 API Key');
     }
     try {
       await send(message, source, selected);
@@ -217,7 +221,7 @@ export function Chat({
     onDirectoryChange?.();
     setAccepted((a) => [...a, message]);
     retries.current = 0;
-    setError('');
+    setError(undefined);
     if (!snapshot?.pending.length) setRevision((r) => r + 1);
   };
   const refresh = () => {
@@ -228,7 +232,7 @@ export function Chat({
   const reconnect = (replacement = false) => {
     if (!replacement && retries.current >= 4) {
       setConnection(undefined);
-      setError('连接已中断。重新连接后可以继续查看回复。');
+      setError(new Error('连接已中断。重新连接后可以继续查看回复。'));
       return;
     }
     setConnection('reconnecting');
@@ -243,12 +247,15 @@ export function Chat({
     if (remoteSending) return;
     setRemoteSending(true);
     try {
-      await submit(action === 'retry_remote' ? '重新执行原任务（可能重复执行）' : '复查原任务', {
-        action,
-        taskId,
-      });
+      await submit(
+        action === 'retry_remote' ? t('重新执行原任务（可能重复执行）') : t('复查原任务'),
+        {
+          action,
+          taskId,
+        },
+      );
     } catch (e) {
-      setError((e as Error).message);
+      setError(e as Error);
     } finally {
       setRemoteSending(false);
     }
@@ -280,14 +287,14 @@ export function Chat({
         .map((operation) => {
           const blocked = !['prepared', 'submitting', 'waiting'].includes(operation.status);
           const labels: Record<string, string> = {
-            prepared: '正在准备执行…',
-            submitting: '正在提交请求…',
-            waiting: '正在等待结果…',
-            unknown: '结果暂时无法确认',
-            timeout: '等待已到期，远端可能仍在运行',
-            cancel_unknown: '已停止本地任务，远端状态尚未确认',
-            cancel_failed: '已停止本地任务，远端取消未成功',
-            cancel_unsupported: '已停止本地任务，远端不支持取消',
+            prepared: t('正在准备执行…'),
+            submitting: t('正在提交请求…'),
+            waiting: t('正在等待结果…'),
+            unknown: t('结果暂时无法确认'),
+            timeout: t('等待已到期，远端可能仍在运行'),
+            cancel_unknown: t('已停止本地任务，远端状态尚未确认'),
+            cancel_failed: t('已停止本地任务，远端取消未成功'),
+            cancel_unsupported: t('已停止本地任务，远端不支持取消'),
           };
           return (
             <div
@@ -305,7 +312,7 @@ export function Chat({
                     disabled={remoteSending || !!snapshot?.pending.length || snapshot?.stopping}
                     onClick={() => void remoteAction('recheck_remote', operation.taskId)}
                   >
-                    复查原任务
+                    {t('复查原任务')}
                   </Button>
                   <Button
                     size="sm"
@@ -313,7 +320,7 @@ export function Chat({
                     disabled={remoteSending || !!snapshot?.pending.length || snapshot?.stopping}
                     onClick={() => void remoteAction('retry_remote', operation.taskId)}
                   >
-                    重新执行（可能重复执行）
+                    {t('重新执行（可能重复执行）')}
                   </Button>
                 </div>
               )}
@@ -322,10 +329,10 @@ export function Chat({
         })}
       {accepted.length > 0 && (
         <aside
-          aria-label="已接受的任务"
+          aria-label={t('已接受的任务')}
           className="rounded-lg border bg-muted/40 px-3 py-2 text-xs"
         >
-          <p className="font-medium">任务已接受，忙碌时按顺序执行</p>
+          <p className="font-medium">{t('任务已接受，忙碌时按顺序执行')}</p>
           <div className="mt-1 max-h-20 space-y-1 overflow-y-auto text-muted-foreground">
             {accepted.map((message, i) => (
               <p key={i} className="truncate">
@@ -352,16 +359,18 @@ export function Chat({
           )}
           <span className="flex-1">
             {snapshot?.stopping
-              ? '正在停止…'
+              ? t('正在停止…')
               : connection === 'reconnecting'
-                ? '正在重新连接…'
+                ? t('正在重新连接…')
                 : connection === 'recovered'
-                  ? '已恢复连接'
-                  : '任务运行中'}
+                  ? t('已恢复连接')
+                  : t('任务运行中')}
           </span>
           {!!snapshot?.pending.some((p) => p.status === 'queued') && (
             <span className="tabular-nums">
-              {snapshot.pending.filter((p) => p.status === 'queued').length} 项排队
+              {t('{count} 项排队', {
+                count: snapshot.pending.filter((p) => p.status === 'queued').length,
+              })}
             </span>
           )}
         </div>
@@ -369,19 +378,27 @@ export function Chat({
       {visibleError && (
         <Alert variant="destructive">
           <AlertDescription>
-            {visibleError}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                retries.current = 0;
-                setConnection('reconnecting');
-                setError('');
-                setRevision((r) => r + 1);
-              }}
-            >
-              重新连接
-            </Button>
+            {t(visibleError.message)}
+            {credentialRequired ? (
+              onSettings && (
+                <Button variant="outline" size="sm" onClick={() => onSettings(selected?.provider)}>
+                  {t('配置模型与 API Key')}
+                </Button>
+              )
+            ) : id ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  retries.current = 0;
+                  setConnection('reconnecting');
+                  setError(undefined);
+                  setRevision((r) => r + 1);
+                }}
+              >
+                {t('重新连接')}
+              </Button>
+            ) : null}
           </AlertDescription>
         </Alert>
       )}
@@ -396,14 +413,14 @@ export function Chat({
             await submit(text);
             if (draftVersion.current === submittedVersion) setText('');
           } catch (e) {
-            setError((e as Error).message);
+            setError(e as Error);
           } finally {
             setSending(false);
           }
         }}
       >
         <label htmlFor="message" className="sr-only">
-          消息
+          {t('消息')}
         </label>
         <Textarea
           id="message"
@@ -413,7 +430,7 @@ export function Chat({
             setText(e.target.value);
           }}
           rows={2}
-          placeholder="描述你的问题，或说说你想完成什么"
+          placeholder={t('描述你的问题，或说说你想完成什么')}
           className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
           disabled={!composerReady || snapshot?.stopping}
           onKeyDown={(e) => {
@@ -433,7 +450,9 @@ export function Chat({
                 disabled={sending || snapshot?.stopping}
               />
             ) : (
-              <span className="px-1 text-[11px] text-muted-foreground">Shift + Enter 换行</span>
+              <span className="px-1 text-[11px] text-muted-foreground">
+                {t('Shift + Enter 换行')}
+              </span>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -442,26 +461,26 @@ export function Chat({
                 type="button"
                 size="sm"
                 variant="outline"
-                aria-label="停止并撤回排队"
+                aria-label={t('停止并撤回排队')}
                 disabled={snapshot.stopping}
                 onClick={async () => {
                   try {
                     await request(`/conversations/${id}/stop`, { method: 'POST' });
                     refresh();
                   } catch (e) {
-                    setError((e as Error).message);
+                    setError(e as Error);
                   }
                 }}
               >
                 <Square className="size-3" />
-                停止
+                {t('停止')}
               </Button>
             )}
             <Button
               type="submit"
               size="icon"
               className="rounded-full"
-              aria-label={sending ? '提交中…' : '发送'}
+              aria-label={sending ? t('提交中…') : t('发送')}
               disabled={
                 !composerReady ||
                 !text.trim() ||
@@ -503,9 +522,11 @@ export function Chat({
             <div className="w-full max-w-3xl space-y-8">
               <div className="text-center">
                 <MessageSquare className="mx-auto mb-5 size-8 text-muted-foreground" />
-                <h1 className="text-2xl font-semibold tracking-tight">今天想解决什么问题？</h1>
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {t('今天想解决什么问题？')}
+                </h1>
                 <p className="mt-3 text-sm text-muted-foreground">
-                  直接提问，或描述你想完成的内容。
+                  {t('直接提问，或描述你想完成的内容。')}
                 </p>
               </div>
               {footer}
@@ -544,6 +565,7 @@ function Runtime({
   progress: (value: RemoteProgress[]) => void;
   footer: ReactNode;
 }) {
+  const { t } = useLocale();
   const extensions = useExtensionConfig(userId);
   const [runtimeIssues, setRuntimeIssues] = useState<RuntimeIssue[]>(snapshot.runtimeIssues ?? []);
   const [toolProgress, setToolProgress] = useState<ToolProgressMap>(snapshot.toolProgress ?? {});
@@ -638,7 +660,7 @@ function Runtime({
             messageIds,
           }}
         >
-          <ThreadPrimitive.Root aria-label="聊天历史" className="flex min-h-0 flex-1 flex-col">
+          <ThreadPrimitive.Root aria-label={t('聊天历史')} className="flex min-h-0 flex-1 flex-col">
             <ThreadPrimitive.Viewport
               data-slot="chat-viewport"
               scrollToBottomOnRunStart={false}
@@ -650,9 +672,9 @@ function Runtime({
                   className="mx-auto max-w-md shrink-0 px-6 text-center"
                 >
                   <MessageSquare className="mx-auto mb-4 size-6 text-muted-foreground" />
-                  <p className="text-xl font-medium tracking-tight">今天想解决什么问题？</p>
+                  <p className="text-xl font-medium tracking-tight">{t('今天想解决什么问题？')}</p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    直接提问，或描述你想比较、计算和调整的内容。
+                    {t('直接提问，或描述你想比较、计算和调整的内容。')}
                   </p>
                 </div>
               </ThreadPrimitive.Empty>
@@ -667,7 +689,7 @@ function Runtime({
               <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl shrink-0 bg-background px-4 pt-3 pb-4 group-has-[[data-slot=chat-welcome]]/viewport:static group-has-[[data-slot=chat-welcome]]/viewport:mt-0 group-has-[[data-slot=chat-welcome]]/viewport:pt-6 group-has-[[data-slot=chat-welcome]]/viewport:pb-0 sm:px-6">
                 <ThreadPrimitive.ScrollToBottom asChild>
                   <TooltipIconButton
-                    tooltip="回到最新消息"
+                    tooltip={t('回到最新消息')}
                     className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm group-has-[[data-slot=chat-welcome]]/viewport:hidden"
                   >
                     <ArrowDown className="size-4" />
@@ -676,14 +698,14 @@ function Runtime({
                 {extensions.unavailable && (
                   <Alert className="mb-3">
                     <AlertDescription>
-                      部分扩展界面未能加载，基础聊天仍可使用。
+                      {t('部分扩展界面未能加载，基础聊天仍可使用。')}
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={extensions.loading}
                         onClick={extensions.retry}
                       >
-                        重试加载
+                        {t('重试加载')}
                       </Button>
                     </AlertDescription>
                   </Alert>
@@ -694,8 +716,8 @@ function Runtime({
                       {(activeRunId ? runtimeIssues : (snapshot.runtimeIssues ?? [])).some(
                         (issue) => issue.code === 'compaction_failed',
                       )
-                        ? '上下文压缩失败，部分任务可能无法继续。请检查模型配置后再发送请求。'
-                        : '部分任务无法恢复，请联系应用维护者。'}
+                        ? t('上下文压缩失败，部分任务可能无法继续。请检查模型配置后再发送请求。')
+                        : t('部分任务无法恢复，请联系应用维护者。')}
                     </AlertDescription>
                   </Alert>
                 )}
@@ -713,8 +735,9 @@ function Tool(part: ToolCallMessagePartProps) {
   return <ToolActivity part={part} />;
 }
 function AssistantText(part: TextMessagePartProps) {
+  const { t } = useLocale();
   if (part.text === '' && part.status.type === 'running')
-    return <TraceLine live label="正在思考…" icon={<Brain />} />;
+    return <TraceLine live label={t('正在思考…')} icon={<Brain />} />;
   return <MarkdownText />;
 }
 // GroupedParts is for adjacent runs; the native clustering primitive is retained
@@ -724,6 +747,7 @@ const groupReasoningParts = (parts: readonly { type: string }[]) => {
   return indices.length ? [{ groupKey: 'reasoning', indices }] : [];
 };
 function AssistantReasoning({ children }: { children?: ReactNode }) {
+  const { t } = useLocale();
   const { activity } = useExtensionContext();
   const parts = useAuiState((s) => s.message.parts);
   const running = parts.some((part) => part.type === 'reasoning' && part.status.type === 'running');
@@ -735,7 +759,7 @@ function AssistantReasoning({ children }: { children?: ReactNode }) {
       <DisclosureTrigger
         icon={<Brain />}
         live={running}
-        label={running ? '正在思考…' : '思考过程'}
+        label={running ? t('正在思考…') : t('思考过程')}
       />
       <ReasoningContent aria-busy={running} className={disclosureContentClass}>
         <ReasoningText className="ps-0">{children}</ReasoningText>
@@ -745,6 +769,7 @@ function AssistantReasoning({ children }: { children?: ReactNode }) {
 }
 const reasoningComponents = { Group: AssistantReasoning, Reasoning };
 export function Assistant() {
+  const { t } = useLocale();
   const content = useAuiState((s) => s.message.content);
   const { activity, toolkit } = useExtensionContext();
   const groupAssistantParts = useMemo(
@@ -817,8 +842,8 @@ export function Assistant() {
                       <DisclosureTrigger
                         icon={<Wrench />}
                         live={part.status.type === 'running'}
-                        label={part.status.type === 'running' ? '正在调用' : '已调用'}
-                        detail={`${part.indices.length} 个工具`}
+                        label={part.status.type === 'running' ? t('正在调用') : t('已调用')}
+                        detail={t('{count} 个工具', { count: part.indices.length })}
                         data-slot="tool-group-trigger"
                       />
                     )}
@@ -844,7 +869,7 @@ export function Assistant() {
                   />
                 );
               case 'indicator':
-                return <TraceLine live label="正在思考…" icon={<Brain />} />;
+                return <TraceLine live label={t('正在思考…')} icon={<Brain />} />;
               default:
                 return null;
             }

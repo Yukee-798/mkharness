@@ -25,7 +25,10 @@
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "build:production": "CLOUDFLARE_ENV=production vite build",
+    "deploy:production": "pnpm build:production && wrangler deploy --env production",
+    "db:migrate:production": "wrangler d1 migrations apply DB --remote --env production"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",

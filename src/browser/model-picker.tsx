@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { Bot } from 'lucide-react';
 import {
   thinkingLabels,
@@ -30,6 +31,7 @@ export function ModelPicker({
   onChange: (selection: ModelSelection) => void;
   disabled?: boolean;
 }) {
+  const { t } = useLocale();
   const searchable = catalog.models.length > 5;
   return (
     <ModelSelectorRoot
@@ -40,7 +42,10 @@ export function ModelPicker({
         icon: <Bot className="size-4" />,
         efforts:
           model.thinkingLevels.length > 1
-            ? model.thinkingLevels.map((id) => ({ id, name: thinkingLabels[id] }))
+            ? model.thinkingLevels.map((id) => ({
+                id,
+                name: t(id === 'off' ? '关闭思考' : thinkingLabels[id]),
+              }))
             : undefined,
       }))}
       value={JSON.stringify([value.provider, value.modelId])}
@@ -59,7 +64,7 @@ export function ModelPicker({
       <ModelSelectorTrigger
         variant="ghost"
         size="sm"
-        aria-label="模型与思考强度"
+        aria-label={t('模型与思考强度')}
         disabled={disabled}
         className="min-w-0 max-w-full"
       >
@@ -71,9 +76,9 @@ export function ModelPicker({
         searchable={searchable}
         className="w-80 max-w-[calc(100vw-2rem)] rounded-xl"
       >
-        {searchable && <ModelSelectorSearch placeholder="搜索模型…" />}
+        {searchable && <ModelSelectorSearch placeholder={t('搜索模型…')} />}
         <ModelSelectorList>
-          <ModelSelectorEmpty>没有匹配的模型</ModelSelectorEmpty>
+          <ModelSelectorEmpty>{t('没有匹配的模型')}</ModelSelectorEmpty>
           <ModelSelectorGroup>
             {catalog.models.map((model) => (
               <ModelSelectorItem
@@ -89,7 +94,7 @@ export function ModelPicker({
           </ModelSelectorGroup>
         </ModelSelectorList>
         <ModelSelectorEffort
-          label="思考强度"
+          label={t('思考强度')}
           className="[&_[role=radiogroup]]:flex-wrap [&_[role=radiogroup]]:justify-end"
         />
       </ModelSelectorContent>

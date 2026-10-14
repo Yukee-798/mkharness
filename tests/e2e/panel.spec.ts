@@ -24,7 +24,7 @@ test('native links open safely during the click without submitting an agent requ
     }),
   );
   await page.goto('/tests/browser/panel.html');
-  await page.getByRole('region', { name: 'Interactive answer' }).first().getByText('观看').click();
+  await page.getByRole('region', { name: '交互式回答' }).first().getByText('观看').click();
   expect(await page.evaluate(() => (window as any).openedUrls)).toEqual([
     {
       url: 'https://example.com/video/1',
@@ -46,7 +46,7 @@ test('native assistant actions retain click-time context and inputs', async ({ p
     }),
   );
   await page.goto('/tests/browser/panel.html');
-  const panel = page.getByRole('region', { name: 'Interactive answer' }).first();
+  const panel = page.getByRole('region', { name: '交互式回答' }).first();
   await panel.getByPlaceholder('Choice').fill('B');
   await panel.getByRole('button', { name: 'Explain' }).click();
   expect(await page.evaluate(() => (window as any).submissions[0])).toEqual({
@@ -86,7 +86,7 @@ test('checks dynamic, row and legacy links on click while preserving local Set a
     }),
   );
   await page.goto('/tests/browser/panel.html');
-  const panel = page.getByRole('region', { name: 'Interactive answer' }).first();
+  const panel = page.getByRole('region', { name: '交互式回答' }).first();
   await panel.getByPlaceholder('URL').fill('javascript:alert(1)');
   for (const name of ['Dynamic', 'Legacy', 'Object step', 'Missing']) {
     await panel.getByRole('button', { name, exact: true }).click();
@@ -129,10 +129,7 @@ test('native select portals share the application theme and preserve keyboard se
     });
   });
   await page.goto('/tests/browser/panel.html');
-  const select = page
-    .getByRole('region', { name: 'Interactive answer' })
-    .first()
-    .getByRole('combobox');
+  const select = page.getByRole('region', { name: '交互式回答' }).first().getByRole('combobox');
   await select.click();
   await expect(page.getByRole('listbox')).toHaveClass(/openui-theme-portal-/);
   await page.getByRole('option', { name: '短期', exact: true }).press('ArrowDown');
@@ -164,7 +161,7 @@ test('native clarification form validates, saves choices and submits only on exp
     });
   });
   await page.goto('/tests/browser/panel.html');
-  const panels = page.getByRole('region', { name: 'Interactive answer' });
+  const panels = page.getByRole('region', { name: '交互式回答' });
   const form = panels.first();
   const comparison = form.getByRole('radio', { name: '方案对比' });
   await expect(comparison).not.toBeChecked();

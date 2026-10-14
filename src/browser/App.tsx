@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { authClient } from './auth';
 import { useNavigate, useSearch } from '@tanstack/react-router';
@@ -13,7 +14,7 @@ import { Plus, LogIn, LogOut, Settings, ChevronsUpDown } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
 import { ScrollArea } from './ui/scroll-area';
-import { ModelSettingsDialog } from './ModelSettings';
+import { SettingsDialog } from './Settings';
 import { retainModelKeys } from './local-model-key';
 import { ChatLoading } from './chat-loading';
 import { cn } from './ui/utils';
@@ -27,6 +28,7 @@ import {
 } from './ui/dropdown-menu';
 const Chat = lazy(() => import('./Chat').then((module) => ({ default: module.Chat })));
 export function App() {
+  const { t } = useLocale();
   const { data: session, isPending, error: sessionError, refetch } = authClient.useSession();
   const bootstrap = useQuery({
     queryKey: ['bootstrap'],
@@ -82,7 +84,7 @@ export function App() {
           <AlertDescription>
             {bootstrap.error
               ? bootstrap.error.message
-              : '当前身份不适用于此部署模式，请退出后重新进入'}
+              : t('当前身份不适用于此部署模式，请退出后重新进入')}
           </AlertDescription>
         </Alert>
         <Button
@@ -92,7 +94,7 @@ export function App() {
             else void authClient.signOut();
           }}
         >
-          {bootstrap.error ? '重试' : '退出当前身份'}
+          {bootstrap.error ? t('重试') : t('退出当前身份')}
         </Button>
       </main>
     );
@@ -100,7 +102,9 @@ export function App() {
     return (
       <main className="flex min-h-dvh items-center justify-center p-6">
         <p role="status" className="text-sm text-muted-foreground">
-          {error || sessionError?.message || (signingIn ? '正在建立浏览器身份…' : '正在恢复身份…')}
+          {t(
+            error || sessionError?.message || (signingIn ? '正在建立浏览器身份…' : '正在恢复身份…'),
+          )}
         </p>
         {(guestFailed || sessionError) && (
           <Button
@@ -110,7 +114,7 @@ export function App() {
               void refetch();
             }}
           >
-            重试
+            {t('重试')}
           </Button>
         )}
       </main>
@@ -124,7 +128,7 @@ export function App() {
           <Button
             variant="ghost"
             className={cn('h-12 w-full justify-start px-3', collapsed && 'justify-center px-0')}
-            aria-label={signingIn ? '正在打开登录…' : '使用 Google 登录'}
+            aria-label={signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
             disabled={signingIn || !!sessionError}
             onClick={async () => {
               setSigningIn(true);
@@ -145,7 +149,7 @@ export function App() {
           >
             <LogIn className="size-4 shrink-0" />
             <span className={collapsed ? 'sr-only' : undefined}>
-              {signingIn ? '正在打开登录…' : '使用 Google 登录'}
+              {signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
             </span>
           </Button>
         )}
@@ -153,27 +157,27 @@ export function App() {
         <div className="flex min-h-0 flex-1 overflow-y-auto">
           <div className="m-auto w-full max-w-md shrink-0 px-6 py-12">
             <h1 className="text-3xl leading-tight font-semibold tracking-tight">
-              把问题变成
+              {t('把问题变成')}
               <br />
-              可以操作的答案。
+              {t('可以操作的答案。')}
             </h1>
             <p className="mt-4 mb-8 text-sm leading-relaxed text-muted-foreground">
-              对话、探索和调整参数。在自己的聊天中继续每一项任务。
+              {t('对话、探索和调整参数。在自己的聊天中继续每一项任务。')}
             </p>
             {(error || sessionError) && (
               <Alert variant="destructive" className="mt-4">
                 <AlertDescription>
-                  {error || sessionError?.message || '无法读取登录配置，请检查服务端设置'}{' '}
+                  {t(error || sessionError?.message || '无法读取登录配置，请检查服务端设置')}{' '}
                   {sessionError && (
                     <Button variant="link" onClick={() => void refetch()}>
-                      重试
+                      {t('重试')}
                     </Button>
                   )}
                 </AlertDescription>
               </Alert>
             )}
             <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              从侧栏底部使用 Google 登录。聊天和输入仅保存在你的个人会话中。
+              {t('从侧栏底部使用 Google 登录。聊天和输入仅保存在你的个人会话中。')}
             </p>
           </div>
         </div>
@@ -182,7 +186,7 @@ export function App() {
   return (
     <Workspace
       key={session.user.id}
-      name={session.user.isAnonymous ? '此浏览器的访客' : session.user.name}
+      name={session.user.isAnonymous ? t('此浏览器的访客') : session.user.name}
       userId={session.user.id}
       anonymous={Boolean(session.user.isAnonymous)}
     />
@@ -197,6 +201,7 @@ function Workspace({
   userId: string;
   anonymous: boolean;
 }) {
+  const { t } = useLocale();
   const { chat: id = '' } = useSearch({ from: '/' });
   const navigate = useNavigate({ from: '/' });
   const client = useQueryClient();
@@ -207,11 +212,13 @@ function Workspace({
   const [menu, setMenu] = useState(false),
     [error, setError] = useState(''),
     [settingsOpen, setSettingsOpen] = useState(false),
+    [settingsSection, setSettingsSection] = useState<'general' | 'models'>('general'),
     [settingsProvider, setSettingsProvider] = useState<string>(),
     [activeProvider, setActiveProvider] = useState<string>(),
     [signingOut, setSigningOut] = useState(false);
   const showSettings = useCallback((provider?: string) => {
     setSettingsProvider(provider);
+    setSettingsSection('models');
     setSettingsOpen(true);
   }, []);
   const refreshDirectory = useCallback(() => {
@@ -234,8 +241,8 @@ function Workspace({
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const groups = [
-    { label: 'Today', items: items.filter((item) => item.updated_at >= today.getTime()) },
-    { label: 'Earlier', items: items.filter((item) => item.updated_at < today.getTime()) },
+    { label: t('Today'), items: items.filter((item) => item.updated_at >= today.getTime()) },
+    { label: t('Earlier'), items: items.filter((item) => item.updated_at < today.getTime()) },
   ];
   const signOut = async () => {
     if (signingOut) return;
@@ -260,20 +267,20 @@ function Workspace({
         onClick={() => void create()}
       >
         <Plus className="size-4" />
-        新建聊天
+        {t('新建聊天')}
       </Button>
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         {loading && !items.length && (
-          <div className="space-y-2" role="status" aria-label="正在读取目录">
+          <div className="space-y-2" role="status" aria-label={t('正在读取目录')}>
             <Skeleton className="h-9 w-full" />
             <Skeleton className="h-9 w-4/5" />
           </div>
         )}
         {!loading && !items.length && (
-          <p className="px-2 py-4 text-sm text-muted-foreground">第一段对话，从这里开始。</p>
+          <p className="px-2 py-4 text-sm text-muted-foreground">{t('第一段对话，从这里开始。')}</p>
         )}
         <ScrollArea className="-mx-4 min-h-0 flex-1">
-          <nav className="space-y-4 px-4" aria-label="聊天记录">
+          <nav className="space-y-4 px-4" aria-label={t('聊天记录')}>
             {groups
               .filter((group) => group.items.length)
               .map((group) => (
@@ -285,7 +292,7 @@ function Workspace({
                     <div
                       key={item.id}
                       role="group"
-                      aria-label={`聊天：${item.title}`}
+                      aria-label={t('聊天：{title}', { title: item.title })}
                       className="group/chat flex items-center rounded-md has-[button[aria-current=page]]:bg-accent"
                     >
                       <Button
@@ -315,7 +322,7 @@ function Workspace({
                 disabled={loading}
                 onClick={() => void directoryQuery.fetchNextPage()}
               >
-                更多聊天
+                {t('更多聊天')}
               </Button>
             )}
           </nav>
@@ -329,7 +336,7 @@ function Workspace({
         menu={menu}
         onMenuChange={setMenu}
         directory={directory}
-        title={id ? (current?.title ?? '聊天') : undefined}
+        title={id ? (current?.title ?? t('聊天')) : undefined}
         onNewChat={() => void create()}
         footer={(collapsed) => (
           <AccountMenu
@@ -337,14 +344,18 @@ function Workspace({
             anonymous={anonymous}
             collapsed={collapsed}
             busy={signingOut}
-            onSettings={() => showSettings(activeProvider)}
+            onSettings={() => {
+              setSettingsProvider(activeProvider);
+              setSettingsSection('general');
+              setSettingsOpen(true);
+            }}
             onSignOut={() => void signOut()}
           />
         )}
       >
         {(error || directoryQuery.error) && (
           <Alert variant="destructive" className="mx-4 mt-4 w-auto">
-            <AlertDescription>{error || directoryQuery.error?.message}</AlertDescription>
+            <AlertDescription>{t(error || directoryQuery.error?.message || '')}</AlertDescription>
           </Alert>
         )}
         <Suspense fallback={<ChatLoading />}>
@@ -362,11 +373,12 @@ function Workspace({
             onModelProviderChange={setActiveProvider}
           />
         </Suspense>
-        <ModelSettingsDialog
+        <SettingsDialog
           userId={userId}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           initialProvider={settingsProvider}
+          initialSection={settingsSection}
         />
       </AppShell>
     </ResourceDrafts>
@@ -388,6 +400,7 @@ function AccountMenu({
   onSignOut: () => void;
   onSettings: () => void;
 }) {
+  const { t } = useLocale();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -397,7 +410,7 @@ function AccountMenu({
             'h-12 w-full justify-start gap-3 px-2 font-medium',
             collapsed && 'justify-center px-0',
           )}
-          aria-label={`账号：${name}`}
+          aria-label={t('账号：{name}', { name })}
           title={collapsed ? name : undefined}
         >
           <span
@@ -411,7 +424,7 @@ function AccountMenu({
               <span className="min-w-0 flex-1 text-left">
                 <span className="block truncate text-sm font-medium">{name}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {anonymous ? '身份保留在此浏览器' : '个人账号'}
+                  {anonymous ? t('身份保留在此浏览器') : t('个人账号')}
                 </span>
               </span>
               <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
@@ -424,11 +437,11 @@ function AccountMenu({
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onSettings}>
           <Settings />
-          模型与 API Key
+          {t('设置')}
         </DropdownMenuItem>
         <DropdownMenuItem disabled={busy} onSelect={onSignOut}>
           <LogOut />
-          {busy ? '正在退出…' : '退出登录'}
+          {busy ? t('正在退出…') : t('退出登录')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

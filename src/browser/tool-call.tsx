@@ -1,7 +1,8 @@
+'use client';
+import { useLocale } from './locale';
 // Compose the official assistant-ui ToolFallback display primitives and disclosure style.
 // Sources: https://r.assistant-ui.com/tool-fallback.json and the homepage trace.tsx.
 // Copyright (c) 2026 AgentbaseAI Inc. (MIT); see THIRD_PARTY_NOTICES.md.
-'use client';
 
 import type { ReactNode } from 'react';
 import { CollapsibleTrigger } from './ui/collapsible';
@@ -50,6 +51,7 @@ export function ToolCall({
   ariaLabel,
   titleMeta,
 }: ToolCallProps) {
+  const { t } = useLocale();
   return (
     <ToolFallbackRoot data-slot="tool-call" open={open} onOpenChange={onOpenChange}>
       <CollapsibleTrigger
@@ -71,20 +73,20 @@ export function ToolCall({
       </CollapsibleTrigger>
       <ToolFallbackContent>
         {progress && (
-          <pre aria-label="工具进度" tabIndex={0} className={payloadScroll}>
+          <pre aria-label={t('工具进度')} tabIndex={0} className={payloadScroll}>
             {progress}
           </pre>
         )}
-        <p className="text-xs text-muted-foreground">请求参数</p>
+        <p className="text-xs text-muted-foreground">{t('请求参数')}</p>
         <ToolFallbackArgs
           argsText={request}
           scrollClassName={payloadScroll}
-          scrollLabel="请求参数内容"
+          scrollLabel={t('请求参数内容')}
         />
         <ToolFallbackResult
           result={result}
           scrollClassName={payloadScroll}
-          scrollLabel="工具结果内容"
+          scrollLabel={t('工具结果内容')}
         />
       </ToolFallbackContent>
     </ToolFallbackRoot>

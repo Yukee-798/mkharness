@@ -2,13 +2,15 @@
 
 **Build Agent apps with durable execution and extensible UI.**
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [Chinese](README.zh-CN.md)
 
 MkHarness is an open-source application template for building your own Agent product. It combines a streaming chat interface, persistent execution, and extensions for tools and interactive results, using **TanStack, Cloudflare, Pi, and assistant-ui**.
 
 Start locally without signing in, add your API key in the UI, and deploy the same application to Cloudflare.
 
 [Quick start](#quick-start) · [Features](#features) · [Extensions](#extend-mkharness) · [Deployment](#deploy-to-cloudflare) · [FAQ](#faq) · [MIT License](LICENSE)
+
+[Try the hosted example](https://template.mkharness.com): sign in with Google and use `openrouter/free` without entering an API key. Free capacity is shared and limited, and generation quality can vary; exhaustion stops the request with a message, never switches to a paid model. Personal settings override the default.
 
 ## Quick start
 
@@ -27,14 +29,16 @@ pnpm dev
 Open **http://localhost:5173**:
 
 1. Select a model in the composer.
-2. Open the visitor menu at the bottom of the sidebar → **模型与 API Key** (Models & API Key). Configure **Model name**, **Base URL** and **API Key**, then click **保存配置** (Save settings).
+2. Open the visitor menu at the bottom of the sidebar → **Settings → Models & API Key**. Configure **Model name**, **Base URL** and **API Key**, then click **Save configuration**.
 3. Send your first message.
+
+The interface defaults to English. Switch to Chinese in **Settings → General → Language**; your choice is remembered in this browser.
 
 Try the included tool: **“Use `describe_text` to count the characters in `Hello world`. Reply with text only.”** It needs no search key or MCP server.
 
 > Keys entered through the UI are sent to your deployment and encrypted on the server for background execution and recovery. Use your own deployment or one you trust. Saving a key does not test the connection; the first model request uses it.
 
-`pnpm setup` generates missing local authentication and encryption secrets. Keep `.dev.vars` across restarts; Git ignores it. Local data lives in Cloudflare's local SQLite storage. Use `localhost` consistently rather than switching between it and `127.0.0.1`. The app currently uses Chinese UI labels; both README languages describe the same setup.
+`pnpm setup` generates missing local authentication and encryption secrets. Keep `.dev.vars` across restarts; Git ignores it. Local data lives in Cloudflare's local SQLite storage. Use `localhost` consistently rather than switching between it and `127.0.0.1`. The interface supports English and Chinese; both README languages describe the same setup.
 
 ## Features
 
@@ -128,6 +132,8 @@ flowchart LR
 
 **Pi owns execution history and results; Query owns read caches; assistant-ui owns chat presentation.** Submit, observe, and Stop are separate operations. Remote side effects require provider idempotency or reconciliation; durable execution alone does not guarantee exactly-once delivery.
 
+To provide the same free default on your own deployment, set `MODEL_PROVIDER=openrouter`, `MODEL_ID=openrouter/free`, `MODEL_THINKING_LEVEL=off`, and `ALLOW_SERVER_MODEL_KEY=1`, then store an OpenRouter key as the `MODEL_API_KEY` Worker secret. The deployment key only authorizes models explicitly configured through `MODEL_ID` / `MODEL_IDS`; personal keys can select other registered models. No paid fallback is configured. Each Agent turn or compaction consumes another provider request, so a chat can use several free requests. [OpenRouter free routing](https://openrouter.ai/docs/guides/routing/routers/free-router).
+
 ## FAQ
 
 <details>
@@ -135,11 +141,11 @@ flowchart LR
 
 Each browser gets an authenticated anonymous Better Auth session. Clearing cookies or switching browsers loses access to that guest identity; cross-browser recovery and guest-to-account migration are not included.
 
-Keys are encrypted in D1 with AES-256-GCM, excluded from chat history. Browser storage is opt-in: “Remember API Key” keeps a plaintext copy in localStorage for this identity, cleared on sign-out; it is never automatically re-uploaded. The deployment operator holds the encryption secret and can decrypt them. Personal keys take precedence over an explicitly enabled deployment key for the same provider. The default `ALLOW_SERVER_MODEL_KEY=0` requires users to supply a key; setting it to `1` with `MODEL_API_KEY` enables an operator-funded default.
+Keys are encrypted in D1 with AES-256-GCM, excluded from chat history. Browser storage is opt-in: “Remember API key in this browser” keeps a plaintext copy in localStorage for this identity, cleared on sign-out; it is never automatically re-uploaded. The deployment operator holds the encryption secret and can decrypt them. The most recently saved personal model is the default for new submissions; its key takes precedence over a deployment key for the same provider. The default `ALLOW_SERVER_MODEL_KEY=0` requires users to supply a key; setting it to `1` with `MODEL_API_KEY` enables an operator-funded default.
 
-The default model list contains only DeepSeek-V4.1-Flash (`deepseek-flash`). A saved model name must be registered in Pi's native catalog; configure `MODEL_IDS` to expose additional models.
+The local template’s default model list contains only DeepSeek-V4.1-Flash (`deepseek-flash`). A saved model name must be registered in Pi's native catalog; configure `MODEL_IDS` to expose additional models.
 
-Custom Base URLs must be public HTTPS endpoints supporting the selected model's native API: OpenAI Responses, Anthropic Messages, or DeepSeek Chat Completions. Changing the address does not change protocols. Redirects and private-network destinations are rejected.
+Known provider endpoints select their native Pi provider. Custom Base URLs must be public HTTPS endpoints supporting the selected provider's API protocol; changing a custom gateway address does not infer a different protocol. Redirects and private-network destinations are rejected.
 
 </details>
 

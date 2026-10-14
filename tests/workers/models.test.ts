@@ -5,6 +5,7 @@ import {
   applicationThinkingLevel,
   applicationModelCatalog,
   validateModelSelection,
+  configuredModelCatalog,
 } from '../../src/server/models';
 import { runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 it('enables low reasoning by default and respects an explicit off setting', async () => {
@@ -186,4 +187,32 @@ it('rejects unsupported choices before inserting a request', async () => {
         state.storage.sql.exec('SELECT COUNT(*) AS count FROM app_requests').one().count,
     ),
   ).toBe(0);
+});
+
+it('uses native OpenRouter free routing and prefers explicit personal configuration without losing the free choice', async () => {
+  const config = {
+    MODEL_PROVIDER: 'openrouter',
+    MODEL_ID: 'openrouter/free',
+    MODEL_THINKING_LEVEL: 'off',
+  };
+  const models = applicationModels(config);
+  expect(models.getModel('openrouter', 'openrouter/free')).toMatchObject({
+    api: 'openai-completions',
+    cost: { input: 0, output: 0 },
+    baseUrl: 'https://openrouter.ai/api/v1',
+  });
+  await expect(models.getAuth('openrouter')).rejects.toThrow();
+  const catalog = configuredModelCatalog(config, models, [
+    { provider: 'deepseek', modelId: 'deepseek-flash' },
+  ]);
+  expect(catalog.defaultSelection).toMatchObject({
+    provider: 'deepseek',
+    modelId: 'deepseek-flash',
+  });
+  expect(catalog.models.map((m) => m.id)).toEqual(
+    expect.arrayContaining(['deepseek-flash', 'openrouter/free']),
+  );
+  expect(configuredModelCatalog(config, models).models.map((m) => m.id)).toEqual([
+    'openrouter/free',
+  ]);
 });

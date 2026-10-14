@@ -17,6 +17,7 @@ const configured = () => ({
   CREDENTIAL_ENCRYPTION_KEY: master,
   ALLOW_SERVER_MODEL_KEY: '1',
   MODEL_PROVIDER: 'openai',
+  MODEL_ID: 'gpt-5-mini',
   MODEL_API_KEY: 'deployment-canary',
 });
 
@@ -33,7 +34,7 @@ it('stores authenticated ciphertext while metadata and other owners cannot expos
   const rows = await env.DB.prepare('SELECT * FROM model_credentials WHERE owner=?').bind(id).all();
   expect(JSON.stringify(rows.results)).not.toContain(canary);
   expect(rows.results[0].nonce).toBeTruthy();
-  const reference = await store.select('openai');
+  const reference = await store.select('openai', 'gpt-5-mini');
   expect(await store.resolve('openai', reference)).toEqual({ apiKey: canary });
   await expect(
     new ModelCredentials(configured(), other).resolve('openai', reference),
@@ -47,7 +48,7 @@ it('atomically arbitrates competing replacements and retains the accepted old ve
   const id = await owner(),
     store = new ModelCredentials(configured(), id);
   const first = await store.save('openai', { apiKey: canary, expectedCurrentId: null });
-  const reference = await store.select('openai');
+  const reference = await store.select('openai', 'gpt-5-mini');
   const competing = await Promise.allSettled(
     ['next-a', 'next-b'].map((apiKey) =>
       store.save('openai', { apiKey, expectedCurrentId: first.currentId }),
@@ -72,7 +73,7 @@ it('rejects altered AAD, bad master keys, and invalid plaintext without falling 
   const id = await owner(),
     store = new ModelCredentials(configured(), id);
   await store.save('openai', { apiKey: canary, expectedCurrentId: null });
-  const reference = await store.select('openai');
+  const reference = await store.select('openai', 'gpt-5-mini');
   await expect(
     new ModelCredentials(
       { ...configured(), CREDENTIAL_ENCRYPTION_KEY: btoa('z'.repeat(32)) },
@@ -80,7 +81,7 @@ it('rejects altered AAD, bad master keys, and invalid plaintext without falling 
     ).resolve('openai', reference),
   ).rejects.toMatchObject({ code: 'credential_decryption_failed' });
   await store.save('anthropic', { apiKey: 'second-provider', expectedCurrentId: null });
-  const second = await store.select('anthropic');
+  const second = await store.select('anthropic', 'claude-sonnet-4-5');
   await env.DB.prepare(
     "UPDATE model_credentials SET ciphertext=(SELECT ciphertext FROM model_credentials WHERE owner=? AND provider='openai'),nonce=(SELECT nonce FROM model_credentials WHERE owner=? AND provider='openai') WHERE owner=? AND provider='anthropic'",
   )
@@ -112,7 +113,7 @@ it('expires retired references at the absolute deadline without writes on reads'
   let time = 1000;
   const store = new ModelCredentials(configured(), id, () => time);
   const first = await store.save('openai', { apiKey: canary, expectedCurrentId: null });
-  const reference = await store.select('openai');
+  const reference = await store.select('openai', 'gpt-5-mini');
   time = 2000;
   await store.save('openai', { apiKey: 'current', expectedCurrentId: first.currentId });
   time = 2000 + 7 * 86400000;
@@ -138,7 +139,7 @@ it('bounds versions and revokes all retained versions with currentId CAS', async
   await expect(
     store.save('openai', { apiKey: 'overflow', expectedCurrentId: currentId }),
   ).rejects.toMatchObject({ code: 'credential_version_limit' });
-  const reference = await store.select('openai');
+  const reference = await store.select('openai', 'gpt-5-mini');
   await expect(store.remove('openai', crypto.randomUUID())).rejects.toMatchObject({
     code: 'credential_conflict',
   });
@@ -157,7 +158,7 @@ it('bounds versions and revokes all retained versions with currentId CAS', async
 it('freezes server credentials and never turns a user failure into deployment fallback', async () => {
   const id = await owner(),
     store = new ModelCredentials(configured(), id);
-  const server = await store.select('openai');
+  const server = await store.select('openai', 'gpt-5-mini');
   expect(server).toMatchObject({ source: 'server' });
   await expect(
     new ModelCredentials({ ...configured(), MODEL_API_KEY: 'rotated' }, id).resolve(
@@ -166,10 +167,13 @@ it('freezes server credentials and never turns a user failure into deployment fa
     ),
   ).rejects.toMatchObject({ code: 'credential_configuration_changed' });
   await expect(
-    new ModelCredentials({ ...configured(), ALLOW_SERVER_MODEL_KEY: '0' }, id).select('openai'),
+    new ModelCredentials({ ...configured(), ALLOW_SERVER_MODEL_KEY: '0' }, id).select(
+      'openai',
+      'gpt-5-mini',
+    ),
   ).rejects.toMatchObject({ code: 'credential_required' });
   await store.save('openai', { apiKey: canary, expectedCurrentId: null });
-  const personal = await store.select('openai');
+  const personal = await store.select('openai', 'gpt-5-mini');
   await store.remove('openai', (await store.metadata('openai')).currentId);
   await expect(store.resolve('openai', personal)).rejects.toMatchObject({
     code: 'credential_unavailable',
@@ -184,7 +188,7 @@ it('binds the destination to the immutable encrypted Key version, including afte
     baseUrl: 'https://first.example.com/v1/',
     expectedCurrentId: null,
   });
-  const reference = await store.select('openai');
+  const reference = await store.select('openai', 'gpt-5-mini');
   const second = await store.save('openai', {
     apiKey: 'new-key',
     baseUrl: 'https://second.example.com/v1',
@@ -201,4 +205,23 @@ it('binds the destination to the immutable encrypted Key version, including afte
   await expect(store.resolve('openai', reference)).rejects.toMatchObject({
     code: 'credential_decryption_failed',
   });
+});
+
+it('limits deployment credentials to configured free models while personal credentials may override', async () => {
+  const store = new ModelCredentials(
+    { ...configured(), MODEL_PROVIDER: 'openrouter', MODEL_ID: 'openrouter/free' },
+    await owner(),
+  );
+  expect(await store.select('openrouter', 'openrouter/free')).toMatchObject({ source: 'server' });
+  await expect(store.select('openrouter', 'openai/gpt-5-mini')).rejects.toMatchObject({
+    code: 'model_not_allowed',
+  });
+  await store.save('openrouter', {
+    apiKey: canary,
+    modelId: 'openai/gpt-5-mini',
+    expectedCurrentId: null,
+  });
+  const personal = await store.select('openrouter', 'openai/gpt-5-mini');
+  expect(personal).toMatchObject({ source: 'user' });
+  expect(await store.resolve('openrouter', personal)).toEqual({ apiKey: canary });
 });

@@ -98,3 +98,5 @@ export class LifecycleProbe extends Fixture {
 export default { fetch: () => new Response('lifecycle test fixture') };
 
 export { BYOKProbe } from './byok-entry';
+
+export { OpenRouterProbe } from './openrouter-entry';

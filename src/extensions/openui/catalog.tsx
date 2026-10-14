@@ -1,3 +1,4 @@
+import { useLocale } from '../../browser/locale';
 import {
   cloneElement,
   createContext,
@@ -79,6 +80,7 @@ const Slider = defineComponent({
     NativeSlider.description + '; finite min < max, positive step, at most 256 discrete options.',
   props: NativeSlider.props,
   component: function SliderView(args) {
+    const { t } = useLocale();
     const guard = useContext(PanelContext),
       streaming = useIsStreaming(),
       getFieldValue = useGetFieldValue();
@@ -91,7 +93,7 @@ const Slider = defineComponent({
     try {
       validateSlider(args.props);
     } catch (error) {
-      if (streaming) return <span>Slider 正在生成…</span>;
+      if (streaming) return <span>{t('Slider 正在生成…')}</span>;
       throw error;
     }
     return cloneElement(element, {

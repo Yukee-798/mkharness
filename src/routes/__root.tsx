@@ -18,7 +18,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="en">
       <head>
         <HeadContent />
       </head>

@@ -1,3 +1,4 @@
+import { useLocale } from '../locale';
 import * as React from 'react';
 import { cn } from './utils';
 import { XIcon } from 'lucide-react';
@@ -45,6 +46,7 @@ function SheetContent({
   side?: 'top' | 'right' | 'bottom' | 'left';
   showCloseButton?: boolean;
 }) {
+  const { t } = useLocale();
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -68,7 +70,7 @@ function SheetContent({
         {showCloseButton && (
           <SheetPrimitive.Close className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-md opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-secondary">
             <XIcon className="size-4" />
-            <span className="sr-only">关闭聊天目录</span>
+            <span className="sr-only">{t('关闭聊天目录')}</span>
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Content>

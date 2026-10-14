@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { request, ApiError } from './api';
@@ -7,33 +8,17 @@ import { Input } from './ui/input';
 import { Checkbox } from './ui/checkbox';
 import { readModelKey, rememberModelKey } from './local-model-key';
 import type { CredentialMetadata } from '../shared/model-settings';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
-export function ModelSettingsDialog({
+export function ModelSettingsForm({
   userId,
-  open,
-  onOpenChange,
   initialProvider,
 }: {
   userId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   initialProvider?: string;
 }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>模型与 API Key</DialogTitle>
-          <DialogDescription>
-            Key 将发送给本部署，在服务端加密保存，用于后台任务与恢复。请仅在你信任的部署中填写。
-          </DialogDescription>
-        </DialogHeader>
-        {open && <CredentialForm key={userId} userId={userId} initialProvider={initialProvider} />}
-      </DialogContent>
-    </Dialog>
-  );
+  return <CredentialForm key={userId} userId={userId} initialProvider={initialProvider} />;
 }
 function CredentialForm({ userId, initialProvider }: { userId: string; initialProvider?: string }) {
+  const { t, locale } = useLocale();
   const client = useQueryClient(),
     query = useQuery(modelSettingsOptions(userId));
   const [choice, setProvider] = useState<string>(),
@@ -51,18 +36,24 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
     };
   }, []);
   const preferred = initialProvider ?? query.data?.modelCatalog.defaultSelection.provider;
-  const provider =
+  const initial =
     choice ??
     (query.data?.providers.some((p) => p.id === preferred)
       ? preferred!
       : (query.data?.providers[0]?.id ?? ''));
   useEffect(() => {
     // Pin the initial choice for this form; a metadata refetch must not redirect a draft Key.
-    if (choice === undefined && query.data) setProvider(provider);
-  }, [choice, query.data, provider]);
+    if (choice === undefined && query.data) setProvider(initial);
+  }, [choice, query.data, initial]);
+  const original = query.data?.credentials.find((c) => c.provider === initial);
+  const defaultUrl = query.data?.providers.find((p) => p.id === initial)?.baseUrl ?? '';
+  const endpoint = baseUrl ?? original?.baseUrl ?? defaultUrl;
+  // Known endpoints select their native Pi protocol; custom gateways retain the initial protocol.
+  const provider =
+    query.data?.providers.find(
+      (p) => p.baseUrl.replace(/\/$/, '') === endpoint.trim().replace(/\/$/, ''),
+    )?.id ?? initial;
   const current = query.data?.credentials.find((c) => c.provider === provider);
-  const defaultUrl = query.data?.providers.find((p) => p.id === provider)?.baseUrl ?? '';
-  const endpoint = baseUrl ?? current?.baseUrl ?? defaultUrl;
   useEffect(() => {
     if (baseUrl === undefined && current) setBaseUrl(endpoint);
   }, [baseUrl, current, endpoint]);
@@ -128,12 +119,12 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
       if (alive.current) setBusy(false);
     }
   };
-  if (query.isPending) return <p role="status">正在读取配置…</p>;
+  if (query.isPending) return <p role="status">{t('正在读取配置…')}</p>;
   if (query.error)
     return (
       <>
-        <p role="alert">{query.error.message}</p>
-        <Button onClick={() => void query.refetch()}>重试</Button>
+        <p role="alert">{t(query.error.message)}</p>
+        <Button onClick={() => void query.refetch()}>{t('重试')}</Button>
       </>
     );
   return (
@@ -145,7 +136,7 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
       }}
     >
       <p className="text-sm text-muted-foreground">
-        模型名使用 API 标识；Base URL 需支持该模型的 API 协议。
+        {t('模型名使用 API 标识；Base URL 需支持该模型的 API 协议。')}
       </p>
       <label className="block space-y-2">
         Base URL
@@ -162,9 +153,9 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
         />
       </label>
       <label className="block space-y-2">
-        模型名
+        {t('模型名')}
         <Input
-          aria-label="模型名"
+          aria-label={t('模型名')}
           required
           maxLength={200}
           autoComplete="off"
@@ -176,13 +167,13 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
         />
       </label>
       <p className="text-sm text-muted-foreground">
-        当前来源：
+        {t('当前来源：')}
         {current?.effectiveSource === 'user'
-          ? '个人 Key'
+          ? t('个人 Key')
           : current?.effectiveSource === 'server'
-            ? '部署默认 Key'
-            : '未配置'}
-        {current?.updatedAt && <> · {new Date(current.updatedAt).toLocaleString()}</>}
+            ? t('部署默认 Key')
+            : t('未配置')}
+        {current?.updatedAt && <> · {new Date(current.updatedAt).toLocaleString(locale)}</>}
       </p>
       <label className="block space-y-2">
         API Key
@@ -193,13 +184,13 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
           value={key}
           disabled={busy || !query.data?.credentialStorageReady}
           onChange={(e) => setKey(e.target.value)}
-          placeholder="填写个人 API Key"
+          placeholder={t('填写个人 API Key')}
         />
       </label>
       <div className="space-y-2">
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
-            aria-label="在此浏览器记住 API Key"
+            aria-label={t('在此浏览器记住 API Key')}
             checked={remember}
             disabled={busy}
             onCheckedChange={(checked) => {
@@ -209,21 +200,21 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
                 setMessage('无法清除浏览器本地保存，请检查浏览器存储设置');
             }}
           />
-          在此浏览器记住 API Key
+          {t('在此浏览器记住 API Key')}
         </label>
         <p className="text-xs text-muted-foreground">
-          可选：以明文保存在 localStorage，供再次填写；页面脚本可读取。退出后清除。
+          {t('可选：以明文保存在 localStorage，供再次填写；页面脚本可读取。退出后清除。')}
         </p>
       </div>
       {!query.data?.credentialStorageReady && (
         <p role="alert" className="text-sm">
-          部署未配置凭据加密主密钥，请联系部署者。
+          {t('部署未配置凭据加密主密钥，请联系部署者。')}
         </p>
       )}
       <p className="text-xs leading-relaxed text-muted-foreground">
-        保存后，下次提交消息时应用新配置，并影响该会话尚未准备的模型调用（含排队消息和压缩）。
-        已保存的步骤快照继续使用原版本；旧版本最多保留七天供恢复。更换浏览器或清除 Cookie
-        后无法找回访客身份。部署者可以解密 Key。
+        {t(
+          '保存后，下次提交消息时应用新配置，并影响该会话尚未准备的模型调用（含排队消息和压缩）。 已保存的步骤快照继续使用原版本；旧版本最多保留七天供恢复。更换浏览器或清除 Cookie 后无法找回访客身份。部署者可以解密 Key。',
+        )}
       </p>
       <div className="flex gap-2">
         <Button
@@ -235,12 +226,12 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
             !query.data?.credentialStorageReady
           }
         >
-          保存配置
+          {t('保存配置')}
         </Button>
       </div>
       {message && (
         <p role="status" className="text-sm">
-          {message}
+          {t(message)}
         </p>
       )}
     </form>

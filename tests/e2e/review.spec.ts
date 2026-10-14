@@ -92,7 +92,7 @@ test('delayed native slider edits each restart the automatic writeback budget', 
     }),
   );
   await page.goto('/tests/browser/panel.html');
-  const panel = page.getByRole('region', { name: 'Interactive answer' }).first(),
+  const panel = page.getByRole('region', { name: '交互式回答' }).first(),
     target = panel.getByPlaceholder('Target'),
     input = panel.locator('.openui-slider-block__input');
   await expect(target).toHaveValue('1');

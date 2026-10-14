@@ -1,4 +1,5 @@
 'use client';
+import { useLocale } from './locale';
 
 import '@assistant-ui/react-markdown/styles/dot.css';
 
@@ -62,6 +63,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components, componentsByLangu
 export const MarkdownText = memo(MarkdownTextImpl);
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+  const { t } = useLocale();
   const { isCopied, copyToClipboard } = useCopyToClipboard();
   const onCopy = () => {
     if (!code || isCopied) return;
@@ -73,7 +75,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
       <span className="aui-code-header-language text-muted-foreground font-medium lowercase">
         {language}
       </span>
-      <TooltipIconButton tooltip="复制代码" onClick={onCopy}>
+      <TooltipIconButton tooltip={t('复制代码')} onClick={onCopy}>
         {!isCopied && <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />}
         {isCopied && <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />}
       </TooltipIconButton>

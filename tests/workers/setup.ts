@@ -1,6 +1,3 @@
-// The test context has its own Vite module graph, separate from the DO fixture entry.
-// Load native UI dependencies before assertions so cold HTTP imports are not timed as validation.
-import '../../src/extensions/openui/catalog';
 import { beforeAll } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
 const migrations = import.meta.glob('../../migrations/*.sql', {

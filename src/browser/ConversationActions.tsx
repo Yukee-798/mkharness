@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { useState } from 'react';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { request, ApiError } from './api';
@@ -41,6 +42,7 @@ export function ConversationActions({
   onRenamed: (title: string) => void;
   onDeleted: () => void;
 }) {
+  const { t } = useLocale();
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(title);
@@ -73,7 +75,7 @@ export function ConversationActions({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="聊天操作"
+            aria-label={t('聊天操作')}
             className="mr-1 shrink-0 md:opacity-0 md:group-hover/chat:opacity-100 md:group-focus-within/chat:opacity-100 data-[state=open]:opacity-100"
           >
             <MoreHorizontal className="size-4" />
@@ -88,7 +90,7 @@ export function ConversationActions({
             }}
           >
             <Pencil />
-            重命名
+            {t('重命名')}
           </DropdownMenuItem>
           <DropdownMenuItem
             variant="destructive"
@@ -98,7 +100,7 @@ export function ConversationActions({
             }}
           >
             <Trash2 />
-            删除聊天
+            {t('删除聊天')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -110,8 +112,8 @@ export function ConversationActions({
       >
         <DialogContent showCloseButton={!busy}>
           <DialogHeader>
-            <DialogTitle>重命名聊天</DialogTitle>
-            <DialogDescription>为这段聊天设置一个方便查找的名称。</DialogDescription>
+            <DialogTitle>{t('重命名聊天')}</DialogTitle>
+            <DialogDescription>{t('为这段聊天设置一个方便查找的名称。')}</DialogDescription>
           </DialogHeader>
           <form
             className="space-y-4"
@@ -135,7 +137,7 @@ export function ConversationActions({
             }}
           >
             <label htmlFor={`chat-name-${id}`} className="sr-only">
-              聊天名称
+              {t('聊天名称')}
             </label>
             <Input
               id={`chat-name-${id}`}
@@ -147,7 +149,7 @@ export function ConversationActions({
             />
             {error && (
               <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
             <DialogFooter>
@@ -157,10 +159,10 @@ export function ConversationActions({
                 disabled={busy}
                 onClick={() => setRenameOpen(false)}
               >
-                取消
+                {t('取消')}
               </Button>
               <Button type="submit" disabled={busy || !name.trim()}>
-                {busy ? '保存中…' : '保存名称'}
+                {busy ? t('保存中…') : t('保存名称')}
               </Button>
             </DialogFooter>
           </form>
@@ -174,18 +176,18 @@ export function ConversationActions({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除聊天？</AlertDialogTitle>
+            <AlertDialogTitle>{t('删除聊天？')}</AlertDialogTitle>
             <AlertDialogDescription className="break-words">
-              “{title}”的历史和填写内容将被删除，当前任务会停止，排队任务会撤回。此操作无法撤销。
+              {t('删除说明', { title })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={busy}>{t('取消')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               disabled={busy}
@@ -194,7 +196,7 @@ export function ConversationActions({
                 void remove();
               }}
             >
-              {busy ? '正在停止并删除…' : '确认删除'}
+              {busy ? t('正在停止并删除…') : t('确认删除')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

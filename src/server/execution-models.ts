@@ -22,6 +22,10 @@ import {
 } from '@earendil-works/pi-durable';
 export type CredentialAccess = Pick<ModelCredentials, 'select' | 'resolve'> &
   Partial<Pick<ModelCredentials, 'configuredModels'>>;
+const freeModelUnavailable =
+  '免费模型额度已用完或服务暂时限流，请稍后重试，或配置个人 API Key。不会自动切换至付费模型。';
+const freeModelServiceUnavailable =
+  '免费模型服务暂时不可用，请稍后重试，或配置个人模型。不会自动切换至付费模型。';
 const boundProviders = new WeakMap<MutableModels, Map<string, string>>();
 export function executionModels(base: Models) {
   const models = createModels({
@@ -186,14 +190,20 @@ export async function bindExecution(
     })();
     return out;
   };
-  const requestOptions = <T extends { fetch?: typeof fetch }>(
+  const requestOptions = <T extends import('@earendil-works/pi-ai').StreamOptions>(
     model: { id: string; baseUrl: string },
     options: T | undefined,
   ): T | undefined => {
     // Bundled catalog destinations remain native; only user overrides need the egress guard.
     // This avoids two extra DNS subrequests per normal model call.
-    if (model.baseUrl === models.getModel(base.id, model.id)?.baseUrl) return options;
-    return { ...options, fetch: modelEndpointFetch(model.baseUrl, options?.fetch) } as T;
+    const native = model.baseUrl === models.getModel(base.id, model.id)?.baseUrl;
+    const result = {
+      ...options,
+      ...(native ? {} : { fetch: modelEndpointFetch(model.baseUrl, options?.fetch) }),
+    };
+    if (base.id === 'openrouter' && (model.id === 'openrouter/free' || model.id.endsWith(':free')))
+      return { ...result, maxRetries: 0 } as T;
+    return native ? options : (result as T);
   };
   boundProviders.get(models)?.set(id, base.id);
   models.setProvider({
@@ -236,15 +246,24 @@ function safeError(message: AssistantMessage, trustedCredential = false): Assist
     '原请求的部署凭据已更改，请发起新请求',
     '个人凭据无法解密，请检查部署主密钥并重新配置',
     '部署尚未配置凭据加密密钥',
+    freeModelUnavailable,
+    freeModelServiceUnavailable,
   ];
   const errorMessage =
     trustedCredential && credentialMessages.includes(text)
       ? text
-      : /429|rate.?limit/i.test(text)
-        ? '429 rate limit: 模型服务暂时限流，请稍后重试'
-        : /maximum context length|context.?window|context.?length/i.test(text)
-          ? 'maximum context length exceeded'
-          : '模型服务请求失败，请检查 Base URL、API Key 与服务状态后发起新请求。';
+      : message.provider === 'openrouter' &&
+          (message.model === 'openrouter/free' || message.model.endsWith(':free')) &&
+          /\b(?:402|429)\b|rate.?limit|insufficient.?credit|quota.?exceed/i.test(text)
+        ? freeModelUnavailable
+        : /429|rate.?limit/i.test(text)
+          ? '429 rate limit: 模型服务暂时限流，请稍后重试'
+          : /maximum context length|context.?window|context.?length/i.test(text)
+            ? 'maximum context length exceeded'
+            : message.provider === 'openrouter' &&
+                (message.model === 'openrouter/free' || message.model.endsWith(':free'))
+              ? freeModelServiceUnavailable
+              : '模型服务请求失败，请检查 Base URL、API Key 与服务状态后发起新请求。';
   return {
     ...message,
     content: [],

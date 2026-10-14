@@ -36,6 +36,7 @@ it('reads the static provider catalog without a key, supplier request, or DO', a
     'openai',
     'anthropic',
     'deepseek',
+    'openrouter',
   ]);
   expect(settings.modelCatalog.defaultSelection).toMatchObject({
     provider: 'deepseek',

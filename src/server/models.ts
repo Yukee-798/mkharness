@@ -6,6 +6,7 @@ import {
 } from '@earendil-works/pi-ai/models';
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
+import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { AppError } from '../shared/contracts';
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai';
@@ -19,6 +20,12 @@ export const modelProviders = [
     defaultModel: 'claude-sonnet-4-5',
   },
   { id: 'deepseek', name: 'DeepSeek', factory: deepseekProvider, defaultModel: 'deepseek-flash' },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    factory: openrouterProvider,
+    defaultModel: 'openrouter/free',
+  },
 ] as const;
 export function registeredProvider(id: string) {
   const provider = modelProviders.find((p) => p.id === id);
@@ -123,9 +130,9 @@ export function configuredModelCatalog(
       (model) => model.provider === preference.provider && model.id === preference.modelId,
     ),
   );
-  const preferred = configured.find((p) => p.provider === available.defaultSelection.provider);
+  const preferred = configured[0];
   const selection = preferred
-    ? { ...available.defaultSelection, modelId: preferred.modelId }
+    ? { ...available.defaultSelection, provider: preferred.provider, modelId: preferred.modelId }
     : available.defaultSelection;
   const ids = env.MODEL_IDS?.split(',')
     .map((id) => id.trim())
@@ -133,8 +140,13 @@ export function configuredModelCatalog(
   const choices = available.models.filter(
     (model) =>
       configured.some((p) => p.provider === model.provider && p.modelId === model.id) ||
-      (model.provider === selection.provider &&
-        (ids?.length ? ids.includes(model.id) : model.id === selection.modelId)),
+      (model.provider === available.defaultSelection.provider &&
+        (ids?.length
+          ? ids.includes(model.id)
+          : model.id ===
+            (selection.provider === available.defaultSelection.provider
+              ? selection.modelId
+              : available.defaultSelection.modelId))),
   );
   const selected = models.getModel(selection.provider, selection.modelId)!;
   return {

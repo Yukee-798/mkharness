@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ModelSettingsDialog } from '../../src/browser/ModelSettings';
+import { SettingsDialog } from '../../src/browser/Settings';
 import type { ModelSettings, CredentialMetadata } from '../../src/shared/model-settings';
 import { userKeys } from '../../src/browser/queries';
 const metadata: CredentialMetadata = {
@@ -75,7 +75,8 @@ it('keeps plaintext outside Query and storage, retains a failed draft and clears
     closed = vi.fn();
   const ui = (open: boolean, initialProvider?: string) => (
     <QueryClientProvider client={client}>
-      <ModelSettingsDialog
+      <SettingsDialog
+        initialSection="models"
         userId="owner"
         open={open}
         onOpenChange={closed}
@@ -91,7 +92,7 @@ it('keeps plaintext outside Query and storage, retains a failed draft and clears
     target: { value: 'https://custom.example.com/v1' },
   });
   fireEvent.change(view.getByLabelText('API Key'), { target: { value: 'CANARY-PRIVATE-KEY' } });
-  fireEvent.click(view.getByRole('button', { name: '保存配置' }));
+  fireEvent.click(view.getByRole('button', { name: 'Save configuration' }));
   await waitFor(() => expect(view.queryByText('冲突')).not.toBeNull());
   expect((view.getByLabelText('API Key') as HTMLInputElement).value).toBe('CANARY-PRIVATE-KEY');
   expect(view.getByLabelText('Base URL')).toHaveProperty('value', 'https://custom.example.com/v1');
@@ -154,19 +155,21 @@ it('remembers a successfully saved key only by explicit opt-in and restores the 
   });
   const ui = (open: boolean) => (
     <QueryClientProvider client={client}>
-      <ModelSettingsDialog userId="owner" open={open} onOpenChange={() => {}} />
+      <SettingsDialog initialSection="models" userId="owner" open={open} onOpenChange={() => {}} />
     </QueryClientProvider>
   );
   const view = render(ui(true));
   await waitFor(() => expect(view.queryByLabelText('API Key')).not.toBeNull());
-  expect(view.getByLabelText('模型名')).toHaveProperty('value', 'deepseek-flash');
-  expect(view.getByLabelText('模型名').getAttribute('placeholder')).toBe('deepseek-flash');
+  expect(view.getByLabelText('Model name')).toHaveProperty('value', 'deepseek-flash');
+  expect(view.getByLabelText('Model name').getAttribute('placeholder')).toBe('deepseek-flash');
   expect(view.queryByRole('button', { name: '移除 Key' })).toBeNull();
-  fireEvent.change(view.getByLabelText('模型名'), { target: { value: 'deepseek-v4-pro' } });
+  fireEvent.change(view.getByLabelText('Model name'), { target: { value: 'deepseek-v4-pro' } });
   fireEvent.change(view.getByLabelText('API Key'), { target: { value: 'LOCAL-CANARY' } });
   fireEvent.click(view.getByRole('checkbox'));
-  fireEvent.click(view.getByRole('button', { name: '保存配置' }));
-  await waitFor(() => expect(view.queryByText('已保存，尚未验证连接')).not.toBeNull());
+  fireEvent.click(view.getByRole('button', { name: 'Save configuration' }));
+  await waitFor(() =>
+    expect(view.queryByText('Saved. Connection has not been verified.')).not.toBeNull(),
+  );
   expect(localStorage.length).toBe(1);
   expect(
     JSON.stringify(
@@ -185,4 +188,84 @@ it('remembers a successfully saved key only by explicit opt-in and restores the 
   expect(writes).toBe(1);
   fireEvent.click(view.getByRole('checkbox'));
   expect(localStorage.length).toBe(0);
+});
+
+it('saves a known endpoint using its native provider and owner-specific revision', async () => {
+  const settings: ModelSettings = {
+    ...data,
+    providers: [
+      ...data.providers,
+      {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        defaultModelId: 'openrouter/free',
+      },
+    ],
+    modelCatalog: {
+      models: [],
+      defaultSelection: {
+        provider: 'openrouter',
+        modelId: 'openrouter/free',
+        thinkingLevel: 'off',
+      },
+    },
+    credentials: [
+      ...data.credentials,
+      {
+        ...metadata,
+        provider: 'openrouter',
+        effectiveSource: 'server',
+        serverDefaultAllowed: true,
+      },
+    ],
+  };
+  let submitted: { url: string; body: any } | undefined;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    if (init?.method === 'PUT') {
+      submitted = { url: String(url), body: JSON.parse(String(init.body)) };
+      return new Response(
+        JSON.stringify({
+          ...metadata,
+          provider: 'deepseek',
+          currentId: 'saved',
+          effectiveSource: 'user',
+          configured: true,
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    return new Response(JSON.stringify(settings), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <SettingsDialog initialSection="models" userId="owner" open onOpenChange={() => {}} />
+    </QueryClientProvider>,
+  );
+  await waitFor(() =>
+    expect(view.getByLabelText('Model name')).toHaveProperty('value', 'openrouter/free'),
+  );
+  fireEvent.change(view.getByLabelText('Base URL'), {
+    target: { value: 'https://api.deepseek.com/' },
+  });
+  fireEvent.change(view.getByLabelText('Model name'), { target: { value: 'deepseek-flash' } });
+  fireEvent.change(view.getByLabelText('API Key'), { target: { value: 'PERSONAL-CANARY' } });
+  fireEvent.click(view.getByText('Save configuration'));
+  await waitFor(() => expect(submitted?.url).toBe('/api/settings/model-credentials/deepseek'));
+  expect(submitted?.body).toMatchObject({
+    modelId: 'deepseek-flash',
+    expectedCurrentId: null,
+    apiKey: 'PERSONAL-CANARY',
+  });
+  expect(
+    JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((q) => q.state),
+    ),
+  ).not.toContain('PERSONAL-CANARY');
 });

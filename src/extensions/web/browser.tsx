@@ -1,7 +1,9 @@
+import { useLocale } from '../../browser/locale';
 import { Globe, Search } from 'lucide-react';
 import type { Toolkit, ToolCallMessagePartProps } from '@assistant-ui/react';
 import { ToolActivity } from '../../browser/tool-activity';
 function Read(part: ToolCallMessagePartProps) {
+  const { t } = useLocale();
   let query: string;
   try {
     query = new URL(String(part.args?.url)).hostname;
@@ -13,17 +15,18 @@ function Read(part: ToolCallMessagePartProps) {
       part={part}
       query={query}
       icon={<Globe />}
-      labels={{ active: '正在读取网页', complete: '已读取网页', failed: '网页读取失败' }}
+      labels={{ active: t('正在读取网页'), complete: t('已读取网页'), failed: t('网页读取失败') }}
     />
   );
 }
 function SearchWeb(part: ToolCallMessagePartProps) {
+  const { t } = useLocale();
   return (
     <ToolActivity
       part={part}
       query={String(part.args?.query ?? '')}
       icon={<Search />}
-      labels={{ active: '正在搜索网页', complete: '已搜索网页', failed: '网页搜索失败' }}
+      labels={{ active: t('正在搜索网页'), complete: t('已搜索网页'), failed: t('网页搜索失败') }}
     />
   );
 }

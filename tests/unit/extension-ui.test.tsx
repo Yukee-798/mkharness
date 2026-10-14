@@ -76,8 +76,8 @@ function App({ ui }: { ui: readonly ExtensionDecoration[] }) {
 it('composes independent decorations for any shared tool and footer without replacing their state', async () => {
   const view = render(<App ui={[metadata, independent]} />);
   await waitFor(() => expect(view.queryByText('Optional footer')).not.toBeNull());
-  const copy = view.getByRole('button', { name: '复制回复' });
-  const tool = view.getByRole('button', { name: '已完成：another_extension_tool' });
+  const copy = view.getByRole('button', { name: 'Copy response' });
+  const tool = view.getByRole('button', { name: 'Completed: another_extension_tool' });
   expect(tool.textContent).toContain('Metadata for another_extension_tool');
   fireEvent.click(tool);
   expect(view.queryByText('Original tool result')).not.toBeNull();
@@ -87,10 +87,10 @@ it('composes independent decorations for any shared tool and footer without repl
   expect(view.queryByText('Metadata for another_extension_tool')).toBeNull();
   expect(view.queryByText('Original tool result')).not.toBeNull();
   expect(view.queryByRole('button', { name: 'Footer 2: 1' })).not.toBeNull();
-  expect(view.getByRole('button', { name: '复制回复' })).toBe(copy);
+  expect(view.getByRole('button', { name: 'Copy response' })).toBe(copy);
   view.rerender(<App ui={[]} />);
   expect(view.queryByRole('button', { name: 'Footer 2: 1' })).toBeNull();
-  expect(view.getByRole('button', { name: '复制回复' })).toBe(copy);
+  expect(view.getByRole('button', { name: 'Copy response' })).toBe(copy);
   expect(view.queryByText('Original tool result')).not.toBeNull();
 });
 it('a failed decoration cannot poison a remaining extension after removal', async () => {
@@ -107,7 +107,7 @@ it('a failed decoration cannot poison a remaining extension after removal', asyn
     fireEvent.click(view.getByRole('button', { name: 'Footer 2: 0' }));
     view.rerender(<App ui={[independent]} />);
     expect(view.queryByRole('button', { name: 'Footer 2: 1' })).not.toBeNull();
-    expect(view.queryByRole('button', { name: '复制回复' })).not.toBeNull();
+    expect(view.queryByRole('button', { name: 'Copy response' })).not.toBeNull();
   } finally {
     error.mockRestore();
   }

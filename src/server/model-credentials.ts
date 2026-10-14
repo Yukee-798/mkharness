@@ -6,6 +6,8 @@ export type CredentialEnvironment = {
   CREDENTIAL_ENCRYPTION_KEY?: string;
   MODEL_API_KEY?: string;
   MODEL_PROVIDER?: string;
+  MODEL_ID?: string;
+  MODEL_IDS?: string;
   ALLOW_SERVER_MODEL_KEY?: string;
 };
 export class ModelCredentials {
@@ -69,7 +71,7 @@ export class ModelCredentials {
   }
   async configuredModels() {
     const { results } = await this.env.DB.prepare(
-      'SELECT provider,model_id AS modelId FROM model_credentials WHERE owner=? AND retired_at IS NULL AND model_id IS NOT NULL',
+      'SELECT provider,model_id AS modelId FROM model_credentials WHERE owner=? AND retired_at IS NULL AND model_id IS NOT NULL ORDER BY created_at DESC,id',
     )
       .bind(this.owner)
       .all<{ provider: string; modelId: string }>();
@@ -163,11 +165,22 @@ export class ModelCredentials {
       throw new AppError(409, 'credential_conflict', '凭据已在其他页面更新，请重新读取后再移除');
     return this.metadata(provider);
   }
-  async select(provider: string): Promise<CredentialRef> {
+  async select(provider: string, modelId: string): Promise<CredentialRef> {
     const row = await this.current(provider);
     if (row) return { source: 'user', id: row.id };
-    if (this.serverAllowed(provider))
+    if (this.serverAllowed(provider)) {
+      // Deployment credentials may only fund explicitly configured models. Personal credentials remain independent.
+      const allowed = (this.env.MODEL_IDS || this.env.MODEL_ID || '')
+        .split(',')
+        .map((id) => id.trim());
+      if (!allowed.includes(modelId))
+        throw new AppError(
+          400,
+          'model_not_allowed',
+          '部署默认 Key 不支持该模型，请配置个人 API Key',
+        );
       return { source: 'server', fingerprint: await this.fingerprint(provider) };
+    }
     throw new AppError(400, 'credential_required', '请先配置所选模型的 Base URL 与 API Key');
   }
   private async fingerprint(provider: string) {

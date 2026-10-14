@@ -1,3 +1,4 @@
+import { useLocale } from './locale';
 import { ActionBarPrimitive, ActionBarMorePrimitive, useAuiState } from '@assistant-ui/react';
 import { Copy, Check, Download, Ellipsis } from 'lucide-react';
 import { TooltipIconButton } from './tooltip-icon-button';
@@ -5,6 +6,7 @@ import { AssistantFooterExtensions } from './extension-ui';
 
 /** Official assistant-ui message actions; HTTP submission and SSE attachment stay separate. */
 export function AssistantFooter() {
+  const { t } = useLocale();
   const visible = useAuiState((s) => {
     if (s.message.status?.type === 'running') return false;
     const index = s.thread.messages.findIndex((message) => message.id === s.message.id);
@@ -25,14 +27,14 @@ export function AssistantFooter() {
     >
       <ActionBarPrimitive.Root autohide="never" className="flex items-center gap-1">
         <ActionBarPrimitive.Copy asChild>
-          <TooltipIconButton tooltip="复制回复" className="group/copy size-7">
+          <TooltipIconButton tooltip={t('复制回复')} className="group/copy size-7">
             <Copy className="size-4 group-data-[copied]/copy:hidden" />
             <Check className="hidden size-4 group-data-[copied]/copy:block" />
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
-            <TooltipIconButton tooltip="更多操作" className="size-7">
+            <TooltipIconButton tooltip={t('更多操作')} className="size-7">
               <Ellipsis className="size-4" />
             </TooltipIconButton>
           </ActionBarMorePrimitive.Trigger>
@@ -44,7 +46,7 @@ export function AssistantFooter() {
             <ActionBarMorePrimitive.Item asChild>
               <ActionBarPrimitive.ExportMarkdown className="flex w-full items-center gap-2 rounded-md px-3 py-2 outline-none hover:bg-muted focus:bg-muted disabled:opacity-50">
                 <Download className="size-4" />
-                导出为 Markdown
+                {t('导出为 Markdown')}
               </ActionBarPrimitive.ExportMarkdown>
             </ActionBarMorePrimitive.Item>
           </ActionBarMorePrimitive.Content>

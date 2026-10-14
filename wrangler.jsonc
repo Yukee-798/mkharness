@@ -51,6 +51,31 @@
     },
   ],
   "env": {
+    "production": {
+      "name": "mkharness-template",
+      "vars": {
+        "APP_URL": "https://template.mkharness.com",
+        "AUTH_MODE": "account",
+        "ALLOW_SERVER_MODEL_KEY": "1",
+        "MODEL_PROVIDER": "openrouter",
+        "MODEL_ID": "openrouter/free",
+        "MODEL_THINKING_LEVEL": "off",
+      },
+      "routes": [{ "pattern": "template.mkharness.com", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "CONVERSATIONS", "class_name": "ConversationAgent" }],
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mkharness-template",
+          "database_id": "02817316-ab35-48b2-891f-66aba0351752",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "workers_dev": false,
+      "preview_urls": false,
+    },
     "test": {
       "name": "agent-generative-ui-test-20261010-7591",
       "vars": {

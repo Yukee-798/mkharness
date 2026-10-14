@@ -14,6 +14,49 @@ function answer(id: number, text: string) {
   return { id, model: [{ role: 'assistant', content: [{ type: 'text', text }] }] };
 }
 
+test('missing credentials in a new chat never offer or request a snapshot reconnect', async ({
+  page,
+}) => {
+  const conversations: string[] = [];
+  await page.route('**/api/settings/models', (route) =>
+    route.fulfill({
+      json: {
+        modelCatalog: {
+          models: [
+            {
+              provider: 'deepseek',
+              id: 'deepseek-flash',
+              name: 'DeepSeek V4.1 Flash',
+              thinkingLevels: ['low'],
+            },
+          ],
+          defaultSelection: {
+            provider: 'deepseek',
+            modelId: 'deepseek-flash',
+            thinkingLevel: 'low',
+          },
+        },
+        credentials: [{ provider: 'deepseek', effectiveSource: 'none' }],
+      },
+    }),
+  );
+  await page.route('**/api/conversations/**', (route) => {
+    conversations.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 404, body: '404 Not Found' });
+  });
+  await page.goto('/tests/browser/chat.html?chat=');
+  await expect(page.getByRole('combobox', { name: '模型与思考强度' })).toBeVisible();
+  const composer = page.getByLabel('消息', { exact: true });
+  await composer.fill('你好');
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('请先配置');
+  await expect(page.getByRole('button', { name: '重新连接', exact: true })).toHaveCount(0);
+  await returnToPage(page);
+  await expect(page.getByRole('alert')).toContainText('请先配置');
+  await expect(composer).toHaveValue('你好');
+  expect(conversations).toEqual([]);
+});
+
 test('a failed terminal snapshot never reattaches cached running work', async ({ page }) => {
   const runId = '11111111-1111-4111-8111-111111111111';
   let snapshots = 0,
