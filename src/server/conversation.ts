@@ -344,6 +344,7 @@ export class ConversationAgent extends Agent<Env> {
   protected contributionHost() {
     return {
       identity: this.ctx.id.toString(),
+      conversationId: this.name,
       pi: () => this.harness.pi(),
       command: async () => (await this.runningRequest())?.request,
     };
@@ -414,6 +415,24 @@ export class ConversationAgent extends Agent<Env> {
   async submission(runId: string) {
     const root = await this.root();
     return root.commit((tx) => tx.submissionByRequest(root.id, runId), BG);
+  }
+  async controlExtension(extensionId: string, name: string, payload: string) {
+    try {
+      const conversation = await this.root();
+      const handler = (await this.contributions()).find(
+        (item) => item.id === extensionId,
+      )?.controls;
+      if (!handler || !Object.hasOwn(handler, name))
+        throw new AppError(404, 'extension_control_unavailable');
+      const value = await handler[name]!.invoke(JSON.parse(payload), { conversation, context: BG });
+      return { ok: true as const, value: jsonText(value) };
+    } catch (error) {
+      return {
+        ok: false as const,
+        status: error instanceof AppError ? error.status : 503,
+        code: error instanceof AppError ? error.code : 'extension_control_failed',
+      };
+    }
   }
   async queuedInputs(): Promise<QueuedInput[]> {
     const root = await this.root();

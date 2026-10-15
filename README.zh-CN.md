@@ -48,7 +48,7 @@ pnpm dev
 - **持久化 Agent 执行。** 每个聊天由独立 Durable Object 承载 PiHarness。支持提交排队、历史持久化和执行中断后重建；关闭浏览器只断开观察，Stop 是独立操作。删除在持久化受理并移除聊天目录后返回 `202`；原生生命周期 alarm 等待 runtime 关闭后清空存储，中断后继续清理。
 - **前后端扩展。** 服务端接入 Pi 原生工具、提示词与 hooks；浏览器注册 assistant-ui Toolkit、工具标题装饰和回复 Footer。
 - **交互式生成 UI。** 可选 OpenUI 扩展支持表单、表格、图表、输入保存，以及有资源限制的 QuickJS 计算。
-- **远程集成。** 可配置 HTTPS MCP 工具、静态 Skills，以及包含 submit/query/cancel 和恢复引用保存的异步服务示例。
+- **远程集成。** 用户可添加远程 MCP 并通过原生 SDK 完成 OAuth，也支持部署级 HTTPS MCP 工具、静态 Skills，以及包含 submit/query/cancel 和恢复引用保存的异步服务示例。
 - **免登录与个人 Key。** Better Auth 匿名会话隔离各浏览器的数据；用户自行配置模型名、Base URL 与 API Key，也可启用 Google 登录和部署默认 Key。
 
 你可以在此基础上搭建调研助手、数据工作流，或调用自有服务的创作 Agent。MkHarness 提供应用与执行基础设施；业务工具、生图/视频服务、计费与订阅由你按需接入。
@@ -63,10 +63,10 @@ pnpm dev
 | 工具 renderer、标题装饰、回复 Footer | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkit 与浏览器贡献              |
 | 生成 UI、资源、输入状态、继续动作    | [`src/extensions/openui/`](src/extensions/openui/) — 完整的可选扩展                                       |
 | 静态 Skills                          | [`src/server/skills.ts`](src/server/skills.ts)                                                            |
-| 远程 MCP 工具                        | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` 配置                                             |
+| 部署级 MCP 工具                      | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` 配置                                             |
 | 异步服务                             | [`src/extensions/async-example/`](src/extensions/async-example/) — 按实际服务契约接入 submit/query/cancel |
 
-最小工具示例只需在 [`extensions.config.ts`](extensions.config.ts) 将 `example.enabled` 设为 `true`。其 `describe_text` 及[浏览器 renderer](src/extensions/example/browser.tsx) 默认不启用。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
+最小工具示例只需在 [`extensions.config.ts`](extensions.config.ts) 将 `example.enabled` 设为 `true`。其[服务端工具、提示词与 hook](src/extensions/example/server.ts)及[浏览器 renderer](src/extensions/example/browser.tsx) 统一放在 `src/extensions/example/`，默认不启用。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
 
 成功的网页读取和搜索从 Pi 已提交结果生成 Sources 来源卡片。回复扩展使用 assistant-ui 原生后续提问按钮，并在操作栏增加重新生成。后续提问是随语言切换的通用提示，不额外调用模型。重新生成以新操作引用原始提交内容（含表单上下文），保留原回答，使用当前模型设置；它不会授权自动重放结果未知的远端副作用。
 
@@ -91,6 +91,37 @@ root = Stack([
 宿主提供三个执行接入点：模型请求前的 `beforeModel`、队列空闲且新请求入站时的 `beforeSubmit`、恢复时遇到不兼容任务的 `taskUnavailable`。原生文档通过 `stateDocuments` 和 `projectState` 投影到公开状态，浏览器通过 `composerFooter` 展示会话级控件，执行仍由 Pi Durable 管理。已有任务和文档的持久化标识保持不变；已接受的旧动作仅由示例内部兼容解析。新的重试、复查统一使用 `extension_action`，指定 `extensionId: "async-example"` 与经过校验的 `{ taskId }`。MCP 保留独立保护逻辑，对旧共享文档中的示例字段只做不透明保留，不导入示例代码。
 
 通用 JSON 校验、大小限制和规范化比较位于 `src/shared/json.ts`，不导入计算引擎。QuickJS、计算预算、浏览器 Worker、WASM 接入和构建集成都属于 `src/extensions/openui/`。构建时关闭 OpenUI 会排除该扩展的浏览器与服务端入口及计算资源；核心聊天、MCP、请求处理和 JSON 工具不导入 QuickJS。模板的依赖清单仍保留相关包，供启用 OpenUI 时构建使用。服务地址、API Key 和 MCP 连接定义仍放在服务端绑定中，它们负责连接参数，不负责扩展启停。关闭 MCP 会停止建立连接及注册工具，宿主仍保留已有未知结果的保护记录。
+
+## 自定义远程 MCP 连接
+
+在 **设置 → 连接 → 添加连接** 中填写名称和公开 HTTPS Streamable HTTP 地址（例如 `https://mcp.notion.com/mcp`）。自动 OAuth 复用 Cloudflare Agents SDK 的服务发现、客户端注册、PKCE、回调校验、令牌交换与刷新。HTTPS 部署通过 `/api/mcp/client-metadata` 发布客户端元数据；不支持动态注册或客户端元数据的服务，可在高级设置填写预注册 Client ID 和 secret。兼容性取决于服务端，未内置各家非标准 OAuth 流程。本地匿名身份与云端登录账号均拥有各自的连接。
+
+新发现的工具默认 **每次询问**，也可逐个禁用或自动允许。新聊天固定当时启用的工具定义，真正派发前再次检查当前权限和连接状态；工具定义或授权身份变化后需创建新聊天。确认卡片跟随对应的工具调用展示，刷新后可恢复；拒绝和 Stop 会阻止尚未派发的请求。已派发但未确认结果的操作标记为 **结果未知**，不会自动重发，该连接在外部核对前保持阻塞；本版尚未提供手动核对结果的操作。断开连接会删除本地令牌；如需撤销服务商授权，还需在服务商处单独操作。
+
+配置界面复用 `@assistant-ui/react-mcp` 原语，通过展示适配器操作现有后端；确认卡片复用 assistant-ui 官方 registry 组件。连接、OAuth 凭据和工具执行仍由服务端管理，浏览器不启用默认 MCP Manager、不持久化连接凭据，也不注册前端工具。确认决定通过扩展 control 接口更新已有 Pi 任务。
+
+`mcp.enabled` 管理所有 MCP 接入，`mcp.custom` 单独管理用户自定义连接。现有部署需先应用 D1 增量迁移 `0007_mcp_connections.sql`，并配置 `MCP_CONNECTIONS` SQLite Durable Object 绑定。Bearer、OAuth 客户端 secret 和令牌使用 `CREDENTIAL_ENCRYPTION_KEY` 在连接 DO 内加密保存；该密钥应保持稳定，凭据不会进入聊天绑定或公开状态。
+
+模块分工：
+
+- `src/server/mcp-connections/`：账号归属、连接目录、加密存储、原生 SDK 适配、HTTP 路由和端点策略。
+- `src/extensions/mcp/`：通过 Pi 原生工具、任务和文档实现确认与中断恢复，通过现有扩展插槽呈现界面。确认决定走通用扩展 control 接口，不会启动第二次模型请求。
+- `src/server/mcp.ts`：保留部署级 `MCP_SERVERS`，与用户连接凭据独立。
+
+首版支持公开 HTTPS Streamable HTTP、受限 JSON 工具 schema、文本和结构化 JSON 结果。不支持的 schema 会展示但无法启用。不会执行本地 stdio 命令或抓取远程 schema 引用，暂未将 MCP Apps、sampling、resources 和 prompts 作为产品能力开放。MCP 和 OAuth 请求均限制私网/保留地址、重定向、超时和响应大小，并做 DNS 预检；DNS 预检属于纵深防御，需要严格抵御 DNS 重绑定的部署还应配置网络出口隔离。
+
+## 用户技能
+
+在 **设置 → 技能 → 导入技能** 上传 Markdown `SKILL.md`，或仅包含一个技能目录的 ZIP，预览说明、文件清单与兼容性提示后保存。Skill 需要 YAML frontmatter 中的 `name`、`description` 与非空 Markdown 正文；如包裹在目录中，目录名应与 `name` 一致。支持参考文档和文本模板，脚本仅保存/读取为文本，不会执行；二进制资源会保留，但本版 Agent 暂不支持读取。Skill 不授予工具权限，也不提供凭据。
+
+新聊天默认选择账号已启用技能，可通过输入框上方的技能选择器调整，也可全部取消。服务端创建聊天时绑定不可变内容版本；更新、停用或从库中删除仅影响新聊天，已有聊天保留绑定版本与已加载说明。删除是移出技能库，不会擦除历史版本。最多保存 32 个在库技能、每个聊天最多选择 8 个；上传最多 1 MiB、解压后最多 2 MiB、单文件最多 128 KiB、每包最多 64 个文件。
+
+运行时复用 `agents/harness/pi` 的 `skills(sources)`，通过 `SkillSource` 读取已经校验归属的固定版本。原生 `activate_skill` 与 `read_skill_resource` 将正文和资源作为普通工具结果提交到 Pi 历史。目录先进入提示词，正文在激活时进入模型上下文；SDK 目前仍会在初始化时读取正文，因此只装载当前聊天选择的版本，参考文件按需读取。技能调用与版本保留在工具记录中，输入框不常驻展示技能或连接摘要。MCP 调用继续使用现有权限与确认机制，不增加 CLI 宿主、第二套执行循环、自动脚本运行器或 OpenUI/QuickJS 耦合。
+
+`extensions.config.ts` 中的 `skills.enabled` 控制启停。现有部署启用前需应用 `0008_skills.sql`，并为 `SKILL_FILES` 配置**私有 R2 存储桶**。D1 保存账号归属、修订、版本元数据与聊天绑定，R2 保存不可变文件，读取时验证内容哈希。请创建目标 Wrangler 环境配置中的桶，例如样例生产配置使用 `pnpm exec wrangler r2 bucket create mkharness-template-skills`；这是 D1 迁移之外的新资源。旧的 `skills-example` 仍可单独启用；同时启用时，两类来源共用一个原生 Skills 扩展。
+
+- `src/server/skills/`：受限导入校验、D1/R2 目录、固定版本来源和鉴权管理路由。Frontmatter 使用与 SDK 相同的 YAML 库，避免其公共解析入口连带加载可选脚本运行器依赖。
+- `src/extensions/skills/`：原生 Pi 接入、结果投影、浏览器选择与展示。用户上传的包是数据，不会成为可执行扩展模块。
 
 ## 部署到 Cloudflare
 
@@ -185,7 +216,7 @@ Key 在 D1 中使用 AES-256-GCM 加密保存，不写入聊天历史。可选�
 <details>
 <summary><strong>模板不包含哪些能力？</strong></summary>
 
-未内置附件、R2 素材、云端电脑/沙箱、每用户 MCP OAuth、支付和订阅。图片与视频生成需要接入服务扩展。接口可能随模板迭代调整。
+未内置附件、R2 素材、云端电脑/沙箱、支付和订阅。图片与视频生成需要接入服务扩展。接口可能随模板迭代调整。
 
 </details>
 

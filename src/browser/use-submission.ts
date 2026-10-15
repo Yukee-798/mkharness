@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useMutation, useMutationState, useQueryClient } from '@tanstack/react-query';
+import type { Json } from '../shared/json';
 import type { RunCommand } from '../shared/contracts';
 import { request } from './api';
 import { userKeys } from './queries';
@@ -9,7 +10,14 @@ type Submission = { id: string; command: RunCommand; initial: boolean };
 
 /** HTTP receipt state only. Pi remains the task/history authority; navigation
  * does not cancel a mutation or resubmit it. No persistence or automatic retry. */
-export function useSubmission(userId: string, id: string, onCreated?: (id: string) => void) {
+export function useSubmission(
+  userId: string,
+  id: string,
+  onCreated?: (id: string) => void,
+  creation?: Record<string, Json>,
+) {
+  const creationRef = useRef(creation);
+  creationRef.current = creation;
   const client = useQueryClient();
   const mutationKey = userKeys(userId).submissions;
   const attempts = useMutationState({
@@ -69,7 +77,10 @@ export function useSubmission(userId: string, id: string, onCreated?: (id: strin
           const initial = !createdId.current;
           if (initial)
             createdId.current = (
-              await request<{ id: string }>('/conversations', { method: 'POST' })
+              await request<{ id: string }>('/conversations', {
+                method: 'POST',
+                ...(creationRef.current ? { body: JSON.stringify(creationRef.current) } : {}),
+              })
             ).id;
           const receipt = mutateAsync({ id: createdId.current, command, initial });
           if (initial && mounted.current) created.current?.(createdId.current);

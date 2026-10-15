@@ -22,6 +22,7 @@ import {
 import { useAgUiRuntime, fromAgUiMessages } from '@assistant-ui/react-ag-ui';
 import type { EntryRecord } from '@earendil-works/pi-durable';
 import { toMessages } from '../shared/stream';
+import type { Json } from '../shared/json';
 import type { RunCommand } from '../shared/contracts';
 import type { QueuedInput, QueueAction, QueueActionResult, QueueDraft } from '../shared/queue';
 import { TaskQueue } from './task-queue';
@@ -97,6 +98,8 @@ export function Chat({
   onCreated,
   onSettings,
   onModelProviderChange,
+  creation,
+  newChatControls,
 }: {
   id: string;
   userId: string;
@@ -105,6 +108,8 @@ export function Chat({
   onCreated?: (id: string) => void;
   onSettings?: (provider?: string) => void;
   onModelProviderChange?: (provider: string | undefined) => void;
+  creation?: Record<string, Json>;
+  newChatControls?: (disabled: boolean) => ReactNode;
 }) {
   const { t } = useLocale();
   const unavailable = useRef(onUnavailable);
@@ -116,7 +121,7 @@ export function Chat({
     enabled: !!id,
   });
   const settings = useQuery(modelSettingsOptions(userId));
-  const { send, retry: retrySubmission, latest } = useSubmission(userId, id, onCreated);
+  const { send, retry: retrySubmission, latest } = useSubmission(userId, id, onCreated, creation);
   const initialSubmission = latest?.submission?.initial ? latest : undefined;
   const [snapshot, setSnapshot] = useState<Snapshot>(),
     [revision, setRevision] = useState(0),
@@ -382,6 +387,7 @@ export function Chat({
           </AlertDescription>
         </Alert>
       )}
+      {!id && newChatControls?.(submitting)}
       <ImageComposer
         className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
         onSubmit={async (images) => {

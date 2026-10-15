@@ -13,12 +13,14 @@ export default defineConfig({
         modulesRules: [{ type: 'CompiledWasm', include: ['**/*.wasm'], fallthrough: true }],
         durableObjects: {
           CONVERSATIONS: { className: 'ConversationAgent', useSQLite: true },
+          MCP_CONNECTIONS: { className: 'McpConnection', useSQLite: true },
           OPENROUTER_PROBES: { className: 'OpenRouterProbe', useSQLite: true },
           LIFECYCLE_PROBES: { className: 'LifecycleProbe', useSQLite: true },
           BYOK_PROBES: { className: 'BYOKProbe', useSQLite: true },
           BINDING_PROBES: { className: 'BindingProbe', useSQLite: true },
         },
         d1Databases: ['DB'],
+        r2Buckets: ['SKILL_FILES'],
         bindings: {
           APP_URL: 'http://localhost:5173',
           AUTH_MODE: 'account',

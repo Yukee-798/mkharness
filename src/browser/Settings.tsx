@@ -1,6 +1,8 @@
 import { ChevronDown, Languages, Settings2, KeyRound, Sun, Moon, Monitor } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { ModelSettingsForm } from './ModelSettings';
+import { McpConnections } from './McpConnections';
+import { Skills } from './Skills';
 import { useLocale, type Locale } from './locale';
 import { useTheme } from './theme';
 import { Button } from './ui/button';
@@ -35,12 +37,16 @@ export function SettingsDialog({
   onOpenChange,
   initialProvider,
   initialSection = 'general',
+  customMcp = false,
+  skills = false,
 }: {
   userId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialProvider?: string;
-  initialSection?: 'general' | 'models';
+  customMcp?: boolean;
+  skills?: boolean;
+  initialSection?: 'general' | 'models' | 'connections' | 'skills';
 }) {
   const { t } = useLocale();
   return (
@@ -55,6 +61,8 @@ export function SettingsDialog({
         {open && (
           <SettingsSections
             userId={userId}
+            mcpAvailable={customMcp}
+            skillsAvailable={skills}
             initialProvider={initialProvider}
             initialSection={initialSection}
           />
@@ -67,20 +75,30 @@ function SettingsSections({
   userId,
   initialProvider,
   initialSection,
+  mcpAvailable,
+  skillsAvailable,
 }: {
   userId: string;
+  mcpAvailable: boolean;
+  skillsAvailable: boolean;
   initialProvider?: string;
-  initialSection: 'general' | 'models';
+  initialSection: 'general' | 'models' | 'connections' | 'skills';
 }) {
   const { t } = useLocale();
+  const [section, setSection] = useState(initialSection);
   const [modelsVisited, setModelsVisited] = useState(initialSection === 'models');
   const desktop = useSyncExternalStore(subscribeLayout, isDesktop, serverLayout);
   return (
     <Tabs
-      defaultValue={initialSection}
+      value={
+        (section === 'connections' && !mcpAvailable) || (section === 'skills' && !skillsAvailable)
+          ? 'general'
+          : section
+      }
       orientation={desktop ? 'vertical' : 'horizontal'}
       className="min-h-0 flex-1 gap-0 md:flex-row"
       onValueChange={(value) => {
+        setSection(value as typeof section);
         if (value === 'models') setModelsVisited(true);
       }}
     >
@@ -102,6 +120,24 @@ function SettingsSections({
           <KeyRound className="mr-3 size-4 shrink-0" />
           {t('模型与 API Key')}
         </TabsTrigger>
+        {mcpAvailable && (
+          <TabsTrigger
+            value="connections"
+            className="justify-start rounded-lg px-4 py-3 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+          >
+            <Settings2 className="mr-3 size-4 shrink-0" />
+            {t('Connections')}
+          </TabsTrigger>
+        )}
+        {skillsAvailable && (
+          <TabsTrigger
+            value="skills"
+            className="justify-start rounded-lg px-4 py-3 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+          >
+            <Settings2 className="mr-3 size-4 shrink-0" />
+            {t('Skills')}
+          </TabsTrigger>
+        )}
       </TabsList>
       <ScrollArea className="min-h-0 min-w-0 flex-1">
         <TabsContent value="general" className="px-6 pb-8 pt-6 md:px-10 md:pt-2">
@@ -120,6 +156,12 @@ function SettingsSections({
             )}
           </p>
           {modelsVisited && <ModelSettingsForm userId={userId} initialProvider={initialProvider} />}
+        </TabsContent>
+        <TabsContent value="connections" className="px-6 pb-8 pt-6 md:px-10 md:pt-2">
+          <McpConnections userId={userId} />
+        </TabsContent>
+        <TabsContent value="skills" className="px-6 pb-8 pt-6 md:px-10 md:pt-2">
+          <Skills userId={userId} />
         </TabsContent>
       </ScrollArea>
     </Tabs>

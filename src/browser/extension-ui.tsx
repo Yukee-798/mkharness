@@ -54,3 +54,29 @@ export function ComposerFooterExtensions() {
     ) : null,
   );
 }
+
+/** Reviewed extensions can label dynamic tools without special cases in chat rendering. */
+export function useToolDisplayName(name: string) {
+  const context = useContext(ExtensionContext);
+  for (const ui of context?.ui ?? []) {
+    try {
+      const label = ui.toolDisplayName?.(name, context?.state);
+      if (label) return label;
+    } catch {
+      /* An unavailable decoration must not break chat. */
+    }
+  }
+  return name;
+}
+
+/** Per-invocation UI shares the tool row's identity and assistant-ui scope. */
+export function ToolFooterExtensions({ part }: { part: ToolCallMessagePartProps }) {
+  const context = useContext(ExtensionContext);
+  return context?.ui?.map(({ id, toolFooter: Footer }) =>
+    Footer ? (
+      <DecorationBoundary key={id}>
+        <Footer part={part} />
+      </DecorationBoundary>
+    ) : null,
+  );
+}

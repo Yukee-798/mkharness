@@ -39,6 +39,44 @@ export function fixtureModels(contextWindow = model.contextWindow) {
     const last = context.messages.at(-1);
     const tool = text?.includes('ignores_cancel') && last?.role === 'user';
     let content: AssistantMessage['content'] | undefined;
+    if (text?.includes('custom_skill_probe')) {
+      content =
+        last?.role === 'user'
+          ? [
+              {
+                type: 'toolCall',
+                id: 'skill-activate',
+                name: 'activate_skill',
+                arguments: { name: 'delivery-guide' },
+              },
+            ]
+          : last?.role === 'toolResult' && last.toolName === 'activate_skill'
+            ? [
+                {
+                  type: 'toolCall',
+                  id: 'skill-reference',
+                  name: 'read_skill_resource',
+                  arguments: { name: 'delivery-guide', path: 'references/checklist.md' },
+                },
+              ]
+            : [{ type: 'text', text: 'Skill fixture finished.' }];
+    }
+    if (text?.includes('custom_mcp_probe')) {
+      const selected = context.messages
+        .flatMap((message) => (message.role === 'system' ? (message.toolsAdded ?? []) : []))
+        .find((tool) => tool.name.startsWith('mcp_user_'));
+      content =
+        last?.role === 'user' && selected
+          ? [
+              {
+                type: 'toolCall',
+                id: 'custom-mcp',
+                name: selected.name,
+                arguments: { query: 'docs' },
+              },
+            ]
+          : [{ type: 'text', text: 'MCP fixture finished.' }];
+    }
     if (text?.includes('large tool outputs') && last?.role === 'user')
       content = [
         {

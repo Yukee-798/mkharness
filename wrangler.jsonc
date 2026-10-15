@@ -30,6 +30,7 @@
   ],
   "durable_objects": {
     "bindings": [
+      { "name": "MCP_CONNECTIONS", "class_name": "McpConnection" },
       {
         "name": "CONVERSATIONS",
         "class_name": "ConversationAgent",
@@ -41,7 +42,9 @@
       "tag": "v1",
       "new_sqlite_classes": ["ConversationAgent"],
     },
+    { "tag": "v2-mcp-connections", "new_sqlite_classes": ["McpConnection"] },
   ],
+  "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "agent-generative-ui-skills-local" }],
   "d1_databases": [
     {
       "binding": "DB",
@@ -63,8 +66,12 @@
       },
       "routes": [{ "pattern": "template.mkharness.com", "custom_domain": true }],
       "durable_objects": {
-        "bindings": [{ "name": "CONVERSATIONS", "class_name": "ConversationAgent" }],
+        "bindings": [
+          { "name": "CONVERSATIONS", "class_name": "ConversationAgent" },
+          { "name": "MCP_CONNECTIONS", "class_name": "McpConnection" },
+        ],
       },
+      "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-template-skills" }],
       "d1_databases": [
         {
           "binding": "DB",
@@ -87,12 +94,16 @@
       },
       "durable_objects": {
         "bindings": [
+          { "name": "MCP_CONNECTIONS", "class_name": "McpConnection" },
           {
             "name": "CONVERSATIONS",
             "class_name": "ConversationAgent",
           },
         ],
       },
+      "r2_buckets": [
+        { "binding": "SKILL_FILES", "bucket_name": "agent-generative-ui-test-skills" },
+      ],
       "d1_databases": [
         {
           "binding": "DB",

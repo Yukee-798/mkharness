@@ -69,6 +69,9 @@ it('downloads extensions concurrently but resolves conflicts in declared order',
 });
 it('rejects incomplete host handlers and conflicting browser tool registrations', async () => {
   expect(() => collectContributions([{ id: 'broken', resources: {} }] as any)).toThrow('invalid');
+  expect(() => collectContributions([{ id: 'broken', controls: { decide: {} } }] as any)).toThrow(
+    'invalid',
+  );
   expect(() => collectContributions([{ id: 'broken', actions: { choose: {} } }] as any)).toThrow(
     'invalid',
   );

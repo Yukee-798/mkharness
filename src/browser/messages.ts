@@ -1,5 +1,21 @@
 // Application copy only; model output and resource content are never translated.
 export const english: Record<string, string> = {
+  skill_not_found: 'Skill not found.',
+  skill_revision_conflict: 'This skill changed in another page. Refresh and try again.',
+  invalid_skill_markdown: 'SKILL.md requires a valid name, description and nonempty instructions.',
+  skill_package_too_large:
+    'Skill package too large: upload up to 1 MiB, expanded up to 2 MiB, each file up to 128 KiB.',
+  invalid_skill_path: 'The package contains an invalid file path.',
+  invalid_skill_archive: 'Invalid ZIP, duplicate files or an oversized entry.',
+  skill_package_requires_one_skill: 'Upload a package containing exactly one SKILL.md.',
+  skill_directory_name_mismatch: 'The skill directory must match the name in SKILL.md.',
+  skill_file_type: 'Upload a Markdown file or ZIP skill package.',
+  duplicate_skill_name: 'A skill with this name exists. Use Update skill.',
+  skill_name_changed: 'Keep the skill name unchanged when updating it.',
+  skill_library_limit: 'Your library can contain at most 32 skills.',
+  skill_selection_limit: 'Select at most 8 skills for a new chat.',
+  skill_unavailable: 'A selected skill is disabled or unavailable. Select again.',
+  skill_storage_unavailable: 'Skill file storage is not configured.',
   '待执行 · {count}': 'Queued · {count}',
   待执行任务: 'Queued tasks',
   重新编辑: 'Edit',

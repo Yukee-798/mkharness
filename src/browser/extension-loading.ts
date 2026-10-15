@@ -7,7 +7,10 @@ import { browserLoaders } from '../extensions/browser';
 export function useBrowserExtensions(userId: string) {
   const capabilities = useQuery({
     queryKey: ['user', userId, 'capabilities'],
-    queryFn: ({ signal }) => request<{ extensionIds: string[] }>('/capabilities', { signal }),
+    queryFn: ({ signal }) =>
+      request<{ extensionIds: string[]; customMcp?: boolean; skills?: boolean }>('/capabilities', {
+        signal,
+      }),
     retry: false,
     // Deployment capabilities do not change between workspace/runtime mounts.
     // Recheck on focus so an already open page can still observe a redeployment.

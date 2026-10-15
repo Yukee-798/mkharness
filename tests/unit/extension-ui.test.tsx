@@ -29,6 +29,7 @@ const metadata: ExtensionDecoration = {
   id: 'metadata',
   composerFooter: () => <span>Optional composer footer</span>,
   toolTitleMeta: ({ part }) => <span>Metadata for {part.toolName}</span>,
+  toolFooter: ({ part }) => <span>Invocation footer for {part.toolCallId}</span>,
   assistantFooter: () => <span>Optional footer</span>,
   assistantActions: () => <button>Optional reply action</button>,
 };
@@ -86,6 +87,9 @@ it('composes independent decorations for any shared tool and footer without repl
   expect(copy.parentElement?.contains(action)).toBe(true);
   const tool = view.getByRole('button', { name: 'Completed: another_extension_tool' });
   expect(tool.textContent).toContain('Metadata for another_extension_tool');
+  const invocationFooter = view.getByText('Invocation footer for 2.call');
+  expect(tool.contains(invocationFooter)).toBe(false);
+  expect(invocationFooter.closest('[hidden]')).toBeNull();
   fireEvent.click(tool);
   expect(view.queryByText('Original tool result')).not.toBeNull();
   fireEvent.click(view.getByRole('button', { name: 'Footer 2: 0' }));
@@ -94,6 +98,7 @@ it('composes independent decorations for any shared tool and footer without repl
   expect(view.queryByText('Optional composer footer')).toBeNull();
   expect(view.queryByRole('button', { name: 'Optional reply action' })).toBeNull();
   expect(view.queryByText('Metadata for another_extension_tool')).toBeNull();
+  expect(view.queryByText('Invocation footer for 2.call')).toBeNull();
   expect(view.queryByText('Original tool result')).not.toBeNull();
   expect(view.queryByRole('button', { name: 'Footer 2: 1' })).not.toBeNull();
   expect(view.getByRole('button', { name: 'Copy response' })).toBe(copy);

@@ -100,3 +100,5 @@ export default { fetch: () => new Response('lifecycle test fixture') };
 export { BYOKProbe } from './byok-entry';
 
 export { OpenRouterProbe } from './openrouter-entry';
+
+export { McpConnection } from '../../src/server/mcp-connections/connection';

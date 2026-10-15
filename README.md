@@ -48,7 +48,7 @@ Try asking a question, requesting an interactive plan, or reading a public web p
 - **Durable Agent execution.** Each conversation runs in its own Durable Object with PiHarness. Submissions queue, history persists, and execution can reconstruct after interruption. Closing the browser detaches observation; Stop is a separate action. Deletion returns `202` after durable acceptance and removal from the conversation directory; a native lifecycle alarm joins runtime shutdown and erases stored content, including after an interruption.
 - **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, and message footers in the browser.
 - **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
-- **Remote integrations.** Configured HTTPS MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.
+- **Remote integrations.** User-added remote MCP connections with native SDK OAuth, deployment-configured MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.
 - **Guest access and personal keys.** Better Auth anonymous sessions isolate each browser's data. Users configure their own model name, Base URL and API Key; Google sign-in and a deployment default key are optional.
 
 Use this foundation for research assistants, data workflows, or creative Agents that call your services. MkHarness provides application and execution infrastructure; product-specific tools, image/video services, billing, and subscriptions are yours to add.
@@ -63,10 +63,10 @@ Extensions are trusted code that you review and ship with your application. Serv
 | Tool renderers, title decorations, reply/composer footers  | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkits and browser contributions              |
 | Generated UI, resources, input state, continuation actions | [`src/extensions/openui/`](src/extensions/openui/) — a complete optional extension                                      |
 | Static Skills                                              | [`src/server/skills.ts`](src/server/skills.ts)                                                                          |
-| Remote MCP tools                                           | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` configuration                                                  |
+| Deployment MCP tools                                       | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` configuration                                                  |
 | An async service                                           | [`src/extensions/async-example/`](src/extensions/async-example/) — adapt to your service's submit/query/cancel contract |
 
-Manage all extension switches in [`extensions.config.ts`](extensions.config.ts). For a small example, set `example.enabled` to `true` there. Its `describe_text` tool and [browser renderer](src/extensions/example/browser.tsx) are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
+Manage all extension switches in [`extensions.config.ts`](extensions.config.ts). For a small example, set `example.enabled` to `true` there. Its [server tool, prompt section and hook](src/extensions/example/server.ts) and [browser renderer](src/extensions/example/browser.tsx) live together in `src/extensions/example/` and are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
 
 Successful web reads and searches populate Sources cards from committed Pi results. The reply extension adds native assistant-ui follow-up buttons and Regenerate to the action bar. Follow-ups are localized common prompts and require no background model call. Regenerate submits a new operation referring to the original committed input, including its form context; the original answer stays in history. It uses current model settings and does not authorize replay of an unknown remote side effect.
 
@@ -91,6 +91,37 @@ The async-service sample is assembled as the `async-example` contribution in the
 The host offers three execution boundaries (`beforeModel`, idle `beforeSubmit`, and `taskUnavailable`), declared native document projections (`stateDocuments` + `projectState`), and a browser `composerFooter` slot. Execution stays in Pi Durable. Native task/document names are retained for existing work; already accepted legacy action receipts are decoded only inside the sample. New retry/recheck requests use `extension_action` with `extensionId: "async-example"` and a validated `{ taskId }` payload. MCP retains its own guard and an opaque view of the legacy shared document, without importing sample code.
 
 Generic finite-JSON validation, size checks and canonical equality live in `src/shared/json.ts`, which has no compute-engine imports. QuickJS, its budgets, browser Worker, WASM bindings and build integration belong to `src/extensions/openui/`. A disabled OpenUI build excludes the extension's browser/server entries and their computation assets; core chat, MCP, requests and JSON utilities never import QuickJS. Dependencies remain listed in the template's package manifest for builds that enable OpenUI. Service endpoints, API keys and MCP connection definitions remain server bindings; they configure a connection rather than enable an extension. Disabling MCP prevents connections and tool registration, while persisted unknown-outcome protection remains in the host.
+
+## Custom remote MCP connections
+
+Open **Settings → Connections → Add connection**, enter a name and a public HTTPS Streamable HTTP endpoint (for example, `https://mcp.notion.com/mcp`), and connect. Automatic OAuth uses the Cloudflare Agents SDK for protected-resource/authorization-server discovery, client registration, PKCE, callback validation, token exchange and refresh. HTTPS deployments publish client metadata at `/api/mcp/client-metadata`; servers without dynamic registration or client metadata support can use the advanced pre-registered Client ID/secret fields. OAuth compatibility depends on the server; arbitrary nonstandard provider flows are not bundled. Anonymous local sessions and signed-in cloud accounts own separate connections.
+
+Newly discovered tools default to **Ask every time**. Each tool can be disabled or allowed automatically. New chats freeze enabled tool definitions; permission restrictions and disconnects apply again immediately before dispatch. Tool or authorization changes require a new chat. Pending confirmations appear beside their tool invocation and survive refresh; Reject and Stop prevent undispatched operations. An interrupted dispatched call is marked **outcome unknown** and is never resent automatically. That connection remains blocked until externally reconciled; this version has no manual outcome-resolution action. Disconnecting erases locally stored tokens; revoke the application's authorization at the provider separately if needed.
+
+The configuration UI reuses `@assistant-ui/react-mcp` primitives with a server-backed presentation adapter. Approval cards reuse the assistant-ui registry component. Connections, OAuth credentials and tool execution remain on the server; the browser does not install the default MCP manager, persist connection credentials or register frontend tools. Approval decisions update the existing Pi task through the extension control endpoint.
+
+`mcp.enabled` controls all MCP integration; `mcp.custom` controls user-managed connections separately. Apply D1 migrations (`0007_mcp_connections.sql` is additive) and provision the `MCP_CONNECTIONS` SQLite Durable Object binding before enabling the feature on an existing deployment. `CREDENTIAL_ENCRYPTION_KEY` encrypts Bearer credentials, OAuth client secrets and tokens in each connection's DO. Keep that key stable; credentials never enter conversation bindings or public projections.
+
+The module boundaries are:
+
+- `src/server/mcp-connections/`: user ownership/catalog, encrypted connection state, native SDK adapter, HTTP routes and endpoint policy.
+- `src/extensions/mcp/`: native Pi tools/tasks/documents for confirmation and interruption recovery, plus browser presentation through the existing extension slot. Confirmation decisions use the generic extension control endpoint and never start a second model run.
+- `src/server/mcp.ts`: existing deployment-managed `MCP_SERVERS`; independent of user connection credentials.
+
+The first version supports public HTTPS Streamable HTTP endpoints, bounded JSON tool schemas, and text/structured-JSON results. Unsupported schemas are visible but cannot be enabled. It does not execute local stdio commands, fetch remote schema references, or implement MCP Apps, sampling, resources or prompts as user-facing capabilities. Private/reserved destinations and HTTP redirects are rejected for both MCP and OAuth requests, with DNS preflight, timeouts and response limits. DNS preflight is defense in depth; deployments needing strict DNS-rebinding protection must also enforce a network egress boundary.
+
+## User skills
+
+Open **Settings → Skills → Import skill** and upload a Markdown `SKILL.md` or a ZIP containing one skill directory. Review the instructions, file list and compatibility notes before saving. A skill needs YAML frontmatter with `name` and `description` plus a nonempty Markdown body. The optional parent directory must match `name`. Reference files and templates are supported; scripts are stored/read as text and are never executed. Binary assets are retained but unavailable to the agent in this version. Skill content does not authorize tools or provide credentials.
+
+Enabled skills are selected by default for a new chat; use the Skills picker above the composer to adjust that chat's selection, including choosing none. The server pins immutable content versions when creating the chat. Uploading a new version, disabling or removing a library entry affects future chats; older chats retain their bound versions and previously loaded instructions. Removal is a library operation, not erasure of historical versions. At most 32 library entries and 8 selected skills are accepted; uploads are limited to 1 MiB compressed, 2 MiB expanded, 128 KiB per file, and 64 files per package.
+
+The runtime reuses `skills(sources)` from `agents/harness/pi`, with `SkillSource` adapters for pinned, owner-checked objects. The native `activate_skill` and `read_skill_resource` tools commit instructions/resources into ordinary Pi history. The directory enters the prompt first; instructions enter the model context on activation. The SDK currently reads instruction bodies during initialization, so only selected versions are installed and reference files are fetched on demand. Skill activity and versions are shown in tool records; the composer has no persistent skill or connection summary. Skills share existing MCP permissions and confirmation controls. No CLI host, second execution loop, automatic script runner or OpenUI/QuickJS coupling is added.
+
+`skills.enabled` in `extensions.config.ts` controls the feature. Apply `0008_skills.sql` and configure a **private** R2 bucket as `SKILL_FILES` before enabling it on an existing deployment. D1 stores ownership, revisions, version metadata and conversation bindings; R2 stores immutable files, checked against their content hashes on reads. Provision the bucket name configured for the intended Wrangler environment, for example `pnpm exec wrangler r2 bucket create mkharness-template-skills` for the sample production configuration. This is an additional resource, separate from the D1 migration. The legacy `skills-example` remains optional; if enabled together, both source kinds share one native Skills extension.
+
+- `src/server/skills/`: bounded import validation, D1/R2 catalog, versioned sources and authenticated management routes. Frontmatter uses the YAML library also used by the SDK; importing the SDK's broad parser entry would require its optional script-runtime dependencies.
+- `src/extensions/skills/`: native Pi integration, result projection and browser selection/presentation. User packages remain data, not executable extension modules.
 
 ## Deploy to Cloudflare
 
@@ -185,7 +216,7 @@ Retired credential versions are retained for up to seven days. Removing a provid
 <details>
 <summary><strong>What is outside the template's scope?</strong></summary>
 
-Attachments, R2 assets, cloud computers/sandboxes, per-user MCP OAuth, payments, and subscriptions are not bundled. Image/video generation requires a service extension. Interfaces may change as the template develops.
+Attachments, R2 assets, cloud computers/sandboxes, payments, and subscriptions are not bundled. Image/video generation requires a service extension. Interfaces may change as the template develops.
 
 </details>
 

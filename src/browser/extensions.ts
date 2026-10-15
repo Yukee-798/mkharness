@@ -1,6 +1,9 @@
 import type { Toolkit, ToolCallMessagePartProps } from '@assistant-ui/react';
 import type { ComponentType } from 'react';
+import type { ExtensionState } from '../shared/extension-state';
 export type ExtensionUI = {
+  toolDisplayName?: (name: string, state?: ExtensionState) => string | undefined;
+  toolFooter?: ComponentType<{ part: ToolCallMessagePartProps }>;
   toolTitleMeta?: ComponentType<{ part: ToolCallMessagePartProps }>;
   assistantActions?: ComponentType;
   assistantFooter?: ComponentType;

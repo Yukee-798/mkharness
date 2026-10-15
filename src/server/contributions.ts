@@ -7,6 +7,7 @@ import type {
   ConversationDocToken,
   JsonObject,
   TaskId,
+  Conversation,
 } from '@earendil-works/pi-durable';
 import type { Json as JsonValue } from '../shared/json';
 import { AppError, type StoredCommand } from '../shared/contracts';
@@ -42,6 +43,7 @@ export type ExecutionContext = {
 };
 export type ContributionHost = {
   identity: string;
+  conversationId?: string;
   pi: () => Promise<Harness>;
   command: () => Promise<StoredCommand | undefined>;
 };
@@ -62,6 +64,16 @@ export type ServerContribution = {
     read(ref: string, context: ReadContext): Promise<{ data: JsonValue; initialState: JsonValue }>;
     validateState?(state: unknown): JsonValue;
   };
+  /** Out-of-band decisions for existing native work; never enqueue a new model run. */
+  controls?: Record<
+    string,
+    {
+      invoke(
+        payload: JsonValue,
+        context: { conversation: Conversation; context: ExecutionContext['context'] },
+      ): Promise<JsonValue>;
+    }
+  >;
   actions?: Record<
     string,
     { normalize(payload: JsonValue, context: ReadContext): Promise<JsonValue> }
@@ -96,6 +108,10 @@ export function collectContributions(contributions: readonly ServerContribution[
         typeof contribution.projectState !== 'function') ||
       Object.values(contribution.execution ?? {}).some(
         (handler) => typeof handler !== 'function',
+      ) ||
+      Object.entries(contribution.controls ?? {}).some(
+        ([name, control]) =>
+          !/^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(name) || typeof control?.invoke !== 'function',
       ) ||
       Object.entries(contribution.actions ?? {}).some(
         ([name, action]) =>

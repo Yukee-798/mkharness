@@ -16,6 +16,7 @@
     "bindings": [{ "name": "CONVERSATIONS", "class_name": "ConversationAgent" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationAgent"] }],
+  "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-e2e-skills" }],
   "d1_databases": [
     {
       "binding": "DB",

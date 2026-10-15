@@ -11,23 +11,38 @@ type Context = {
   env: Env;
   entries: () => Promise<readonly EntryRecord[]>;
   host?: ContributionHost;
+  configuration?: ExtensionConfiguration;
 };
 type Definition = {
   id: string;
   create: (context: Context) => Promise<ServerContribution>;
 };
 
-/** Add to definitions to opt into the sample; declaring a tool is not installing it. */
+/** Registered sample; enable it through extensions.config.ts. */
 export const exampleDefinition: Definition = {
   id: 'example',
   create: async () => {
-    const { exampleExtension } = await import('../server/extensions');
+    const { exampleExtension } = await import('./example/server');
     return { id: 'example', extension: exampleExtension() };
   },
 };
 
 /** The only server activation list. Listing IDs never executes a factory. */
 export const definitions: readonly Definition[] = [
+  {
+    id: 'skills',
+    create: async ({ env, host, configuration = extensionConfiguration }) => {
+      const { skillsContribution } = await import('./skills/server');
+      return skillsContribution(env, host, extensionEnabled('skills-example', configuration));
+    },
+  },
+  {
+    id: 'mcp',
+    create: async ({ env, host }) => {
+      const { userMcpContribution } = await import('./mcp/server');
+      return userMcpContribution(env, host);
+    },
+  },
   {
     id: 'timing',
     create: async () => {
@@ -75,7 +90,9 @@ export const definitions: readonly Definition[] = [
   exampleDefinition,
   {
     id: 'skills-example',
-    create: async () => {
+    create: async ({ configuration = extensionConfiguration }) => {
+      // Both source kinds share one native Skills extension and one pair of tools.
+      if (extensionEnabled('skills', configuration)) return { id: 'skills-example' };
       const { staticSkills, exampleSkillSource } = await import('../server/skills');
       return { id: 'skills-example', extension: await staticSkills([exampleSkillSource()]) };
     },

@@ -35,7 +35,9 @@ it('capabilities are authenticated configuration reads that never acquire a DO',
   );
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({
-    extensionIds: ['timing', 'web', 'openui', 'reply', 'async-example'],
+    extensionIds: ['skills', 'mcp', 'timing', 'web', 'openui', 'reply', 'async-example'],
+    customMcp: true,
+    skills: true,
   });
 });
 it('isolates listing and every resource operation using real Better Auth sessions', async () => {
@@ -59,6 +61,7 @@ it('isolates listing and every resource operation using real Better Auth session
     ['runs', 'POST'],
     ['runs/abc/events', 'GET'],
     ['runs/abc/queue', 'POST'],
+    ['extensions/mcp/controls/decide', 'POST'],
     ['stop', 'POST'],
     ['extensions/openui/resources/1.call', 'GET'],
     ['extensions/openui/resources/1.call/state', 'PATCH'],
@@ -400,3 +403,120 @@ for (const scheduled of [false, true]) {
     expect(JSON.parse(await fresh.snapshot()).entries).toEqual([]);
   });
 }
+
+it('scopes custom MCP management to the session owner and validates callbacks and bodies', async () => {
+  const base = 'http://localhost:5173/api';
+  const headers = {
+    cookie: await cookie('token-a'),
+    origin: env.APP_URL,
+    'Content-Type': 'application/json',
+  };
+  expect((await app.request(base + '/mcp/connections', {}, env)).status).toBe(401);
+  const metadata = await app.request(base + '/mcp/client-metadata', {}, env);
+  expect(metadata.status).toBe(200);
+  expect(await metadata.json()).toMatchObject({ redirect_uris: [base + '/mcp/callback'] });
+  expect(
+    (
+      await app.request(
+        base + '/mcp/connections',
+        { method: 'POST', headers: { ...headers, origin: 'https://foreign.example' }, body: '{}' },
+        env,
+      )
+    ).status,
+  ).toBe(403);
+  for (const endpoint of [
+    'http://public.example/mcp',
+    'https://127.0.0.1/mcp',
+    'https://host.internal/mcp',
+  ]) {
+    const res = await app.request(
+      base + '/mcp/connections',
+      { method: 'POST', headers, body: JSON.stringify({ name: 'blocked', endpoint }) },
+      env,
+    );
+    expect(res.status).toBe(400);
+  }
+  const created = await app.request(
+    base + '/mcp/connections',
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: 'API ownership',
+        endpoint: 'https://public.example/mcp',
+        auth: 'none',
+      }),
+    },
+    env,
+  );
+  expect(created.status).toBe(201);
+  const { connection } = (await created.json()) as any;
+  expect(
+    (
+      await app.request(
+        base + '/mcp/connections/' + connection.id,
+        { method: 'PATCH', headers, body: JSON.stringify({ revision: 999, enabled: false }) },
+        env,
+      )
+    ).status,
+  ).toBe(409);
+  const other = { ...headers, cookie: await cookie('token-b') };
+  const list = await app.request(base + '/mcp/connections', { headers: other }, env);
+  expect(await list.json()).toEqual({ connections: [] });
+  for (const [method, path, body] of [
+    ['POST', '/connect', undefined],
+    ['PATCH', '', JSON.stringify({ revision: 1, enabled: false })],
+    ['DELETE', '', undefined],
+  ] as const) {
+    expect(
+      (
+        await app.request(
+          base + '/mcp/connections/' + connection.id + path,
+          { method, headers: other, body },
+          env,
+        )
+      ).status,
+    ).toBe(404);
+  }
+  const foreignCallback = await app.request(
+    base + '/mcp/callback?state=nonce.' + connection.id + '&code=fixture',
+    { headers: other },
+    env,
+  );
+  expect(foreignCallback.headers.get('location')).toBe(env.APP_URL + '/?mcp=error');
+  expect(
+    (await app.request(base + '/conversations', { method: 'POST', headers, body: '{' }, env))
+      .status,
+  ).toBe(400);
+  expect(
+    (
+      await app.request(
+        base + '/conversations',
+        { method: 'POST', headers, body: JSON.stringify({ mcpConnectionIds: [connection.id] }) },
+        env,
+      )
+    ).status,
+  ).toBe(201);
+  expect(
+    (
+      await app.request(
+        base + '/conversations',
+        {
+          method: 'POST',
+          headers: other,
+          body: JSON.stringify({ mcpConnectionIds: [connection.id] }),
+        },
+        env,
+      )
+    ).status,
+  ).toBe(404);
+  expect(
+    (
+      await app.request(
+        base + '/mcp/connections/' + connection.id,
+        { method: 'DELETE', headers },
+        env,
+      )
+    ).status,
+  ).toBe(200);
+});

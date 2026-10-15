@@ -7,7 +7,8 @@ export default {
   openui: { enabled: true, inspect: false },
   reply: { enabled: true },
   'async-example': { enabled: true },
-  mcp: { enabled: true },
+  mcp: { enabled: true, custom: true },
   example: { enabled: false },
+  skills: { enabled: true },
   'skills-example': { enabled: false },
 } satisfies ExtensionConfiguration;

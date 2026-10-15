@@ -2,7 +2,7 @@ import { extensionEnabled, type ExtensionConfiguration } from '../../src/extensi
 import { asyncExampleContribution } from '../../src/extensions/async-example/server';
 import type { RemoteConfig } from '../../src/extensions/async-example/runtime';
 import { ConversationAgent as Base } from '../../src/server/conversation';
-import { exampleExtension } from '../../src/server/extensions';
+import { exampleExtension } from '../../src/extensions/example/server';
 import { staticSkills, exampleSkillSource } from '../../src/server/skills';
 import { fixtureModels } from '../fixture-model';
 import { Type } from '@earendil-works/pi-ai';
@@ -118,7 +118,9 @@ export class ConversationAgent extends Base {
     const extensions: Extension[] = [
       ...(await super.extensions()),
       exampleExtension(),
-      await staticSkills([exampleSkillSource()]),
+      ...((await this.contributions()).some((c) => c.id === 'skills' && c.extension?.tools?.length)
+        ? []
+        : [await staticSkills([exampleSkillSource()])]),
       {
         name: 'fixture',
         sections: [

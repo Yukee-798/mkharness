@@ -14,7 +14,7 @@ export async function applicationContributions(
   return collectContributions(
     await Promise.all(
       enabledDefinitions(config).map(async (definition) => {
-        const contribution = await definition.create({ env, entries, host });
+        const contribution = await definition.create({ env, entries, host, configuration: config });
         if (contribution.id !== definition.id)
           throw new AppError(503, 'extension_identity_mismatch');
         return contribution;

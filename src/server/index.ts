@@ -14,7 +14,14 @@ import {
 } from './models';
 import { AppError, commandSchema, conversationTitleSchema } from '../shared/contracts';
 import { queueActionSchema } from '../shared/queue';
+import { skillRoutes } from './skills/routes';
+import { skillsEnabled, newSkillBindings } from './skills/catalog';
 const app = new Hono<{ Bindings: Env; Variables: { userId: string; conversationId: string } }>();
+import { mcpRoutes, clientMetadata } from './mcp-connections/routes';
+import { customMcpEnabled, newConversationBindings } from './mcp-connections/catalog';
+app.get('/api/mcp/client-metadata', (c) =>
+  customMcpEnabled() ? c.json(clientMetadata(c.env.APP_URL)) : c.notFound(),
+);
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'private, no-store');
   await next();
@@ -35,7 +42,11 @@ app.use('/api/*', async (c, next) => {
   c.set('userId', session.user.id);
   await next();
 });
-app.get('/api/capabilities', (c) => c.json({ extensionIds: extensionIds() }));
+app.get('/api/capabilities', (c) =>
+  c.json({ extensionIds: extensionIds(), customMcp: customMcpEnabled(), skills: skillsEnabled() }),
+);
+app.route('/api/mcp', mcpRoutes);
+app.route('/api/skills', skillRoutes);
 app.get('/api/settings/models', async (c) => {
   const credentials = new ModelCredentials(c.env, c.get('userId'));
   return c.json({
@@ -123,11 +134,39 @@ app.get('/api/conversations', async (c) => {
 app.post('/api/conversations', async (c) => {
   const id = crypto.randomUUID(),
     now = Date.now();
-  await c.env.DB.prepare(
-    'INSERT INTO conversations(id,owner,title,created_at,updated_at) VALUES(?,?,?,?,?)',
-  )
-    .bind(id, c.get('userId'), '新聊天', now, now)
-    .run();
+  let selected: string[] | undefined;
+  let skillIds: string[] | undefined;
+  if (c.req.header('Content-Length') !== '0' && c.req.raw.body) {
+    let body: unknown;
+    try {
+      body = JSON.parse(await boundedText(new Response(c.req.raw.body), 4096));
+    } catch {
+      throw new AppError(400, 'invalid_request');
+    }
+    const parsed = z
+      .object({
+        mcpConnectionIds: z.array(z.uuid()).max(10).optional(),
+        skillIds: z.array(z.uuid()).max(8).optional(),
+      })
+      .strict()
+      .safeParse(body);
+    if (!parsed.success) throw new AppError(400, 'invalid_request');
+    selected = parsed.data.mcpConnectionIds;
+    skillIds = parsed.data.skillIds;
+  }
+  const bindings = await newConversationBindings(c.env, c.get('userId'), selected);
+  const skills = await newSkillBindings(c.env, c.get('userId'), skillIds);
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'INSERT INTO conversations(id,owner,title,created_at,updated_at) VALUES(?,?,?,?,?)',
+    ).bind(id, c.get('userId'), '新聊天', now, now),
+    c.env.DB.prepare(
+      'INSERT INTO conversation_mcp_bindings(conversation,bindings) VALUES(?,?)',
+    ).bind(id, JSON.stringify(bindings)),
+    c.env.DB.prepare(
+      'INSERT INTO conversation_skill_bindings(conversation,bindings) VALUES(?,?)',
+    ).bind(id, JSON.stringify(skills)),
+  ]);
   return c.json({ id, title: '新聊天' }, 201);
 });
 app.use('/api/conversations/:id/*', async (c, next) => {
@@ -174,6 +213,22 @@ app.delete('/api/conversations/:id', async (c) => {
     .bind(c.get('conversationId'), c.get('userId'))
     .run();
   return c.json({ deleting: true }, 202);
+});
+app.post('/api/conversations/:id/extensions/:extensionId/controls/:name', async (c) => {
+  let payload: string;
+  try {
+    payload = await boundedText(new Response(c.req.raw.body), 4096);
+    JSON.parse(payload);
+  } catch {
+    throw new AppError(400, 'invalid_extension_control');
+  }
+  const result = await c.env.CONVERSATIONS.getByName(c.get('conversationId')).controlExtension(
+    c.req.param('extensionId'),
+    c.req.param('name'),
+    payload,
+  );
+  if (!result.ok) throw new AppError(result.status, result.code);
+  return c.json(JSON.parse(result.value));
 });
 app.post('/api/conversations/:id/runs', async (c) => {
   let raw: string;

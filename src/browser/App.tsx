@@ -18,6 +18,7 @@ import { SettingsDialog } from './Settings';
 import { retainModelKeys } from './local-model-key';
 import { ChatLoading } from './chat-loading';
 import { useBrowserExtensions } from './extension-loading';
+import { useSkillSelection, SkillPicker } from '../extensions/skills/selection';
 import { cn } from './ui/utils';
 import {
   DropdownMenu,
@@ -205,9 +206,13 @@ function Workspace({
   const { t } = useLocale();
   // Start capability discovery and reviewed module downloads while Chat and its
   // snapshot load. The runtime reuses these same user-scoped query results.
-  useBrowserExtensions(userId);
+  const extensions = useBrowserExtensions(userId);
   const { chat: id = '' } = useSearch({ from: '/' });
   const navigate = useNavigate({ from: '/' });
+  const skillSelection = useSkillSelection(
+    userId,
+    !id && extensions.capabilities.data?.skills === true,
+  );
   const client = useQueryClient();
   useEffect(
     () => () => {
@@ -226,8 +231,12 @@ function Workspace({
   const loading = directoryQuery.isPending || directoryQuery.isFetching;
   const [menu, setMenu] = useState(false),
     [error, setError] = useState(''),
-    [settingsOpen, setSettingsOpen] = useState(false),
-    [settingsSection, setSettingsSection] = useState<'general' | 'models'>('general'),
+    [settingsOpen, setSettingsOpen] = useState(() =>
+      new URLSearchParams(window.location.search).has('mcp'),
+    ),
+    [settingsSection, setSettingsSection] = useState<'general' | 'models' | 'connections'>(() =>
+      new URLSearchParams(window.location.search).has('mcp') ? 'connections' : 'general',
+    ),
     [settingsProvider, setSettingsProvider] = useState<string>(),
     [activeProvider, setActiveProvider] = useState<string>(),
     [signingOut, setSigningOut] = useState(false);
@@ -393,10 +402,31 @@ function Workspace({
             }}
             onSettings={showSettings}
             onModelProviderChange={setActiveProvider}
+            creation={
+              extensions.capabilities.data?.skills && skillSelection.creationIds !== undefined
+                ? { skillIds: skillSelection.creationIds }
+                : undefined
+            }
+            newChatControls={
+              extensions.capabilities.data?.skills
+                ? (disabled) => (
+                    <SkillPicker
+                      available={skillSelection.available}
+                      ids={skillSelection.ids}
+                      onChange={skillSelection.setSelected}
+                      disabled={disabled}
+                      failed={skillSelection.query.isError}
+                      loading={skillSelection.query.isPending}
+                    />
+                  )
+                : undefined
+            }
           />
         </Suspense>
         <SettingsDialog
           userId={userId}
+          customMcp={extensions.capabilities.data?.customMcp === true}
+          skills={extensions.capabilities.data?.skills === true}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           initialProvider={settingsProvider}

@@ -1,4 +1,4 @@
-import { exampleExtension } from '../../src/server/extensions';
+import { exampleExtension } from '../../src/extensions/example/server';
 import { ConversationAgent } from '../../src/server/conversation';
 import { executionModels } from '../../src/server/execution-models';
 import { applicationModels } from '../../src/server/models';

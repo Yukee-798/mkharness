@@ -327,3 +327,35 @@ it('refuses live catalog changes before calling and keeps an independent accepte
     ]);
   }
 });
+
+it('accepts native Notion empty and unrestricted property schemas while retaining argument validation', async () => {
+  const notionSchema = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    type: 'object',
+    properties: {
+      query: { type: 'string', minLength: 1 },
+      filters: { type: 'object', additionalProperties: {} },
+    },
+    required: ['query'],
+    additionalProperties: {},
+  };
+  const built = await buildMcp(manager(notionSchema), configs, {});
+  const tool = built.extension.tools![0];
+  expect(tool).toBeDefined();
+  expect(() =>
+    validateToolArguments(tool, {
+      type: 'toolCall',
+      id: 'notion',
+      name: tool.name,
+      arguments: { query: 'docs', filters: { custom: true } },
+    }),
+  ).not.toThrow();
+  expect(() =>
+    validateToolArguments(tool, {
+      type: 'toolCall',
+      id: 'notion',
+      name: tool.name,
+      arguments: { query: '' },
+    }),
+  ).toThrow();
+});
