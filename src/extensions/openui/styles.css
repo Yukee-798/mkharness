@@ -8,12 +8,15 @@
 .generated-panel .openui-card-sunk {
   box-shadow: none;
 }
+.generated-panel .openui-button-base {
+  @apply justify-center text-center;
+}
 /* Explicit form actions share the available width; inline/link actions stay compact. */
 .generated-panel [role='form'] > .openui-buttons {
   @apply w-full;
 }
 .generated-panel [role='form'] > .openui-buttons > .openui-button-base {
-  @apply min-w-0 flex-1 justify-center text-center;
+  @apply min-w-0 flex-1;
 }
 .generated-panel :is(.openui-input-medium, .openui-select-trigger-md, .openui-button-base-medium) {
   min-height: 2.25rem;
