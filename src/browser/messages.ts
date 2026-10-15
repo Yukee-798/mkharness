@@ -1,5 +1,15 @@
 // Application copy only; model output and resource content are never translated.
 export const english: Record<string, string> = {
+  '待执行 · {count}': 'Queued · {count}',
+  待执行任务: 'Queued tasks',
+  重新编辑: 'Edit',
+  引导: 'Steer',
+  等待引导: 'Steering pending',
+  移除排队消息: 'Remove queued message',
+  展开全部: 'Show all',
+  收起: 'Collapse',
+  先发送或清空当前草稿: 'Send or clear your current draft first',
+  queue_item_started: 'This task has already started or ended. The queue has been refreshed.',
   添加图片: 'Add images',
   移除图片: 'Remove image',
   '仅支持 PNG、JPEG、WebP 或 GIF 图片': 'Only PNG, JPEG, WebP, or GIF images are supported.',

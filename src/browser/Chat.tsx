@@ -22,6 +22,8 @@ import { useAgUiRuntime, fromAgUiMessages } from '@assistant-ui/react-ag-ui';
 import type { EntryRecord } from '@earendil-works/pi-durable';
 import { toMessages } from '../shared/stream';
 import type { RunCommand } from '../shared/contracts';
+import type { QueuedInput, QueueAction, QueueActionResult, QueueDraft } from '../shared/queue';
+import { TaskQueue } from './task-queue';
 import { AttachAgent, StreamReplaced } from './transport';
 import { ResourceDrafts } from './ResourceDrafts';
 import { request, ApiError } from './api';
@@ -68,6 +70,7 @@ export type Snapshot = {
   cursor?: unknown;
   pending: { operationId: string; status: 'running' | 'queued' }[];
   stopping: boolean;
+  queue?: QueuedInput[];
   modelCatalog?: ModelCatalog;
   selection?: ModelSelection;
   remote?: RemoteProgress[];
@@ -121,8 +124,11 @@ export function Chat({
     [restoration, setRestoration] = useState(0),
     [error, setError] = useState<Error>(),
     [text, setText] = useState(''),
-    [accepted, setAccepted] = useState<string[]>([]),
+    [ackPending, setAckPending] = useState(false),
     [sending, setSending] = useState(false);
+  const [editingQueue, setEditingQueue] = useState(false);
+  const [draftSource, setDraftSource] = useState<RunCommand['source']>();
+  const queueEpoch = useRef(0);
   const retries = useRef(0);
   const draftVersion = useRef(0);
   const [selection, setSelection] = useState<ModelSelection>();
@@ -171,15 +177,18 @@ export function Chat({
   useEffect(() => {
     if (!id || revision === 0) return;
     let active = true;
+    const epoch = queueEpoch.current;
     void refetchSnapshot().then(({ data: s, isSuccess }) => {
       // A failed Query refetch retains cached data. Only a successful read may restore
       // history and attach; otherwise cached pending work can form a terminal SSE loop.
       if (!active || !isSuccess || !s) return;
       restoredRevision.current = revision;
-      setSnapshot(s);
+      setSnapshot((current) =>
+        epoch === queueEpoch.current ? s : { ...s, queue: current?.queue ?? s.queue },
+      );
       setRestoration(revision);
       setRemote(s.remote ?? []);
-      setAccepted([]);
+      setAckPending(false);
       if (!s.pending.length)
         setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : previous));
     });
@@ -223,10 +232,26 @@ export function Chat({
     }
     if (!id) return;
     onDirectoryChange?.();
-    setAccepted((a) => [...a, message]);
+    setAckPending(true);
     retries.current = 0;
     setError(undefined);
     if (!snapshot?.pending.length) setRevision((r) => r + 1);
+    else {
+      const epoch = queueEpoch.current;
+      const { data, isSuccess } = await refetchSnapshot();
+      if (isSuccess && data) {
+        setSnapshot((s) =>
+          s
+            ? {
+                ...s,
+                pending: data.pending,
+                queue: epoch === queueEpoch.current ? data.queue : s.queue,
+              }
+            : data,
+        );
+        setAckPending(false);
+      }
+    }
   };
   const refresh = () => {
     retries.current = 0;
@@ -274,7 +299,7 @@ export function Chat({
   const renderedSnapshot = snapshot ?? (!id || initialSubmission ? emptySnapshot : undefined);
   const submitting = sending || latest?.status === 'pending';
   const composerReady = !id || !!renderedSnapshot;
-  const hasPending = !!snapshot?.pending.length || accepted.length > 0;
+  const hasPending = !!snapshot?.pending.length || ackPending;
   const isStopping = stopSending || !!snapshot?.stopping;
   const composerVersion = draftVersion.current;
   const footer = (
@@ -335,21 +360,36 @@ export function Chat({
             </div>
           );
         })}
-      {accepted.length > 0 && (
-        <aside
-          aria-label={t('已接受的任务')}
-          className="rounded-lg border bg-muted/40 px-3 py-2 text-xs"
-        >
-          <p className="font-medium">{t('任务已接受，忙碌时按顺序执行')}</p>
-          <div className="mt-1 max-h-20 space-y-1 overflow-y-auto text-muted-foreground">
-            {accepted.map((message, i) => (
-              <p key={i} className="truncate">
-                {message}
-              </p>
-            ))}
-          </div>
-        </aside>
-      )}
+      <TaskQueue
+        items={snapshot?.queue ?? []}
+        disabled={submitting || isStopping}
+        hasDraft={!!text}
+        editing={setEditingQueue}
+        act={async (runId: string, action: QueueAction) => {
+          const epoch = queueEpoch.current;
+          try {
+            const result = await request<QueueActionResult>(
+              `/conversations/${id}/runs/${runId}/queue`,
+              { method: 'POST', body: JSON.stringify({ action }) },
+            );
+            if (epoch === queueEpoch.current)
+              setSnapshot((s) => (s ? { ...s, queue: result.queue } : s));
+            return result;
+          } catch (error) {
+            // A boundary may win the race. Refresh queue membership without replacing attach.
+            const { data, isSuccess } = await refetchSnapshot();
+            if (isSuccess && data && epoch === queueEpoch.current)
+              setSnapshot((s) => (s ? { ...s, queue: data.queue } : s));
+            throw error;
+          }
+        }}
+        edit={(draft: QueueDraft) => {
+          draftVersion.current++;
+          setText(draft.text);
+          setDraftSource(draft.source);
+          if (draft.config && catalog) setSelection(resolveModelSelection(catalog, draft.config));
+        }}
+      />
       {connection && (
         <div
           role="status"
@@ -368,10 +408,10 @@ export function Chat({
           <span className="flex-1">
             {connection === 'reconnecting' ? t('正在重新连接…') : t('已恢复连接')}
           </span>
-          {!!snapshot?.pending.some((p) => p.status === 'queued') && (
+          {!!snapshot?.queue?.length && (
             <span className="tabular-nums">
               {t('{count} 项排队', {
-                count: snapshot.pending.filter((p) => p.status === 'queued').length,
+                count: snapshot.queue!.length,
               })}
             </span>
           )}
@@ -423,13 +463,22 @@ export function Chat({
       <ImageComposer
         className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
         onSubmit={async (images) => {
-          if (!composerReady || (!text.trim() && !images?.length) || submitting || isStopping)
+          if (
+            !composerReady ||
+            (!text.trim() && !images?.length) ||
+            submitting ||
+            isStopping ||
+            editingQueue
+          )
             return false;
           const submittedVersion = composerVersion;
           setSending(true);
           try {
-            await submit(text, undefined, images);
-            if (draftVersion.current === submittedVersion) setText('');
+            await submit(text, draftSource, images);
+            if (draftVersion.current === submittedVersion) {
+              setText('');
+              setDraftSource(undefined);
+            }
             return true;
           } catch (e) {
             setError(e as Error);
@@ -450,11 +499,12 @@ export function Chat({
               onChange={(e) => {
                 draftVersion.current++;
                 setText(e.target.value);
+                if (!e.target.value) setDraftSource(undefined);
               }}
               rows={2}
               placeholder={t('描述你的问题，或说说你想完成什么')}
               className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
-              disabled={!composerReady || isStopping}
+              disabled={!composerReady || isStopping || editingQueue}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
@@ -463,14 +513,14 @@ export function Chat({
               }}
             />
             <div className="mt-2 flex items-center justify-between gap-2">
-              <AddImage disabled={!composerReady || submitting || isStopping} />
+              <AddImage disabled={!composerReady || submitting || isStopping || editingQueue} />
               <div className="min-w-0 flex-1">
                 {catalog && selected ? (
                   <ModelPicker
                     catalog={catalog}
                     value={selected}
                     onChange={setSelection}
-                    disabled={submitting || isStopping}
+                    disabled={submitting || isStopping || editingQueue}
                   />
                 ) : (
                   <span className="px-1 text-[11px] text-muted-foreground">
@@ -495,6 +545,7 @@ export function Chat({
                   !composerReady ||
                   submitting ||
                   isStopping ||
+                  editingQueue ||
                   (!hasPending && ((!text.trim() && !hasImages) || (!id && settings.isPending)))
                 }
                 onClick={
@@ -544,6 +595,10 @@ export function Chat({
             reconnect={reconnect}
             connected={connected}
             progress={setRemote}
+            queue={(value) => {
+              queueEpoch.current++;
+              setSnapshot((s) => (s ? { ...s, queue: value } : s));
+            }}
             footer={footer}
           />
         ) : (
@@ -579,6 +634,7 @@ function Runtime({
   reconnect,
   connected,
   progress,
+  queue,
   footer,
 }: {
   id: string;
@@ -592,6 +648,7 @@ function Runtime({
   reconnect: (replacement?: boolean) => void;
   connected: () => void;
   progress: (value: RemoteProgress[]) => void;
+  queue: (value: QueuedInput[]) => void;
   footer: ReactNode;
 }) {
   const { t } = useLocale();
@@ -641,8 +698,8 @@ function Runtime({
       headId: messages.at(-1)?.id ?? null,
     };
   }, [snapshot.entries, messageIds, optimistic, optimisticStatus]);
-  const callbacks = useRef({ done, reconnect, connected, progress, snapshot });
-  callbacks.current = { done, reconnect, connected, progress, snapshot };
+  const callbacks = useRef({ done, reconnect, connected, progress, queue, snapshot });
+  callbacks.current = { done, reconnect, connected, progress, queue, snapshot };
   const agent = useMemo(
     () =>
       new AttachAgent(
@@ -676,6 +733,11 @@ function Runtime({
               ),
               ...value,
             ]);
+        },
+        (runId, value) => {
+          const pending = callbacks.current.snapshot.pending;
+          const active = pending.find((item) => item.status === 'running') ?? pending[0];
+          if (active?.operationId === runId) callbacks.current.queue(value);
         },
       ),
     [id, messageIds],

@@ -105,6 +105,12 @@ export async function observeRun(
         throw error;
       })
     )?.operations ?? {};
+  let queue = await owner.queuedInputs().catch(async (error) => {
+    unsubscribe();
+    await watch.stop();
+    throw error;
+  });
+  let queueChanged = true;
   const fold = new StreamFold();
   // A committed snapshot must update the draft already visible in this observation.
   // Pi entry ids remain authoritative in storage and on the next attachment.
@@ -162,6 +168,7 @@ export async function observeRun(
             runId,
             status: record!.status,
             stopping: owner.stopping,
+            ...(queueChanged ? { queue } : {}),
             runtimeIssues: compactionIssues(compactionFailure),
             messageIds: Object.fromEntries(liveMessageIds),
             toolProgress: Object.fromEntries(
@@ -176,6 +183,7 @@ export async function observeRun(
             extensionState: extensionProjection.project(),
           },
         } as BaseEvent);
+        queueChanged = false;
       };
       sendState = () => {
         if (!ended) state();
@@ -235,7 +243,11 @@ export async function observeRun(
               progress.round(event.entry);
           for (const event of events) {
             if (ended) return;
-            if (event.type === 'submission' && event.record.id === record!.id) {
+            if (event.type === 'inbox_update') {
+              queue = await owner.queuedInputs();
+              queueChanged = true;
+              state();
+            } else if (event.type === 'submission' && event.record.id === record!.id) {
               record = event.record;
               state();
             } else if (

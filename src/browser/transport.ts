@@ -13,6 +13,7 @@ import { aliasMessages, messageAliases } from '../shared/stream';
 import type { ToolProgressMap } from '../shared/tool-progress';
 import type { RuntimeIssue } from '../shared/runtime-issues';
 import type { ExtensionState } from '../shared/extension-state';
+import type { QueuedInput } from '../shared/queue';
 export class StreamReplaced extends Error {}
 /** The only run path is GET attach. HTTP submission belongs to the composer. */
 export class AttachAgent extends AbstractAgent {
@@ -26,6 +27,7 @@ export class AttachAgent extends AbstractAgent {
     private toolProgress: (runId: string, value: ToolProgressMap) => void = () => {},
     private extensionState: (runId: string, value: ExtensionState) => void = () => {},
     private runtimeIssues: (runId: string, value: RuntimeIssue[]) => void = () => {},
+    private queue: (runId: string, value: QueuedInput[]) => void = () => {},
   ) {
     super({ threadId: conversationId });
   }
@@ -40,6 +42,7 @@ export class AttachAgent extends AbstractAgent {
       this.toolProgress,
       this.extensionState,
       this.runtimeIssues,
+      this.queue,
     );
   }
   run(input: RunAgentInput) {
@@ -78,9 +81,12 @@ export class AttachAgent extends AbstractAgent {
                   toolProgress?: ToolProgressMap;
                   extensionState?: ExtensionState;
                   runtimeIssues?: RuntimeIssue[];
+                  queue?: QueuedInput[];
                 };
               }
             ).snapshot;
+            if (state?.runId === runId && Array.isArray(state.queue))
+              this.queue(runId, state.queue);
             if (state?.runId === runId && state.messageIds)
               for (const [canonicalId, liveId] of Object.entries(state.messageIds))
                 if (!this.messageIds.has(canonicalId)) this.messageIds.set(canonicalId, liveId);

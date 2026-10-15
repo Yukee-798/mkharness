@@ -119,7 +119,8 @@ test('one composer action switches from send to stop without a running banner', 
   try {
     await page.goto('/tests/browser/chat.html');
     const input = page.getByLabel('消息', { exact: true });
-    const action = page.locator('form button');
+    // Count execution controls; the independent image picker is also a form button.
+    const action = page.getByRole('button', { name: /^(发送|停止并撤回排队|正在停止…|提交中…)$/ });
     await input.fill('Start a task');
     await expect(action).toHaveCount(1);
     await page.getByRole('button', { name: '发送', exact: true }).click();

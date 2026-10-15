@@ -13,6 +13,7 @@ import {
   registeredProvider,
 } from './models';
 import { AppError, commandSchema, conversationTitleSchema } from '../shared/contracts';
+import { queueActionSchema } from '../shared/queue';
 const app = new Hono<{ Bindings: Env; Variables: { userId: string; conversationId: string } }>();
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'private, no-store');
@@ -211,6 +212,20 @@ app.get('/api/conversations/:id/snapshot', async (c) => {
     await c.env.CONVERSATIONS.getByName(c.get('conversationId')).snapshot(c.req.query('cursor')),
   );
   return c.json(reply, reply.error?.status ?? 200);
+});
+app.post('/api/conversations/:id/runs/:runId/queue', async (c) => {
+  const body = await c.req.json().catch(() => undefined);
+  const parsed = queueActionSchema.safeParse(body);
+  if (!parsed.success) throw new AppError(400, 'invalid_request');
+  const result = JSON.parse(
+    await c.env.CONVERSATIONS.getByName(c.get('conversationId')).actOnQueuedInput(
+      c.req.param('runId'),
+      parsed.data.action,
+    ),
+  );
+  if ('error' in result)
+    return c.json({ error: result.error }, result.error.status as ContentfulStatusCode);
+  return c.json(result);
 });
 app.get('/api/conversations/:id/runs/:runId/events', (c) =>
   c.env.CONVERSATIONS.getByName(c.get('conversationId')).observeRun(

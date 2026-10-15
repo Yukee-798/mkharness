@@ -56,6 +56,7 @@ it('isolates listing and every resource operation using real Better Auth session
     ['snapshot', 'GET'],
     ['runs', 'POST'],
     ['runs/abc/events', 'GET'],
+    ['runs/abc/queue', 'POST'],
     ['stop', 'POST'],
     ['extensions/openui/resources/1.call', 'GET'],
     ['extensions/openui/resources/1.call/state', 'PATCH'],

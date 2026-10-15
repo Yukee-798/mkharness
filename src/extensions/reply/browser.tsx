@@ -7,6 +7,8 @@ import { Button } from '../../browser/ui/button';
 import { TooltipIconButton } from '../../browser/tooltip-icon-button';
 import type { RunCommand } from '../../shared/contracts';
 import type { BrowserExtension } from '../../browser/extensions';
+import type { SuggestionsState } from './suggestions';
+import { SUGGESTIONS_TOOL } from './suggestions';
 
 function useReplyAction() {
   const { submit, busy } = useExtensionContext();
@@ -68,11 +70,14 @@ function Regenerate() {
 
 /** Native suggestion chips. No second model request or writable suggestion store. */
 function FollowupSuggestions() {
-  const { t } = useLocale();
+  const { state, messageIds } = useExtensionContext();
+  const messageId = useAuiState((s) => s.message.id);
   const latest = useAuiState((s) => s.thread.messages.at(-1)?.id === s.message.id);
   const action = useReplyAction();
-  if (!latest || action.disabled) return null;
-  const suggestions = ['总结这段回答', '举一个具体例子', '接下来可以做什么'].map((text) => t(text));
+  const suggestions = (state?.reply as SuggestionsState | undefined)?.replies?.[
+    canonicalMessageId(messageId, messageIds)
+  ];
+  if (!latest || action.disabled || !suggestions?.length) return null;
   return (
     <div data-slot="suggestions" className="mt-3 flex w-full flex-wrap gap-2">
       {suggestions.map((prompt) => (
@@ -95,6 +100,11 @@ function FollowupSuggestions() {
     </div>
   );
 }
+
+export const toolkit = {
+  [SUGGESTIONS_TOOL]: { type: 'backend', render: () => null },
+} satisfies BrowserExtension['toolkit'];
+export const activity = { [SUGGESTIONS_TOOL]: 'hidden' } satisfies BrowserExtension['activity'];
 
 export const ui = {
   assistantActions: Regenerate,

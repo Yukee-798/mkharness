@@ -267,3 +267,53 @@ it('uses the existing attach to deliver scoped runtime issues and their clearanc
     vi.unstubAllGlobals();
   }
 });
+
+it('delivers native queue changes over the same cloned attach and ignores foreign state', async () => {
+  const queue = vi.fn();
+  const item = { runId: 'queued', text: 'Next task', mode: 'followUp' };
+  const states = [
+    { runId: 'foreign', queue: [{ ...item, text: 'Private foreign queue' }] },
+    { runId: 'r', queue: [item] },
+    { runId: 'r', status: 'placed' },
+    { runId: 'r', queue: [] },
+  ];
+  const events = [
+    { type: 'RUN_STARTED', threadId: 'c', runId: 'r' },
+    ...states.map((snapshot) => ({ type: 'STATE_SNAPSHOT', snapshot })),
+    { type: 'RUN_FINISHED', threadId: 'c', runId: 'r' },
+  ];
+  const network = vi.fn(
+    async () =>
+      new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+  );
+  vi.stubGlobal('fetch', network);
+  try {
+    const agent = new AttachAgent(
+      'c',
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      new Map(),
+      () => {},
+      () => {},
+      () => {},
+      queue,
+    );
+    await new Promise<void>((resolve, reject) =>
+      agent
+        .clone()
+        .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
+        .subscribe({ complete: resolve, error: reject }),
+    );
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(queue.mock.calls).toEqual([
+      ['r', [item]],
+      ['r', []],
+    ]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

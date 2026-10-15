@@ -5,6 +5,7 @@ import { PiHarness } from 'agents/harness/pi';
 import {
   Harness,
   ROOT_CONVERSATION_ID,
+  InboxDoc,
   createRegistry,
   createSession,
   watchEvents,
@@ -67,6 +68,7 @@ import { mcpIntentUnresolved } from './remote-intents';
 import { claimPiStorage, RuntimeStorageError } from './pi-storage';
 import { compactionIssues } from '../shared/runtime-issues';
 import { withdrawIdleInputs } from './queue-recovery';
+import { queueActionSchema, type QueueAction, type QueuedInput } from '../shared/queue';
 export const BG: Parameters<Harness['close']>[0] = Object.freeze({
   abortSignal: undefined,
   value: () => undefined,
@@ -413,6 +415,109 @@ export class ConversationAgent extends Agent<Env> {
     const root = await this.root();
     return root.commit((tx) => tx.submissionByRequest(root.id, runId), BG);
   }
+  async queuedInputs(): Promise<QueuedInput[]> {
+    const root = await this.root();
+    const pending = (await this.harness.pending({ session: '1' })).filter(
+      (p) => p.status === 'queued',
+    );
+    if (!pending.length) return [];
+    return root.commit(async (tx) => {
+      const inbox = await tx.doc(InboxDoc, root.id);
+      const result: QueuedInput[] = [];
+      // Existing receipts supply display text; Pi alone owns membership and order.
+      const records = pending.flatMap(({ operationId }) =>
+        this.rows<{ id: string; payload: string }>(
+          'SELECT id,payload FROM app_requests WHERE id=? AND accepted<>-1',
+          operationId,
+        ),
+      );
+      const byId = new Map(
+        (await Promise.all(records.map((row) => tx.submissionByRequest(root.id, row.id)))).map(
+          (submission, i) => [Number(submission?.id), records[i]!],
+        ),
+      );
+      for (const item of inbox.items) {
+        if (item.mode === 'write') continue;
+        const row = byId.get(Number(item.id));
+        if (!row) continue;
+        const { request } = storedRequestSchema.parse(JSON.parse(row.payload));
+        result.push({
+          runId: request.runId,
+          text: request.text,
+          ...(request.images
+            ? {
+                images: request.images.map((image, index) => ({
+                  name: image.name,
+                  mimeType: image.mimeType,
+                  // At most one 24 KiB thumbnail per item. Large originals travel only on edit.
+                  ...(index === 0 && image.data.length <= 32768 ? { data: image.data } : {}),
+                })),
+              }
+            : {}),
+          mode: item.mode,
+        });
+      }
+      // Steers join the current tool boundary; followers wait for its final answer.
+      return result.sort((a, b) => Number(b.mode === 'steer') - Number(a.mode === 'steer'));
+    }, BG);
+  }
+  async actOnQueuedInput(runId: string, action: QueueAction): Promise<string> {
+    try {
+      if (
+        !commandSchema.shape.runId.safeParse(runId).success ||
+        !queueActionSchema.safeParse({ action }).success
+      )
+        throw new AppError(400, 'invalid_request');
+      return JSON.stringify(
+        await this.serial(async () => {
+          if (this.deleting) throw new AppError(404, 'not_found');
+          if (this.stopping) throw new AppError(409, 'stopping');
+          const row = this.rows<{ payload: string }>(
+            'SELECT payload FROM app_requests WHERE id=?',
+            runId,
+          )[0];
+          if (!row) throw new AppError(404, 'run_not_found');
+          const stored = storedRequestSchema.parse(JSON.parse(row.payload));
+          const root = await this.root();
+          const pi = await this.harness.pi();
+          if (action === 'steer') {
+            // Public native document, serialized with the very boundary that places input.
+            // Keep the original submission, immutable payload and credential references.
+            await root.commit(async (tx) => {
+              const submission = await tx.submissionByRequest(root.id, runId);
+              if (!submission || submission.type !== 'input' || submission.status !== 'queued')
+                throw new AppError(409, 'queue_item_started');
+              const inbox = await tx.doc(InboxDoc, root.id);
+              const item = inbox.items.find((item) => item.id === submission.id);
+              if (!item || item.mode === 'write') throw new AppError(409, 'queue_item_started');
+              item.mode = 'steer';
+            }, BG);
+            pi.resume();
+          } else {
+            const submission = await this.submission(runId);
+            if (!submission || submission.type !== 'input')
+              throw new AppError(404, 'run_not_found');
+            const withdrawn =
+              submission.status === 'unanswered' &&
+              submission.entry === undefined &&
+              submission.reason === 'aborted';
+            if (!withdrawn && (await pi.abortSubmission(submission.id, BG, root.id)) !== 'aborted')
+              throw new AppError(409, 'queue_item_started');
+            // Retain the immutable receipt for binding recovery, but never re-enqueue it.
+            this.ctx.storage.sql.exec('UPDATE app_requests SET accepted=-1 WHERE id=?', runId);
+          }
+          const { runId: _id, ...draft } = stored.request;
+          return { queue: await this.queuedInputs(), ...(action === 'edit' ? { draft } : {}) };
+        }),
+      );
+    } catch (error) {
+      if (error instanceof AppError)
+        return JSON.stringify({
+          error: { status: error.status, code: error.code, message: error.message },
+        });
+      throw error;
+    }
+  }
   async submitRun(raw: RunCommand) {
     try {
       return await this.admit(raw);
@@ -518,6 +623,18 @@ export class ConversationAgent extends Agent<Env> {
       if (!record?.accepted) {
         await this.recovery.schedule();
         await this.enqueue(stored!);
+      }
+      // A native withdrawal can commit before its host flag (e.g. isolate loss).
+      // Reconcile that receipt on retry, rather than acknowledging a withdrawn run.
+      const receipt = record ? await this.submission(command.runId) : undefined;
+      if (
+        receipt?.type === 'input' &&
+        receipt.status === 'unanswered' &&
+        receipt.entry === undefined &&
+        receipt.reason === 'aborted'
+      ) {
+        this.ctx.storage.sql.exec('UPDATE app_requests SET accepted=-1 WHERE id=?', command.runId);
+        throw new AppError(409, 'request_withdrawn');
       }
       return { runId: command.runId, accepted: true as const };
     });
@@ -889,6 +1006,7 @@ export class ConversationAgent extends Agent<Env> {
       toolProgress,
       extensionState,
       pending,
+      queue: await this.queuedInputs(),
       stopping: this.stopping,
       modelCatalog,
       selection,
