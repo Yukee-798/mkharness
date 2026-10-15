@@ -18,7 +18,7 @@ import { SettingsDialog } from './Settings';
 import { retainModelKeys } from './local-model-key';
 import { ChatLoading } from './chat-loading';
 import { useBrowserExtensions } from './extension-loading';
-import { useSkillSelection, SkillPicker } from '../extensions/skills/selection';
+import { useSkillSelection } from '../extensions/skills/selection';
 import { cn } from './ui/utils';
 import {
   DropdownMenu,
@@ -405,20 +405,6 @@ function Workspace({
             creation={
               extensions.capabilities.data?.skills && skillSelection.creationIds !== undefined
                 ? { skillIds: skillSelection.creationIds }
-                : undefined
-            }
-            newChatControls={
-              extensions.capabilities.data?.skills
-                ? (disabled) => (
-                    <SkillPicker
-                      available={skillSelection.available}
-                      ids={skillSelection.ids}
-                      onChange={skillSelection.setSelected}
-                      disabled={disabled}
-                      failed={skillSelection.query.isError}
-                      loading={skillSelection.query.isPending}
-                    />
-                  )
                 : undefined
             }
           />
