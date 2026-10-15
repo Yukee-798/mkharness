@@ -17,6 +17,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { SettingsDialog } from './Settings';
 import { retainModelKeys } from './local-model-key';
 import { ChatLoading } from './chat-loading';
+import { useBrowserExtensions } from './extension-loading';
 import { cn } from './ui/utils';
 import {
   DropdownMenu,
@@ -202,6 +203,9 @@ function Workspace({
   anonymous: boolean;
 }) {
   const { t } = useLocale();
+  // Start capability discovery and reviewed module downloads while Chat and its
+  // snapshot load. The runtime reuses these same user-scoped query results.
+  useBrowserExtensions(userId);
   const { chat: id = '' } = useSearch({ from: '/' });
   const navigate = useNavigate({ from: '/' });
   const client = useQueryClient();

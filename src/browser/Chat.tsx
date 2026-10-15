@@ -453,6 +453,7 @@ export function Chat({
               <Button
                 type={hasPending || isStopping ? 'button' : 'submit'}
                 size="icon"
+                aria-busy={submitting || isStopping}
                 className="rounded-full"
                 aria-label={
                   isStopping
@@ -584,7 +585,6 @@ function Runtime({
     !snapshot.entries.some((e) => e.model?.some((m) => m.role === 'user'))
       ? initialSubmission?.submission
       : undefined;
-  const optimisticStatus = optimistic ? initialSubmission?.status : undefined;
   const history = useMemo(() => {
     const source = toMessages(snapshot.entries, messageIds);
     // This is the first message of a just-created chat. Once Pi exposes a user
@@ -597,18 +597,7 @@ function Runtime({
       });
     const messages = fromAgUiMessages(source, {
       showThinking: true,
-    }).map((m) =>
-      fromThreadMessageLike(
-        {
-          ...m,
-          ...(m.id?.startsWith('submitting:')
-            ? { metadata: { custom: { submissionStatus: optimisticStatus } } }
-            : {}),
-        },
-        m.id!,
-        { type: 'complete', reason: 'stop' },
-      ),
-    );
+    }).map((m) => fromThreadMessageLike(m, m.id!, { type: 'complete', reason: 'stop' }));
     return {
       messages: messages.map((message, i) => ({
         parentId: i ? messages[i - 1].id : null,
@@ -616,7 +605,7 @@ function Runtime({
       })),
       headId: messages.at(-1)?.id ?? null,
     };
-  }, [snapshot.entries, messageIds, optimistic, optimisticStatus]);
+  }, [snapshot.entries, messageIds, optimistic]);
   const callbacks = useRef({ done, reconnect, connected, queue, snapshot });
   callbacks.current = { done, reconnect, connected, queue, snapshot };
   const agent = useMemo(
@@ -916,23 +905,10 @@ export function Assistant() {
   );
 }
 function User() {
-  const { t } = useLocale();
-  const status = useAuiState((s) => s.message.metadata.custom.submissionStatus);
   return (
     <MessagePrimitive.Root className="mb-8 ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
       <MessageImages />
       <MessagePrimitive.Parts />
-      {typeof status === 'string' && (
-        <p
-          role="status"
-          className="mt-2 flex items-center justify-end gap-1 text-xs text-muted-foreground"
-        >
-          {status === 'pending' && (
-            <LoaderCircle className="size-3 motion-safe:animate-spin" aria-hidden="true" />
-          )}
-          {status === 'pending' ? t('提交中…') : status === 'error' ? t('提交未确认') : t('已提交')}
-        </p>
-      )}
     </MessagePrimitive.Root>
   );
 }

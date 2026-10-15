@@ -98,7 +98,11 @@ test('an image-only first message travels in one frozen command and remains visi
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect(page).toHaveURL(/chat=images/);
     await expect(page.getByRole('img', { name: 'pixel.png' })).toBeVisible();
-    await expect(page.getByRole('status')).toContainText('提交中…');
+    await expect(page.getByText('提交中…', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '提交中…', exact: true })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
     expect(command.text).toBe('');
     expect(command.images).toEqual([{ name: 'pixel.png', mimeType: 'image/png', data }]);
     acknowledge();

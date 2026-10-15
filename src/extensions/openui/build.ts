@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { catalogPrompt } from './catalog-prompt.ts';
 
 /** Derive server metadata from the browser's native library at build time.
  * Workers only receive JSON: React components and random library IDs never execute there. */
@@ -26,7 +27,8 @@ export function openuiBuild({ enabled = true, inspect = false } = {}): Plugin {
       if (!isRunnableDevEnvironment(environment))
         throw new Error('OpenUI catalog requires a Node build environment');
       const { library } = await environment.runner.import(catalog);
-      return `export const schema = ${JSON.stringify(library.toJSONSchema())};\nexport const spec = ${JSON.stringify(library.toSpec())};`;
+      const spec = library.toSpec();
+      return `export const schema = ${JSON.stringify(library.toJSONSchema())};\nexport const spec = ${JSON.stringify(spec)};\nexport const prompt = ${JSON.stringify(catalogPrompt(spec))};`;
     } finally {
       await loader.close();
     }
@@ -78,6 +80,8 @@ export function openuiBuild({ enabled = true, inspect = false } = {}): Plugin {
         return 'export const toolkit = {}; export function openuiContribution() { throw new Error("OpenUI is disabled in extensions.config.ts"); }';
       if (source !== resolved) return;
       this.addWatchFile(catalog);
+      this.addWatchFile(fileURLToPath(new URL('./catalog-prompt.ts', import.meta.url)));
+      this.addWatchFile(fileURLToPath(new URL('./contracts.ts', import.meta.url)));
       return (generated ??= generate());
     },
     hotUpdate(context) {

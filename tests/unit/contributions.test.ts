@@ -47,6 +47,26 @@ it('loads only reviewed browser IDs and isolates failed optional modules', async
   expect(result.modules).toHaveLength(1);
   expect(result.unavailable).toEqual(['missing', 'broken']);
 });
+it('downloads extensions concurrently but resolves conflicts in declared order', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const toolkit = { duplicate: { type: 'backend' as const, render: () => null } };
+  const first = vi.fn(async () => {
+    await held;
+    return { toolkit };
+  });
+  const second = vi.fn(async () => ({ toolkit }));
+  const loading = loadBrowserExtensions(['first', 'second', 'first'], { first, second });
+  try {
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).toHaveBeenCalledOnce();
+  } finally {
+    release();
+  }
+  const result = await loading;
+  expect(result.modules.map((module) => module.id)).toEqual(['first']);
+  expect(result.unavailable).toEqual(['second']);
+});
 it('rejects incomplete host handlers and conflicting browser tool registrations', async () => {
   expect(() => collectContributions([{ id: 'broken', resources: {} }] as any)).toThrow('invalid');
   expect(() => collectContributions([{ id: 'broken', actions: { choose: {} } }] as any)).toThrow(

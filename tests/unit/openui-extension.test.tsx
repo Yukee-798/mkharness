@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
-vi.mock('../../src/extensions/openui/compute/server', () => ({ computeProgram: vi.fn() }));
+const engineImported = vi.hoisted(() => vi.fn());
+vi.mock('../../src/extensions/openui/compute/server', () => {
+  engineImported();
+  return { computeProgram: vi.fn() };
+});
 import { openuiContribution } from '../../src/extensions/openui/server';
+import { validateUI } from '../../src/extensions/openui/tools';
 import { toolkit, activity } from '../../src/extensions/openui/browser';
 it('assembles the catalog and execution instructions in the same optional native extension', () => {
   const contribution = openuiContribution(async () => []);
@@ -17,4 +22,9 @@ it('registers generated content with native standalone display and hides interna
   expect(toolkit.present_openui.display).toBe('standalone');
   expect(toolkit.prepare_program.type).toBe('backend');
   expect(activity.prepare_program).toBe('hidden');
+});
+it('registers tools and validates static content without importing the computation engine', async () => {
+  openuiContribution(async () => []);
+  await validateUI('root = Stack([TextContent("Ready")])', false);
+  expect(engineImported).not.toHaveBeenCalled();
 });

@@ -9,7 +9,7 @@ beforeEach(() => {
   load.mockResolvedValue({
     library: {
       toJSONSchema: () => ({ components: 'schema' }),
-      toSpec: () => ({ components: 'spec' }),
+      toSpec: () => ({ components: { TextContent: { signature: 'TextContent(text: string)' } } }),
     },
   });
   vi.mocked(createServer).mockResolvedValue({
@@ -40,6 +40,7 @@ it('prepares before startup resolves, and every load reuses the same cached gene
   ]);
   expect(first).toEqual(second);
   expect(first).toContain('export const schema');
+  expect(first).toContain('export const prompt');
   expect(load).toHaveBeenCalledOnce();
 });
 it('does not evaluate disabled OpenUI during startup', async () => {

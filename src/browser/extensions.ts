@@ -17,13 +17,23 @@ export async function loadBrowserExtensions(ids: readonly string[], loaders: Bro
   const modules: (BrowserExtension & { id: string })[] = [],
     unavailable: string[] = [];
   const names = new Set<string>();
-  for (const id of new Set(ids)) {
-    if (!Object.hasOwn(loaders, id)) {
+  const unique = [...new Set(ids)];
+  // Fetch independently; validate in declaration order so conflict resolution
+  // never depends on which network request happens to finish first.
+  const loaded = await Promise.allSettled(
+    unique.map(async (id) => {
+      if (!Object.hasOwn(loaders, id)) throw new Error('Unknown browser extension');
+      return loaders[id]!();
+    }),
+  );
+  for (const [index, id] of unique.entries()) {
+    const result = loaded[index]!;
+    if (result.status === 'rejected') {
       unavailable.push(id);
       continue;
     }
     try {
-      const module = await loaders[id]!();
+      const module = result.value;
       const tools = Object.keys(module.toolkit ?? {});
       if (
         tools.some((name) => names.has(name)) ||

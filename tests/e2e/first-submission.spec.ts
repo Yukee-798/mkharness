@@ -31,12 +31,21 @@ const entries = (text: string) => [
   { id: 2, model: [{ role: 'assistant', content: [{ type: 'text', text: 'Finished answer' }] }] },
 ];
 
-test('creation navigates before the receipt or snapshot, retains the message across chats, then adopts Pi history once', async ({
+test('creation works while OpenUI is loading, retains the message across chats, then adopts Pi history once', async ({
   page,
 }) => {
   await workspace(page);
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
+  let openuiRequested = false;
+  await page.route(/\/assets\/browser-[^/]+\.js$/, async (route) => {
+    const response = await route.fetch();
+    if ((await response.text()).includes('present_openui')) {
+      openuiRequested = true;
+      await held;
+    }
+    await route.fulfill({ response });
+  });
   let accepted = false,
     submissions = 0,
     observations = 0,
@@ -68,11 +77,16 @@ test('creation navigates before the receipt or snapshot, retains the message acr
   });
   try {
     await page.goto('/');
+    await expect.poll(() => openuiRequested).toBe(true);
     await page.getByLabel('消息', { exact: true }).fill('First message');
     await page.getByRole('button', { name: '发送', exact: true }).click();
     await expect(page).toHaveURL(/chat=created/);
     await expect(page.getByText('First message', { exact: true })).toHaveCount(1);
-    await expect(page.getByRole('status')).toContainText('提交中…');
+    await expect(page.getByText('提交中…', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '提交中…', exact: true })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
     await expect(page.getByRole('button', { name: '提交中…', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: '停止并撤回排队' })).toHaveCount(0);
     await page
