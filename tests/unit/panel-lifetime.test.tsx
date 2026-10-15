@@ -5,7 +5,7 @@ import { Panel } from '../../src/extensions/openui/Panel';
 const pending = vi.hoisted(
   () => [] as { id: string; inputs: any; signal?: AbortSignal; resolve: (value: any) => void }[],
 );
-vi.mock('../../src/browser/compute', () => ({
+vi.mock('../../src/extensions/openui/compute/browser', () => ({
   computeProgram: vi.fn(
     (program, inputs, signal) =>
       new Promise((resolve) => pending.push({ id: program.data, inputs, signal, resolve })),

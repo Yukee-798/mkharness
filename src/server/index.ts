@@ -35,7 +35,7 @@ app.use('/api/*', async (c, next) => {
   c.set('userId', session.user.id);
   await next();
 });
-app.get('/api/capabilities', (c) => c.json({ extensionIds: extensionIds(c.env) }));
+app.get('/api/capabilities', (c) => c.json({ extensionIds: extensionIds() }));
 app.get('/api/settings/models', async (c) => {
   const credentials = new ModelCredentials(c.env, c.get('userId'));
   return c.json({

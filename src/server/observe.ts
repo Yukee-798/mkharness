@@ -3,8 +3,6 @@ import { EventType, type BaseEvent, type ToolCallStartEvent } from '@ag-ui/core'
 import { StreamFold, DraftProjection, toMessages, toolResultEvent } from '../shared/stream';
 import type { ConversationAgent } from './conversation';
 import { BG } from './conversation';
-import { RemoteIntents, type RemoteIntent } from './remote-example';
-import { remoteProgress } from '../shared/remote-progress';
 import { compactionIssues } from '../shared/runtime-issues';
 import { restoreToolProgress } from './tool-progress';
 export async function observeRun(
@@ -24,15 +22,14 @@ export async function observeRun(
     throw error;
   });
   const entries = new Map<number, EntryRecord>();
-  let committedRemote: Record<string, RemoteIntent> | undefined;
   let compactionFailure = watch.snapshot.compactionFailure;
   let runtimeChanged = false;
-  let remoteRevision = 0;
+  let extensionStateRevision = 0;
   let sendState: (() => void) | undefined;
   let stateScheduled = false;
-  let remoteChanged = false;
   const unsubscribe = pi.subscribeCommits((publication) => {
     const projectionChanged = extensionProjection.accept(publication.changes);
+    if (projectionChanged) extensionStateRevision = Number(publication.seq);
     for (const change of publication.changes) {
       if (
         change.type === 'document' &&
@@ -46,25 +43,15 @@ export async function observeRun(
           runtimeChanged = true;
         }
       }
-      if (
-        change.type === 'document' &&
-        change.conversationId === root.id &&
-        change.record.kind === 'app.remote-intents'
-      ) {
-        committedRemote =
-          (change.value as { operations: Record<string, RemoteIntent> } | null)?.operations ?? {};
-        remoteRevision = Number(publication.seq);
-        remoteChanged = true;
-      }
     }
     // Keep commit listeners short. Coalesce changes and serialize optional public
     // projections outside Pi's synchronous adoption callback, using the same SSE.
-    if ((projectionChanged || remoteChanged || runtimeChanged) && !stateScheduled) {
+    if ((projectionChanged || runtimeChanged) && !stateScheduled) {
       stateScheduled = true;
       queueMicrotask(() => {
         stateScheduled = false;
         if (!sendState) return;
-        if (remoteChanged || runtimeChanged || extensionProjection.hasChanges()) sendState?.();
+        if (runtimeChanged || extensionProjection.hasChanges()) sendState?.();
       });
     }
   });
@@ -97,14 +84,6 @@ export async function observeRun(
     await watch.stop();
     throw error;
   }
-  const initialRemote =
-    (
-      await pi.snapshot(RemoteIntents, root.id, BG).catch(async (error) => {
-        unsubscribe();
-        await watch.stop();
-        throw error;
-      })
-    )?.operations ?? {};
   let queue = await owner.queuedInputs().catch(async (error) => {
     unsubscribe();
     await watch.stop();
@@ -160,7 +139,6 @@ export async function observeRun(
         } as BaseEvent);
       };
       const state = () => {
-        remoteChanged = false;
         runtimeChanged = false;
         emit({
           type: EventType.STATE_SNAPSHOT,
@@ -178,8 +156,7 @@ export async function observeRun(
                 return [alias ? alias + id.slice(boundary) : id, value];
               }),
             ),
-            remoteRevision,
-            remote: remoteProgress(committedRemote ?? initialRemote),
+            extensionStateRevision,
             extensionState: extensionProjection.project(),
           },
         } as BaseEvent);

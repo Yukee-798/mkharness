@@ -1,3 +1,6 @@
+import { extensionEnabled, type ExtensionConfiguration } from '../../src/extensions/configuration';
+import { asyncExampleContribution } from '../../src/extensions/async-example/server';
+import type { RemoteConfig } from '../../src/extensions/async-example/runtime';
 import { ConversationAgent as Base } from '../../src/server/conversation';
 import { exampleExtension } from '../../src/server/extensions';
 import { staticSkills, exampleSkillSource } from '../../src/server/skills';
@@ -36,7 +39,7 @@ export class ConversationAgent extends Base {
       resolve: async () => ({ apiKey: 'fixture' }),
     };
   }
-  protected override remoteConfiguration() {
+  private asyncConfiguration(): RemoteConfig | undefined {
     const sql = this.ctx.storage.sql;
     if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_remote'").toArray().length)
       return {
@@ -49,7 +52,7 @@ export class ConversationAgent extends Base {
         waitMs: Number(sql.exec('SELECT * FROM test_remote').toArray()[0].wait_ms ?? 5000),
         pollMs: [100, 200, 500],
       };
-    return super.remoteConfiguration();
+    return undefined;
   }
   protected override mcpConfiguration() {
     const sql = this.ctx.storage.sql;
@@ -75,9 +78,20 @@ export class ConversationAgent extends Base {
   protected override models() {
     return fixtureModels();
   }
+  protected override extensionConfiguration(): ExtensionConfiguration {
+    const config = { ...super.extensionConfiguration() };
+    const sql = this.ctx.storage.sql;
+    if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_extensions'").toArray().length)
+      for (const row of sql.exec('SELECT id,enabled FROM test_extensions').toArray())
+        config[String(row.id)] = { ...config[String(row.id)], enabled: row.enabled === 1 };
+    return config;
+  }
   protected override async contributions() {
     return [
-      ...(await super.contributions()),
+      ...(await super.contributions()).filter((item) => item.id !== 'async-example'),
+      ...(extensionEnabled('async-example', this.extensionConfiguration())
+        ? [asyncExampleContribution(this.asyncConfiguration(), this.contributionHost())]
+        : []),
       {
         id: 'progress-fixture',
         extension: {
@@ -126,34 +140,37 @@ export class ConversationAgent extends Base {
             },
           },
         ],
-        wraps: [
-          {
-            tool: 'present_openui',
-            wrap: (tool: ToolRegistration) => ({
-              ...tool,
-              execute: async (
-                args: any,
-                api: ToolExecutionApi,
-                context: Parameters<ToolRegistration['execute']>[2],
-              ) => {
-                const result = await tool.execute(args, api, context);
-                const sql = this.ctx.storage.sql;
-                const armed =
-                  sql.exec("SELECT name FROM sqlite_master WHERE name='test_fault'").toArray()
-                    .length &&
-                  sql.exec("SELECT value FROM test_fault WHERE key='armed'").toArray()[0]?.value;
-                if (armed) {
-                  sql.exec(
-                    "INSERT INTO test_fault VALUES('reached',1) ON CONFLICT(key) DO NOTHING",
-                  );
-                  await new Promise((r) => setTimeout(r, 500));
-                  sql.exec("UPDATE test_fault SET value=0 WHERE key='armed'");
-                }
-                return result;
+        wraps: extensionEnabled('openui', this.extensionConfiguration())
+          ? [
+              {
+                tool: 'present_openui',
+                wrap: (tool: ToolRegistration) => ({
+                  ...tool,
+                  execute: async (
+                    args: any,
+                    api: ToolExecutionApi,
+                    context: Parameters<ToolRegistration['execute']>[2],
+                  ) => {
+                    const result = await tool.execute(args, api, context);
+                    const sql = this.ctx.storage.sql;
+                    const armed =
+                      sql.exec("SELECT name FROM sqlite_master WHERE name='test_fault'").toArray()
+                        .length &&
+                      sql.exec("SELECT value FROM test_fault WHERE key='armed'").toArray()[0]
+                        ?.value;
+                    if (armed) {
+                      sql.exec(
+                        "INSERT INTO test_fault VALUES('reached',1) ON CONFLICT(key) DO NOTHING",
+                      );
+                      await new Promise((r) => setTimeout(r, 500));
+                      sql.exec("UPDATE test_fault SET value=0 WHERE key='armed'");
+                    }
+                    return result;
+                  },
+                }),
               },
-            }),
-          },
-        ],
+            ]
+          : [],
         tools: [
           defineTool({
             name: 'ignores_cancel',

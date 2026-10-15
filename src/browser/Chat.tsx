@@ -1,3 +1,4 @@
+import { ComposerFooterExtensions } from './extension-ui';
 import {
   ImageComposer,
   AddImage,
@@ -42,7 +43,6 @@ import {
   type ModelCatalog,
   type ModelSelection,
 } from '../shared/model-selection';
-import type { RemoteProgress } from '../shared/remote-progress';
 import { TooltipIconButton } from './tooltip-icon-button';
 import { ToolActivity } from './tool-activity';
 import { useExtensionConfig } from './extension-config';
@@ -73,7 +73,6 @@ export type Snapshot = {
   queue?: QueuedInput[];
   modelCatalog?: ModelCatalog;
   selection?: ModelSelection;
-  remote?: RemoteProgress[];
   runtimeIssues?: RuntimeIssue[];
 };
 const emptySnapshot: Snapshot = { entries: [], pending: [], stopping: false };
@@ -132,8 +131,6 @@ export function Chat({
   const retries = useRef(0);
   const draftVersion = useRef(0);
   const [selection, setSelection] = useState<ModelSelection>();
-  const [remote, setRemote] = useState<RemoteProgress[]>([]);
-  const [remoteSending, setRemoteSending] = useState(false);
   const [stopSending, setStopSending] = useState(false);
   const catalog = settings.data?.modelCatalog ?? snapshot?.modelCatalog;
   const selected = catalog
@@ -172,7 +169,6 @@ export function Chat({
     )
       return;
     setSnapshot(query.data);
-    setRemote(query.data.remote ?? []);
   }, [id, revision, query.data, query.isSuccess, snapshot]);
   useEffect(() => {
     if (!id || revision === 0) return;
@@ -187,7 +183,6 @@ export function Chat({
         epoch === queueEpoch.current ? s : { ...s, queue: current?.queue ?? s.queue },
       );
       setRestoration(revision);
-      setRemote(s.remote ?? []);
       setAckPending(false);
       if (!s.pending.length)
         setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : previous));
@@ -272,23 +267,6 @@ export function Chat({
   const connected = () => {
     setConnection((previous) => (previous === 'reconnecting' ? 'recovered' : undefined));
   };
-  const remoteAction = async (action: 'retry_remote' | 'recheck_remote', taskId: number) => {
-    if (remoteSending) return;
-    setRemoteSending(true);
-    try {
-      await submit(
-        action === 'retry_remote' ? t('重新执行原任务（可能重复执行）') : t('复查原任务'),
-        {
-          action,
-          taskId,
-        },
-      );
-    } catch (e) {
-      setError(e as Error);
-    } finally {
-      setRemoteSending(false);
-    }
-  };
   useEffect(() => {
     if (!snapshot?.stopping) return;
     const timer = setTimeout(() => setRevision((r) => r + 1), 1000);
@@ -304,62 +282,6 @@ export function Chat({
   const composerVersion = draftVersion.current;
   const footer = (
     <div className="space-y-3">
-      {remote
-        .filter((o) =>
-          [
-            'prepared',
-            'submitting',
-            'waiting',
-            'unknown',
-            'timeout',
-            'cancel_unknown',
-            'cancel_failed',
-            'cancel_unsupported',
-          ].includes(o.status),
-        )
-        .map((operation) => {
-          const blocked = !['prepared', 'submitting', 'waiting'].includes(operation.status);
-          const labels: Record<string, string> = {
-            prepared: t('正在准备执行…'),
-            submitting: t('正在提交请求…'),
-            waiting: t('正在等待结果…'),
-            unknown: t('结果暂时无法确认'),
-            timeout: t('等待已到期，远端可能仍在运行'),
-            cancel_unknown: t('已停止本地任务，远端状态尚未确认'),
-            cancel_failed: t('已停止本地任务，远端取消未成功'),
-            cancel_unsupported: t('已停止本地任务，远端不支持取消'),
-          };
-          return (
-            <div
-              key={operation.taskId}
-              role="status"
-              data-slot="remote-progress"
-              className="rounded-lg border px-3 py-2 text-xs text-muted-foreground"
-            >
-              <p>{labels[operation.status]}</p>
-              {blocked && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={remoteSending || !!snapshot?.pending.length || snapshot?.stopping}
-                    onClick={() => void remoteAction('recheck_remote', operation.taskId)}
-                  >
-                    {t('复查原任务')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={remoteSending || !!snapshot?.pending.length || snapshot?.stopping}
-                    onClick={() => void remoteAction('retry_remote', operation.taskId)}
-                  >
-                    {t('重新执行（可能重复执行）')}
-                  </Button>
-                </div>
-              )}
-            </div>
-          );
-        })}
       <TaskQueue
         items={snapshot?.queue ?? []}
         disabled={submitting || isStopping}
@@ -594,7 +516,6 @@ export function Chat({
             done={refresh}
             reconnect={reconnect}
             connected={connected}
-            progress={setRemote}
             queue={(value) => {
               queueEpoch.current++;
               setSnapshot((s) => (s ? { ...s, queue: value } : s));
@@ -633,7 +554,6 @@ function Runtime({
   done,
   reconnect,
   connected,
-  progress,
   queue,
   footer,
 }: {
@@ -647,7 +567,6 @@ function Runtime({
   done: () => void;
   reconnect: (replacement?: boolean) => void;
   connected: () => void;
-  progress: (value: RemoteProgress[]) => void;
   queue: (value: QueuedInput[]) => void;
   footer: ReactNode;
 }) {
@@ -698,8 +617,8 @@ function Runtime({
       headId: messages.at(-1)?.id ?? null,
     };
   }, [snapshot.entries, messageIds, optimistic, optimisticStatus]);
-  const callbacks = useRef({ done, reconnect, connected, progress, queue, snapshot });
-  callbacks.current = { done, reconnect, connected, progress, queue, snapshot };
+  const callbacks = useRef({ done, reconnect, connected, queue, snapshot });
+  callbacks.current = { done, reconnect, connected, queue, snapshot };
   const agent = useMemo(
     () =>
       new AttachAgent(
@@ -707,11 +626,6 @@ function Runtime({
         () => callbacks.current.done(),
         () => callbacks.current.reconnect(),
         () => callbacks.current.connected(),
-        (runId, value) => {
-          const pending = callbacks.current.snapshot.pending;
-          const active = pending.find((p) => p.status === 'running') ?? pending[0];
-          if (active?.operationId === runId) callbacks.current.progress(value);
-        },
         messageIds,
         (runId, value) => {
           const pending = callbacks.current.snapshot.pending;
@@ -841,6 +755,7 @@ function Runtime({
                     </AlertDescription>
                   </Alert>
                 )}
+                <ComposerFooterExtensions />
                 {footer}
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Viewport>

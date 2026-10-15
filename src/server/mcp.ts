@@ -8,10 +8,10 @@ import {
   type TaskId,
 } from '@earendil-works/pi-durable';
 import { Type } from '@earendil-works/pi-ai';
-import { AppError, type RunCommand } from '../shared/contracts';
-import { canonicalJson, finiteJson, jsonText, type Json } from '../shared/compute';
+import { AppError, type StoredCommand } from '../shared/contracts';
+import { canonicalJson, finiteJson, jsonText, type Json } from '../shared/json';
 import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
-import { RemoteIntents, mcpIntentUnresolved } from './remote-intents';
+import { McpIntents, mcpIntentUnresolved } from './mcp-intents';
 
 export type MCPConfig = {
   serverId: string;
@@ -340,7 +340,7 @@ export async function buildMcp(
   configs: MCPConfig[],
   env: Record<string, unknown>,
   pinned?: readonly MCPBinding[],
-  command?: () => Promise<RunCommand>,
+  command?: () => Promise<StoredCommand>,
 ) {
   const bindings: MCPBinding[] = [...(pinned ?? [])];
   const availability = new Map<string, string>();
@@ -438,7 +438,7 @@ export async function buildMcp(
         beforeTool: async (call, api, context) => {
           const binding = bindings.find((binding) => binding.name === call.name);
           if (!binding || binding.replay === 'safe') return;
-          const doc = await api.snapshot(RemoteIntents, api.conversationId, context);
+          const doc = await api.snapshot(McpIntents, api.conversationId, context);
           for (const intent of Object.values(doc?.mcp ?? {}))
             if (
               (intent.serverId === binding.serverId || intent.endpoint === binding.endpoint) &&
@@ -465,7 +465,7 @@ export async function buildMcp(
           try {
             if (binding.replay === 'unsafe') {
               const intents =
-                (await api.snapshot(RemoteIntents, api.conversationId, context))?.mcp ?? {};
+                (await api.snapshot(McpIntents, api.conversationId, context))?.mcp ?? {};
               for (const intent of Object.values(intents))
                 if (
                   (intent.serverId === binding.serverId || intent.endpoint === binding.endpoint) &&
@@ -508,7 +508,7 @@ export async function buildMcp(
               if (!command) return failure('mcp_host_context_missing');
               const runId = (await command()).runId;
               await api.commit(async (tx) => {
-                const doc = await tx.doc(RemoteIntents, api.conversationId);
+                const doc = await tx.doc(McpIntents, api.conversationId);
                 doc.mcp ??= {};
                 // Read the tracked document view after assignment. The assignment's
                 // raw object is not the Pi draft proxy and later mutations won't commit.
@@ -536,7 +536,7 @@ export async function buildMcp(
             const converted = convertResult(result);
             if (binding.replay === 'unsafe')
               await api.commit(async (tx) => {
-                (await tx.doc(RemoteIntents, api.conversationId)).mcp![api.taskId]!.status =
+                (await tx.doc(McpIntents, api.conversationId)).mcp![api.taskId]!.status =
                   'responded';
               }, context);
             return converted;
@@ -547,7 +547,7 @@ export async function buildMcp(
               // Context cannot bypass that boundary or prove the remote canceled.
               signal.throwIfAborted();
               await api.commit(async (tx) => {
-                const intent = (await tx.doc(RemoteIntents, api.conversationId)).mcp?.[api.taskId];
+                const intent = (await tx.doc(McpIntents, api.conversationId)).mcp?.[api.taskId];
                 if (intent) intent.status = 'unknown';
               }, context);
               return failure('remote_outcome_unknown');

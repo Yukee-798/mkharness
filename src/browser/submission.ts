@@ -1,5 +1,5 @@
 import type { RunCommand } from '../shared/contracts';
-import { jsonEqual } from '../shared/compute';
+import { jsonEqual } from '../shared/json';
 /** Retain an unacknowledged command so explicit retry uses the same Pi operation id. */
 export function createSubmitter(
   post: (command: RunCommand) => Promise<unknown>,

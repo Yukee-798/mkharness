@@ -2,7 +2,7 @@ import { skills } from 'agents/harness/pi';
 import { type SkillSource, type SkillContent, type SkillResource } from 'agents/skills';
 import type { Extension, ToolRegistration } from '@earendil-works/pi-durable';
 import { AppError } from '../shared/contracts';
-import { jsonText } from '../shared/compute';
+import { jsonText } from '../shared/json';
 import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
 
 const pathAllowed = (path: string) =>

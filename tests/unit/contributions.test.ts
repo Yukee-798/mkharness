@@ -1,3 +1,5 @@
+import { extensionConfiguration } from '../../src/extensions/configuration';
+import * as activation from '../../src/extensions/server';
 import { afterEach, expect, it, vi } from 'vitest';
 import { collectContributions } from '../../src/server/contributions';
 import { loadBrowserExtensions } from '../../src/browser/extensions';
@@ -8,7 +10,10 @@ afterEach(() => vi.restoreAllMocks());
 it('rejects a factory identity that disagrees with the static activation namespace', async () => {
   vi.spyOn(definitions[0]!, 'create').mockResolvedValue({ id: 'different-id' });
   await expect(
-    applicationContributions({ ENABLE_GENERATIVE_UI: '0' } as unknown as Env, async () => []),
+    applicationContributions({} as Env, async () => [], undefined, {
+      ...extensionConfiguration,
+      openui: { enabled: false },
+    }),
   ).rejects.toMatchObject({ code: 'extension_identity_mismatch' });
 });
 it('validates advertised static IDs without executing any factory', () => {
@@ -16,7 +21,7 @@ it('validates advertised static IDs without executing any factory', () => {
   const original = definitions[1]!.id;
   try {
     definitions[1]!.id = definitions[0]!.id;
-    expect(() => extensionIds({} as Env)).toThrow('duplicate');
+    expect(() => extensionIds()).toThrow('duplicate');
     expect(factory).not.toHaveBeenCalled();
   } finally {
     definitions[1]!.id = original;
@@ -53,4 +58,60 @@ it('rejects incomplete host handlers and conflicting browser tool registrations'
   });
   expect(result.unavailable).toEqual(['second']);
   expect(result.modules).toHaveLength(1);
+});
+
+it('removing the async definition removes tools, actions, guards and document projections together', async () => {
+  const env = {
+    ASYNC_SERVICE_URL: 'https://async.example.test',
+  } as unknown as Env;
+  const host = { identity: 'chat', pi: vi.fn(), command: vi.fn() };
+  const config = { ...extensionConfiguration, openui: { enabled: false } };
+  const installed = await applicationContributions(env, async () => [], host, config);
+  const example = installed.find((item) => item.id === 'async-example')!;
+  expect(example.extension?.tools?.map((tool) => tool.name)).toEqual([
+    'example_generate',
+    'example_recheck',
+  ]);
+  expect(example.extension?.tasks?.[0]?.definition.name).toBe('app.remote-example');
+  expect(Object.keys(example.actions!)).toEqual(['retry', 'recheck']);
+  expect(Object.keys(example.execution!)).toEqual([
+    'beforeModel',
+    'beforeSubmit',
+    'taskUnavailable',
+  ]);
+  expect(example.stateDocuments?.[0]?.definition.kind).toBe('app.remote-intents');
+  const remaining = activation
+    .enabledDefinitions(config)
+    .filter((item) => item.id !== 'async-example');
+  vi.spyOn(activation, 'enabledDefinitions').mockReturnValue(remaining);
+  const removed = await applicationContributions(env, async () => [], host, config);
+  expect(removed.map((item) => item.id)).not.toContain('async-example');
+  expect(
+    removed.flatMap((item) => item.extension?.tools ?? []).map((tool) => tool.name),
+  ).not.toContain('example_generate');
+  expect(host.pi).not.toHaveBeenCalled();
+});
+
+it('one configuration controls every registered contribution without running disabled factories', async () => {
+  const config = Object.fromEntries(
+    Object.keys(extensionConfiguration).map((id) => [
+      id,
+      { enabled: id === 'reply' || id === 'example' },
+    ]),
+  );
+  const factories = definitions
+    .filter((definition) => !config[definition.id]?.enabled)
+    .map((definition) => vi.spyOn(definition, 'create'));
+  expect(extensionIds(config)).toEqual(['reply', 'example']);
+  const contributions = await applicationContributions(
+    {} as Env,
+    async () => [],
+    undefined,
+    config,
+  );
+  expect(contributions.map((item) => item.id)).toEqual(['reply', 'example']);
+  for (const factory of factories) expect(factory).not.toHaveBeenCalled();
+  expect(() => extensionIds({ ...config, typo: { enabled: true } })).toThrow(
+    'unknown_extension_configuration',
+  );
 });

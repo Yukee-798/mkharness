@@ -3,9 +3,13 @@ import type {
   Extension,
   TaskRecord,
   SubmissionRecord,
+  Harness,
+  ConversationDocToken,
+  JsonObject,
+  TaskId,
 } from '@earendil-works/pi-durable';
-import type { Json as JsonValue } from '../shared/compute';
-import { AppError, type RunCommand } from '../shared/contracts';
+import type { Json as JsonValue } from '../shared/json';
+import { AppError, type StoredCommand } from '../shared/contracts';
 import { validateExtensions } from './extensions';
 import type { successfulTool } from '../shared/references';
 
@@ -16,7 +20,7 @@ export type ReadContext = {
   acceptedInput: (entryId: number) => Promise<
     | {
         text: string;
-        source?: RunCommand['source'];
+        source?: StoredCommand['source'];
         context?: JsonValue;
       }
     | undefined
@@ -27,10 +31,33 @@ export type ProjectionContext = {
   entries: readonly EntryRecord[];
   tasks: readonly TaskRecord<JsonValue, JsonValue, JsonValue>[];
   submissions: readonly SubmissionRecord[];
+  documents?: ReadonlyMap<string, Readonly<JsonObject> | null>;
+};
+/** Trusted execution hooks use Pi itself; they must not introduce another queue or task store. */
+export type ExecutionContext = {
+  pi: Harness;
+  context: Parameters<Harness['inspect']>[0];
+  command?: StoredCommand;
+  entries: readonly EntryRecord[];
+};
+export type ContributionHost = {
+  identity: string;
+  pi: () => Promise<Harness>;
+  command: () => Promise<StoredCommand | undefined>;
 };
 export type ServerContribution = {
   id: string;
   extension?: Extension;
+  execution?: {
+    /** Runs at the model boundary. A rejection fails closed before a provider call. */
+    beforeModel?: (context: ExecutionContext) => Promise<void>;
+    /** Runs only for a new admission while Pi has no pending inputs. */
+    beforeSubmit?: (context: ExecutionContext) => Promise<void>;
+    /** Called after the host aborts an incompatible native task during recovery. */
+    taskUnavailable?: (context: ExecutionContext & { taskId: TaskId }) => Promise<void>;
+  };
+  /** Only these native conversation documents enter the private projection fold. */
+  stateDocuments?: readonly ConversationDocToken<JsonObject>[];
   resources?: {
     read(ref: string, context: ReadContext): Promise<{ data: JsonValue; initialState: JsonValue }>;
     validateState?(state: unknown): JsonValue;
@@ -67,6 +94,9 @@ export function collectContributions(contributions: readonly ServerContribution[
       (contribution.projectTool !== undefined && typeof contribution.projectTool !== 'function') ||
       (contribution.projectState !== undefined &&
         typeof contribution.projectState !== 'function') ||
+      Object.values(contribution.execution ?? {}).some(
+        (handler) => typeof handler !== 'function',
+      ) ||
       Object.entries(contribution.actions ?? {}).some(
         ([name, action]) =>
           !/^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(name) || typeof action?.normalize !== 'function',

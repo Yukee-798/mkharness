@@ -1,8 +1,9 @@
+import { extensionConfiguration } from '../../src/extensions/configuration';
 import { defineTask } from '@earendil-works/pi-durable';
 import { validateExtensions } from '../../src/server/extensions';
 import { BG } from '../../src/server/conversation';
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 it('an async native extension runs through Pi history after UI repair exhaustion', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
@@ -60,10 +61,10 @@ it('missing native task definitions settle with an explicit recovery diagnostic'
 
 it('optional UI can be disabled without removing local tools or base rules', async () => {
   const { applicationExtensions } = await import('../../src/server/assembly');
-  const extensions = await applicationExtensions(
-    { ENABLE_GENERATIVE_UI: '0' } as any,
-    async () => [],
-  );
+  const extensions = await applicationExtensions({} as Env, async () => [], undefined, {
+    ...extensionConfiguration,
+    openui: { enabled: false },
+  });
   validateExtensions(extensions);
   expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).toContain('read_web');
   expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).not.toContain(
@@ -75,4 +76,33 @@ it('optional UI can be disabled without removing local tools or base rules', asy
   expect(extensions.flatMap((e) => e.sections ?? []).map((s) => s.key)).not.toContain(
     'execution-contract',
   );
+});
+
+it('the central configuration disables OpenUI and MCP without opening a configured remote connection', async () => {
+  const network = vi.spyOn(globalThis, 'fetch');
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  try {
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec('CREATE TABLE test_extensions (id TEXT PRIMARY KEY, enabled INTEGER)');
+      state.storage.sql.exec("INSERT INTO test_extensions VALUES('openui',0),('mcp',0)");
+      state.storage.sql.exec('CREATE TABLE test_mcp (key TEXT)');
+      state.storage.sql.exec("INSERT INTO test_mcp VALUES('unsafe-probe')");
+      await instance.root();
+      const installed = await (instance as any).extensions();
+      const tools = installed
+        .flatMap((item: any) => item.tools ?? [])
+        .map((tool: any) => tool.name);
+      expect(tools).toContain('read_web');
+      expect(tools).not.toContain('present_openui');
+      expect(tools.some((name: string) => name.startsWith('mcp_'))).toBe(false);
+    });
+    expect(
+      network.mock.calls.some(([input]) =>
+        String(input instanceof Request ? input.url : input).includes('mcp.example.test'),
+      ),
+    ).toBe(false);
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
 });

@@ -124,8 +124,8 @@ it('repeated regeneration inherits the first frozen input without nesting or new
   ).toEqual({ action: 'regenerate', originalRequest: original });
 });
 it('the sample remains available to opt in, but is absent from default capabilities', async () => {
-  expect(extensionIds({} as Env)).not.toContain('example');
-  expect(extensionIds({} as Env)).toContain('reply');
+  expect(extensionIds()).not.toContain('example');
+  expect(extensionIds()).toContain('reply');
   expect(
     (
       await exampleDefinition.create({ env: {} as Env, entries: async () => [] })

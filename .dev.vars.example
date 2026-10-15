@@ -21,9 +21,8 @@ MODEL_THINKING_LEVEL=low
 # read_web remains available without an API key.
 TAVILY_API_KEY=
 
-# Developer-installed native capabilities
-ENABLE_GENERATIVE_UI=1
-ENABLE_EXAMPLE_SKILL=0
+# Enable/disable reviewed extensions in extensions.config.ts.
+# These bindings configure limits, connections and secrets only.
 TOOL_CALL_LIMIT=40
 # JSON configuration, credentials referenced by env variable name only.
 MCP_SERVERS=[]

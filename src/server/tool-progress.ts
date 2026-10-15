@@ -6,7 +6,7 @@ import {
   type Cursor,
   type TaskRecord,
 } from '@earendil-works/pi-durable';
-import type { Json } from '../shared/compute';
+import type { Json } from '../shared/json';
 import { BG } from './conversation';
 import { AppError } from '../shared/contracts';
 import { ToolProgressFold } from '../shared/tool-progress';

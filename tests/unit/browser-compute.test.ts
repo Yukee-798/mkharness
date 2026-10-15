@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { computeProgram } from '../../src/browser/compute';
+import { computeProgram } from '../../src/extensions/openui/compute/browser';
 
 class CalculationWorker {
   static instances: CalculationWorker[] = [];

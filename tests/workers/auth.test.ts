@@ -34,7 +34,9 @@ it('capabilities are authenticated configuration reads that never acquire a DO',
     { ...env, CONVERSATIONS: unavailableDO } as any,
   );
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ extensionIds: ['timing', 'web', 'openui', 'reply'] });
+  expect(await response.json()).toEqual({
+    extensionIds: ['timing', 'web', 'openui', 'reply', 'async-example'],
+  });
 });
 it('isolates listing and every resource operation using real Better Auth sessions', async () => {
   const a = await cookie('token-a'),

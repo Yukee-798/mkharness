@@ -1,3 +1,8 @@
+import {
+  extensionConfiguration,
+  extensionEnabled,
+  type ExtensionConfiguration,
+} from '../extensions/configuration';
 import { userContent, imageModelError } from '../shared/images';
 import { Agent } from 'agents';
 import { LifecycleCapability } from 'agents/lifecycle';
@@ -23,7 +28,7 @@ import {
   storedRequestSchema,
   type StoredRequest,
 } from '../shared/contracts';
-import { jsonText, canonicalJson } from '../shared/compute';
+import { jsonText, canonicalJson } from '../shared/json';
 import { applicationContributions } from './assembly';
 import type { ServerContribution, ReadContext } from './contributions';
 import { readSuccessfulTool } from './history';
@@ -34,15 +39,6 @@ import {
   mcpConfiguration,
   type MCPConfig,
 } from './mcp';
-import {
-  RemoteIntents,
-  remoteBlocked,
-  remoteModelAllowed,
-  remoteRunBlocked,
-  remoteExample,
-  remoteConfiguration,
-  type RemoteConfig,
-} from './remote-example';
 import { validateExtensions } from './extensions';
 import { withRunLimits, runLimits, toolBudget } from './limits';
 import { observeRun } from './observe';
@@ -63,8 +59,7 @@ import {
   type CredentialAccess,
 } from './execution-models';
 import type { ModelSelection } from '../shared/model-selection';
-import { remoteProgress } from '../shared/remote-progress';
-import { mcpIntentUnresolved } from './remote-intents';
+import { McpIntents, mcpIntentUnresolved } from './mcp-intents';
 import { claimPiStorage, RuntimeStorageError } from './pi-storage';
 import { compactionIssues } from '../shared/runtime-issues';
 import { withdrawIdleInputs } from './queue-recovery';
@@ -122,7 +117,7 @@ export class ConversationAgent extends Agent<Env> {
     super(ctx, env);
     configureMcpStartup(
       this.mcp,
-      () => this.mcpConfiguration(),
+      () => (extensionEnabled('mcp', this.extensionConfiguration()) ? this.mcpConfiguration() : []),
       env as unknown as Record<string, unknown>,
     );
     ctx.storage.sql.exec(
@@ -155,8 +150,10 @@ export class ConversationAgent extends Agent<Env> {
         // close it or retain document caches/timers after initialization.
         const bootstrap = createSession(storage, { documentRetentionMs: 0 });
         const saved = await bootstrap.snapshot(MCPBindings, ROOT_CONVERSATION_ID, context);
-        const configs = this.mcpConfiguration();
-        if (configs.length || saved?.bindings.length)
+        const mcpEnabled = extensionEnabled('mcp', this.extensionConfiguration());
+        const configs = mcpEnabled ? this.mcpConfiguration() : [];
+        this.mcpPrepared = undefined;
+        if (mcpEnabled && (configs.length || saved?.bindings.length))
           this.mcpPrepared = await buildMcp(
             this.mcp,
             configs,
@@ -250,14 +247,13 @@ export class ConversationAgent extends Agent<Env> {
         for (const task of (await pi.inspect(context)).tasks)
           if (task.state.kind === 'blocked') {
             await pi.abortTask(task.record.id, context);
-            if (await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, context))
-              await pi.commit(async (tx) => {
-                for (const operation of Object.values(
-                  (await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID)).operations,
-                ))
-                  if (operation.childTaskId === Number(task.record.id))
-                    operation.status = 'unknown';
-              }, context);
+            for (const contribution of await this.contributions())
+              await contribution.execution?.taskUnavailable?.({
+                pi,
+                context,
+                taskId: task.record.id,
+                entries: [],
+              });
           }
         return pi;
       },
@@ -309,9 +305,14 @@ export class ConversationAgent extends Agent<Env> {
   private async assertModelAllowed(entries: readonly EntryRecord[]) {
     const stored = await this.runningRequest();
     const pi = await this.harness.pi();
-    const doc = await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
-    if (!remoteModelAllowed(doc?.operations ?? {}, stored?.request) || remoteRunBlocked(entries))
-      throw new AppError(409, 'remote_outcome_unknown');
+    for (const contribution of await this.contributions())
+      await contribution.execution?.beforeModel?.({
+        pi,
+        context: BG,
+        command: stored?.request,
+        entries,
+      });
+    const doc = await pi.snapshot(McpIntents, ROOT_CONVERSATION_ID, BG);
     const current = entries.slice(entries.findLastIndex((entry) => entry.kind === 'pi.user'));
     const attempted = current
       .flatMap((entry) => entry.model ?? [])
@@ -337,14 +338,25 @@ export class ConversationAgent extends Agent<Env> {
   protected mcpConfiguration(): MCPConfig[] {
     return mcpConfiguration(this.env as unknown as Record<string, unknown>);
   }
-  protected remoteConfiguration(): RemoteConfig | undefined {
-    return remoteConfiguration(this.env as unknown as Record<string, unknown>);
+  protected extensionConfiguration(): ExtensionConfiguration {
+    return extensionConfiguration;
+  }
+  protected contributionHost() {
+    return {
+      identity: this.ctx.id.toString(),
+      pi: () => this.harness.pi(),
+      command: async () => (await this.runningRequest())?.request,
+    };
   }
   protected contributions(): Promise<readonly ServerContribution[]> {
-    return (this.contributionSet ??= applicationContributions(this.env, () => this.allEntries()));
+    return (this.contributionSet ??= applicationContributions(
+      this.env,
+      () => this.allEntries(),
+      this.contributionHost(),
+      this.extensionConfiguration(),
+    ));
   }
   protected async extensions(): Promise<Extension[]> {
-    const remote = this.remoteConfiguration();
     return [
       runLimits(
         () => this.allEntries(),
@@ -354,18 +366,6 @@ export class ConversationAgent extends Agent<Env> {
         contribution.extension ? [contribution.extension] : [],
       ),
       ...(this.mcpPrepared ? [this.mcpPrepared.extension] : []),
-      ...(remote
-        ? [
-            remoteExample(remote, {
-              identity: this.ctx.id.toString(),
-              command: async () => {
-                const command = await this.runningRequest();
-                if (!command) throw new AppError(409, 'run_context_missing');
-                return command.request;
-              },
-            }),
-          ]
-        : []),
     ];
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -570,22 +570,6 @@ export class ConversationAgent extends Agent<Env> {
             } catch {
               throw new AppError(400, 'invalid_action_context');
             }
-          } else {
-            const doc = await (
-              await this.harness.pi()
-            ).snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
-            const original = doc?.operations[command.source.taskId];
-            if (!original) throw new AppError(404, 'remote_reference_not_found');
-            if (!this.remoteConfiguration())
-              throw new AppError(503, 'remote_disabled', '远端能力当前不可用，请联系应用维护者。');
-            if (original.service !== this.remoteConfiguration()?.endpoint)
-              throw new AppError(
-                409,
-                'remote_configuration_changed',
-                '远端服务配置已更改，请联系应用维护者。',
-              );
-            if (command.source.action === 'retry_remote' && !remoteBlocked(original))
-              throw new AppError(409, 'remote_retry_unnecessary');
           }
         }
         // Freeze this configuration update and source context across the host/Pi acceptance gap.
@@ -604,7 +588,17 @@ export class ConversationAgent extends Agent<Env> {
           ).select(selection.provider, selection.modelId),
         };
         const pending = await this.harness.pending({ session: '1' });
-        if (!pending.length) await this.pruneCompletedRemote(command);
+        if (!pending.length) {
+          await this.pruneCompletedMcp();
+          const execution = {
+            pi: await this.harness.pi(),
+            context: BG,
+            command,
+            entries: await this.allEntries(),
+          };
+          for (const contribution of await this.contributions())
+            await contribution.execution?.beforeSubmit?.(execution);
+        }
         if (pending.filter((p) => p.status === 'queued').length >= 10)
           throw new AppError(429, 'queue_full');
         this.ctx.storage.sql.exec(
@@ -639,41 +633,17 @@ export class ConversationAgent extends Agent<Env> {
       return { runId: command.runId, accepted: true as const };
     });
   }
-  private async pruneCompletedRemote(command: RunCommand) {
+  private async pruneCompletedMcp() {
     const pi = await this.harness.pi();
-    const saved = await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG);
+    const saved = await pi.snapshot(McpIntents, ROOT_CONVERSATION_ID, BG);
     if (!saved) return;
-    const referenced =
-      command.source &&
-      (command.source.action === 'retry_remote' || command.source.action === 'recheck_remote')
-        ? command.source.taskId
-        : undefined;
-    const published = new Set(
-      (await this.allEntries())
-        .flatMap((entry) => entry.model ?? [])
-        .flatMap((message) =>
-          message.role === 'toolResult' &&
-          !message.isError &&
-          message.details &&
-          typeof message.details === 'object' &&
-          'remoteTaskId' in message.details
-            ? [message.details.remoteTaskId]
-            : [],
-        ),
-    );
-    const completed = Object.values(saved.operations).filter(
-      (o) => o.status === 'completed' && published.has(o.taskId) && o.taskId !== referenced,
-    );
     const completedMcp: number[] = [];
     for (const intent of Object.values(saved.mcp ?? {}))
       if (!mcpIntentUnresolved(intent, await pi.getTask(intent.taskId as TaskId, BG)))
         completedMcp.push(intent.taskId);
-    if (completed.length || completedMcp.length)
+    if (completedMcp.length)
       await pi.commit(async (tx) => {
-        const doc = await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID);
-        for (const operation of completed)
-          if (doc.operations[operation.taskId]?.status === 'completed')
-            delete doc.operations[operation.taskId];
+        const doc = await tx.doc(McpIntents, ROOT_CONVERSATION_ID);
         for (const taskId of completedMcp) delete doc.mcp?.[taskId];
       }, BG);
   }
@@ -1010,9 +980,7 @@ export class ConversationAgent extends Agent<Env> {
       stopping: this.stopping,
       modelCatalog,
       selection,
-      remote: remoteProgress(
-        (await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, BG))?.operations ?? {},
-      ),
+
       capabilityIssues: this.mcpPrepared?.diagnostics ?? [],
       runtimeIssues: [
         ...terminalTasks.items

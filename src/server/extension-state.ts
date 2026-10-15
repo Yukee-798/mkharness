@@ -7,10 +7,11 @@ import {
   type SubmissionRecord,
   type Cursor,
   type Page,
+  type JsonObject,
 } from '@earendil-works/pi-durable';
 import type { ServerContribution, ProjectionContext } from './contributions';
 import type { ExtensionState } from '../shared/extension-state';
-import { jsonText, type Json as JsonValue } from '../shared/compute';
+import { jsonText, type Json as JsonValue } from '../shared/json';
 
 /** Read-only fold. The host supplies commits through its existing observation subscription. */
 export function createExtensionProjection(
@@ -23,6 +24,13 @@ export function createExtensionProjection(
   const entries = new Map<number, EntryRecord>();
   const tasks = new Map<number, TaskRecord<JsonValue, JsonValue, JsonValue>>();
   const submissions = new Map<number, SubmissionRecord>();
+  const documentTokens = new Map(
+    projectors.flatMap((item) =>
+      (item.stateDocuments ?? []).map((token) => [token.definition.kind, token] as const),
+    ),
+  );
+  const documents = new Map<string, Readonly<JsonObject> | null>();
+  const documentVersions = new Map<string, number>();
   let cached: ExtensionState | undefined;
   let published = '';
   const accept = (change: CommitChange) => {
@@ -32,7 +40,14 @@ export function createExtensionProjection(
       tasks.set(Number(change.value.id), change.value);
     else if (change.type === 'submission' && change.value.conversationId === ROOT_CONVERSATION_ID)
       submissions.set(Number(change.value.id), change.value);
-    else return false;
+    else if (
+      change.type === 'document' &&
+      change.conversationId === ROOT_CONVERSATION_ID &&
+      documentTokens.has(change.record.kind)
+    ) {
+      documents.set(change.record.kind, change.value);
+      documentVersions.set(change.record.kind, (documentVersions.get(change.record.kind) ?? 0) + 1);
+    } else return false;
     cached = undefined;
     return true;
   };
@@ -40,6 +55,13 @@ export function createExtensionProjection(
     includeHistory = false,
   ): Promise<ProjectionContext & { page?: Page<EntryRecord, Cursor> }> => {
     if (!projectors.length && !includeHistory) return { entries: [], tasks: [], submissions: [] };
+    // Snapshot only declared documents. A commit received during the read wins;
+    // reading an absent document must not create it with tx.doc().
+    for (const [kind, token] of documentTokens) {
+      const version = documentVersions.get(kind);
+      const value = await pi.snapshot(token, ROOT_CONVERSATION_ID, context);
+      if (documentVersions.get(kind) === version) documents.set(kind, value ?? null);
+    }
     // One serialized read boundary: older bootstrap pages cannot replace a newer
     // commit. The host subscribes before this read and folds subsequent publications.
     // Native read-only commits have no Storage writes or commit publication.
@@ -87,6 +109,7 @@ export function createExtensionProjection(
       entries: [...entries.values()],
       tasks: [...tasks.values()],
       submissions: [...submissions.values()],
+      documents,
     };
     const result: ExtensionState = {};
     for (const contribution of projectors) {

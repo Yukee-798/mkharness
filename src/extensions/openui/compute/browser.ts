@@ -1,4 +1,5 @@
-import { LIMITS, failure, type ComputeResult, type Program, type Json } from '../shared/compute';
+import { LIMITS, failure, type ComputeResult, type Program } from './contracts';
+import type { Json } from '../../../shared/json';
 // One worker per invocation: queued/loading work never consumes the execution timeout.
 export function computeProgram(
   program: Program,

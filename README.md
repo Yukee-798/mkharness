@@ -57,20 +57,20 @@ Use this foundation for research assistants, data workflows, or creative Agents 
 
 Extensions are trusted code that you review and ship with your application. Server capabilities and browser presentation have separate static registration points, so a tool can have a custom renderer without adding tool-specific branches to core chat logic.
 
-| Add or customize                                           | Start here                                                                                                            |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Agent tools, prompt sections, hooks                        | [`src/extensions/server.ts`](src/extensions/server.ts) — native Pi Extensions                                         |
-| Tool renderers, title decorations, reply footers           | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkits and browser contributions            |
-| Generated UI, resources, input state, continuation actions | [`src/extensions/openui/`](src/extensions/openui/) — a complete optional extension                                    |
-| Static Skills                                              | [`src/server/skills.ts`](src/server/skills.ts)                                                                        |
-| Remote MCP tools                                           | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` configuration                                                |
-| An async service                                           | [`src/server/remote-example.ts`](src/server/remote-example.ts) — adapt to your service's submit/query/cancel contract |
+| Add or customize                                           | Start here                                                                                                              |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Agent tools, prompt sections, hooks                        | [`src/extensions/server.ts`](src/extensions/server.ts) — native Pi Extensions                                           |
+| Tool renderers, title decorations, reply/composer footers  | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkits and browser contributions              |
+| Generated UI, resources, input state, continuation actions | [`src/extensions/openui/`](src/extensions/openui/) — a complete optional extension                                      |
+| Static Skills                                              | [`src/server/skills.ts`](src/server/skills.ts)                                                                          |
+| Remote MCP tools                                           | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` configuration                                                  |
+| An async service                                           | [`src/extensions/async-example/`](src/extensions/async-example/) — adapt to your service's submit/query/cancel contract |
 
-For a small example, add `exampleDefinition` to the static `definitions` array in [`src/extensions/server.ts`](src/extensions/server.ts). Its `describe_text` tool and [browser renderer](src/extensions/example/browser.tsx) are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
+Manage all extension switches in [`extensions.config.ts`](extensions.config.ts). For a small example, set `example.enabled` to `true` there. Its `describe_text` tool and [browser renderer](src/extensions/example/browser.tsx) are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
 
 Successful web reads and searches populate Sources cards from committed Pi results. The reply extension adds native assistant-ui follow-up buttons and Regenerate to the action bar. Follow-ups are localized common prompts and require no background model call. Regenerate submits a new operation referring to the original committed input, including its form context; the original answer stays in history. It uses current model settings and does not authorize replay of an unknown remote side effect.
 
-Set `ENABLE_GENERATIVE_UI=0` to disable OpenUI's tools, prompts, and UI together. Set `ENABLE_EXAMPLE_SKILL=1` to try the static Skill example. Web search is registered only when `TAVILY_API_KEY` is configured; reading web pages needs no search key.
+Set `openui.enabled` to `false` to disable OpenUI's tools, prompts, resources, actions, UI and computation together; set `'skills-example'.enabled` to `true` to try the static Skill example. `timing`, `web`, `reply`, `async-example`, `example`, and the host MCP integration use the same configuration file. `openui.inspect` controls the optional developer inspector. Rebuild/redeploy after changing deployment configuration, or restart local development. The former per-extension environment switches are no longer used. Web search is registered only when `TAVILY_API_KEY` is configured; reading web pages needs no search key.
 
 OpenUI's form catalog includes sliders (single value or range), switches, dates, selects, checkboxes, and text fields. `Progress` uses shadcn/ui to display measured or computed progress. For example, the following document updates the progress bar locally as the slider changes; editing does not call the Agent:
 
@@ -85,6 +85,12 @@ root = Stack([
 Use two slider values for a range, such as `[20, 80]`. Use `Progress(null, "Waiting for data")` when progress is unknown; it does not track background Agent tasks automatically.
 
 See the [server contracts](src/server/contributions.ts), [browser contracts](src/browser/extensions.ts), and [.dev.vars.example](.dev.vars.example) for the available interfaces and configuration. Runtime plugin installation and marketplace compatibility are not included.
+
+The async-service sample is assembled as the `async-example` contribution in the same server and browser registration lists. Set `ASYNC_SERVICE_URL` to install its native tools and tasks; the contribution can still display and guard previously saved outcomes when the service is unconfigured. Its directory owns the provider contract, retry/recheck authorization, native task recovery and progress cards. To omit the sample entirely, set `'async-example'.enabled` to `false`; basic chat, history, Stop and MCP remain independent.
+
+The host offers three execution boundaries (`beforeModel`, idle `beforeSubmit`, and `taskUnavailable`), declared native document projections (`stateDocuments` + `projectState`), and a browser `composerFooter` slot. Execution stays in Pi Durable. Native task/document names are retained for existing work; already accepted legacy action receipts are decoded only inside the sample. New retry/recheck requests use `extension_action` with `extensionId: "async-example"` and a validated `{ taskId }` payload. MCP retains its own guard and an opaque view of the legacy shared document, without importing sample code.
+
+Generic finite-JSON validation, size checks and canonical equality live in `src/shared/json.ts`, which has no compute-engine imports. QuickJS, its budgets, browser Worker, WASM bindings and build integration belong to `src/extensions/openui/`. A disabled OpenUI build excludes the extension's browser/server entries and their computation assets; core chat, MCP, requests and JSON utilities never import QuickJS. Dependencies remain listed in the template's package manifest for builds that enable OpenUI. Service endpoints, API keys and MCP connection definitions remain server bindings; they configure a connection rather than enable an extension. Disabling MCP prevents connections and tool registration, while persisted unknown-outcome protection remains in the host.
 
 ## Deploy to Cloudflare
 

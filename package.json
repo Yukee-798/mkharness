@@ -94,8 +94,5 @@
     "vite": "8.0.0",
     "vitest": "4.1.0",
     "wrangler": "4.149.0"
-  },
-  "imports": {
-    "#quickjs.wasm": "@jitl/quickjs-wasmfile-release-sync/wasm"
   }
 }

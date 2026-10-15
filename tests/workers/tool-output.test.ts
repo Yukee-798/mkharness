@@ -1,3 +1,4 @@
+import { extensionConfiguration } from '../../src/extensions/configuration';
 import { Harness, MemoryStorage, createRegistry, type Extension } from '@earendil-works/pi-durable';
 import { it, expect, vi } from 'vitest';
 import { webTools } from '../../src/server/web';
@@ -13,8 +14,10 @@ it.each([
 ])('native model tool catalog respects search configuration: %j', async ({ key, enabled }) => {
   const registry = createRegistry();
   for (const extension of await applicationExtensions(
-    { ENABLE_GENERATIVE_UI: '0', TAVILY_API_KEY: key } as any,
+    { TAVILY_API_KEY: key } as unknown as Env,
     async () => [],
+    undefined,
+    { ...extensionConfiguration, openui: { enabled: false } },
   ))
     registry.install(extension);
   const names = registry

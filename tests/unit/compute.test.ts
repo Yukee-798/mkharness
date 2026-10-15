@@ -1,3 +1,3 @@
-import { computeProgram } from '../../src/shared/compute';
+import { computeProgram } from '../../src/extensions/openui/compute/engine';
 import { computationContract } from '../compute-cases';
 computationContract(computeProgram);

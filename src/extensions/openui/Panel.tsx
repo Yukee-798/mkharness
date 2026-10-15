@@ -13,11 +13,12 @@ import {
 } from 'react';
 import { Renderer, type ActionEvent } from '@openuidev/react-lang';
 import { library, PanelContext, type PanelGuard } from './catalog';
-import type { Program, Json } from '../../shared/compute';
-import { finiteJson, jsonEqual, canonicalJson } from '../../shared/compute';
+import type { Json } from '../../shared/json';
+import type { Program } from './compute/contracts';
+import { finiteJson, jsonEqual, canonicalJson } from '../../shared/json';
 import type { RawState, RunCommand } from '../../shared/contracts';
 import { actionParams, externalURL, UI_ACTIONS } from './contracts';
-import { computeProgram } from '../../browser/compute';
+import { computeProgram } from './compute/browser';
 import { request } from '../../browser/api';
 import { type ResourceDraft, type SaveStatus } from '../../browser/draft';
 import { useResourceDrafts } from '../../browser/ResourceDrafts';

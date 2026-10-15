@@ -8,8 +8,9 @@ import {
 import { createParser, generatePrompt } from '@openuidev/lang-core';
 import { schema, spec } from 'virtual:mkharness-openui-catalog';
 import { toolRef, successfulTool } from '../../shared/references';
-import { jsonText, jsonEqual, finiteJson, type Program, type Json } from '../../shared/compute';
-import { computeProgram } from '../../server/compute';
+import { jsonText, jsonEqual, finiteJson, type Json } from '../../shared/json';
+import type { Program } from './compute/contracts';
+import { computeProgram } from './compute/server';
 import { validateSlider } from './slider';
 import { validateProgress } from './progress';
 import { UI_ACTION_RULE, validateUIActions } from './contracts';

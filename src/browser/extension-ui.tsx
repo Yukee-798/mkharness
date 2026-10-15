@@ -42,3 +42,15 @@ export function AssistantActionExtensions() {
     ) : null,
   );
 }
+
+/** Conversation-level controls compose within assistant-ui's viewport footer. */
+export function ComposerFooterExtensions() {
+  const context = useContext(ExtensionContext);
+  return context?.ui?.map(({ id, composerFooter: Footer }) =>
+    Footer ? (
+      <DecorationBoundary key={id}>
+        <Footer />
+      </DecorationBoundary>
+    ) : null,
+  );
+}

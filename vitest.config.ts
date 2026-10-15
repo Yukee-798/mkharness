@@ -1,8 +1,8 @@
-import { openuiServerCatalog } from './config/openui-catalog';
+import { openuiBuild } from './src/extensions/openui/build';
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 export default defineConfig({
-  plugins: [openuiServerCatalog()],
+  plugins: [openuiBuild()],
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   test: {
     include: ['tests/unit/**/*.test.ts', 'tests/unit/**/*.test.tsx'],

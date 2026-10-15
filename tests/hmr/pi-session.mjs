@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { cloudflare } from '@cloudflare/vite-plugin';
-import { openuiServerCatalog } from '../../config/openui-catalog.ts';
+import { openuiBuild } from '../../src/extensions/openui/build.ts';
 
 process.env.X_LOCAL_OBSERVABILITY = 'false';
 const persistence = await realpath(await mkdtemp(join(tmpdir(), 'pi-hmr-')));
@@ -34,7 +34,7 @@ await symlink(
   'dir',
 );
 // Match the application's build seam; the real extensions import this metadata.
-const plugins = [openuiServerCatalog()];
+const plugins = [openuiBuild()];
 let restart;
 plugins.push({
   name: 'observe-test-restarts',

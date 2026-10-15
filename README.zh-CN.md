@@ -57,20 +57,20 @@ pnpm dev
 
 扩展是经你审核、随应用部署发布的受信任代码。服务端能力与浏览器展示各有独立的静态装配入口，工具可以接入专属 renderer，无需在核心聊天逻辑增加工具名分支。
 
-| 扩展内容                             | 从这里开始                                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| Agent 工具、提示词片段、hooks        | [`src/extensions/server.ts`](src/extensions/server.ts) — Pi 原生 Extension                              |
-| 工具 renderer、标题装饰、回复 Footer | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkit 与浏览器贡献            |
-| 生成 UI、资源、输入状态、继续动作    | [`src/extensions/openui/`](src/extensions/openui/) — 完整的可选扩展                                     |
-| 静态 Skills                          | [`src/server/skills.ts`](src/server/skills.ts)                                                          |
-| 远程 MCP 工具                        | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` 配置                                           |
-| 异步服务                             | [`src/server/remote-example.ts`](src/server/remote-example.ts) — 按实际服务契约接入 submit/query/cancel |
+| 扩展内容                             | 从这里开始                                                                                                |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Agent 工具、提示词片段、hooks        | [`src/extensions/server.ts`](src/extensions/server.ts) — Pi 原生 Extension                                |
+| 工具 renderer、标题装饰、回复 Footer | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkit 与浏览器贡献              |
+| 生成 UI、资源、输入状态、继续动作    | [`src/extensions/openui/`](src/extensions/openui/) — 完整的可选扩展                                       |
+| 静态 Skills                          | [`src/server/skills.ts`](src/server/skills.ts)                                                            |
+| 远程 MCP 工具                        | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` 配置                                             |
+| 异步服务                             | [`src/extensions/async-example/`](src/extensions/async-example/) — 按实际服务契约接入 submit/query/cancel |
 
-最小工具示例可将 `exampleDefinition` 加入 [`src/extensions/server.ts`](src/extensions/server.ts) 的静态 `definitions` 数组。其 `describe_text` 及[浏览器 renderer](src/extensions/example/browser.tsx) 默认不启用。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
+最小工具示例只需在 [`extensions.config.ts`](extensions.config.ts) 将 `example.enabled` 设为 `true`。其 `describe_text` 及[浏览器 renderer](src/extensions/example/browser.tsx) 默认不启用。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
 
 成功的网页读取和搜索从 Pi 已提交结果生成 Sources 来源卡片。回复扩展使用 assistant-ui 原生后续提问按钮，并在操作栏增加重新生成。后续提问是随语言切换的通用提示，不额外调用模型。重新生成以新操作引用原始提交内容（含表单上下文），保留原回答，使用当前模型设置；它不会授权自动重放结果未知的远端副作用。
 
-`ENABLE_GENERATIVE_UI=0` 同时关闭 OpenUI 的工具、提示词与 UI；`ENABLE_EXAMPLE_SKILL=1` 启用静态 Skill 示例。网页搜索仅在配置 `TAVILY_API_KEY` 时注册，读取网页不需要搜索 Key。
+所有扩展启停统一在 [`extensions.config.ts`](extensions.config.ts) 配置：`openui.enabled: false` 同时关闭 OpenUI 的工具、提示词、资源、动作、界面和计算；`skills-example.enabled: true` 启用静态 Skill 示例。timing、web、reply、async-example、example 和宿主 MCP 接入使用同一个文件，`openui.inspect` 控制开发检查器。修改后重新构建部署，或重启本地开发服务；原有扩展专用环境变量不再使用。网页搜索仅在配置 `TAVILY_API_KEY` 时注册，读取网页不需要搜索 Key。
 
 OpenUI 表单目录已包含单值或范围滑块、开关、日期、下拉选择、复选框与文本输入。`Progress` 使用 shadcn/ui 展示实际测量或计算得到的进度。例如，以下内容在滑块改变后本地更新进度条，编辑时不调用 Agent：
 
@@ -85,6 +85,12 @@ root = Stack([
 范围滑块使用两个值，例如 `[20, 80]`。进度未知时使用 `Progress(null, "等待数据")`；它不会自动追踪后台 Agent 任务。
 
 具体接口与配置见[服务端契约](src/server/contributions.ts)、[浏览器契约](src/browser/extensions.ts)及 [.dev.vars.example](.dev.vars.example)。不包含运行时插件安装器或外部插件市场兼容层。
+
+异步服务示例以 `async-example` contribution 接入服务端与浏览器注册表。配置 `ASYNC_SERVICE_URL` 后安装其原生工具和任务；未配置服务时，扩展仍可展示和保护已有任务的未知结果。服务协议、重试与复查授权、原生任务恢复和进度卡片都位于该扩展目录。要完全停用示例，在统一配置中将 `async-example.enabled` 设为 `false`，基础聊天、历史、Stop 和 MCP 保持独立。
+
+宿主提供三个执行接入点：模型请求前的 `beforeModel`、队列空闲且新请求入站时的 `beforeSubmit`、恢复时遇到不兼容任务的 `taskUnavailable`。原生文档通过 `stateDocuments` 和 `projectState` 投影到公开状态，浏览器通过 `composerFooter` 展示会话级控件，执行仍由 Pi Durable 管理。已有任务和文档的持久化标识保持不变；已接受的旧动作仅由示例内部兼容解析。新的重试、复查统一使用 `extension_action`，指定 `extensionId: "async-example"` 与经过校验的 `{ taskId }`。MCP 保留独立保护逻辑，对旧共享文档中的示例字段只做不透明保留，不导入示例代码。
+
+通用 JSON 校验、大小限制和规范化比较位于 `src/shared/json.ts`，不导入计算引擎。QuickJS、计算预算、浏览器 Worker、WASM 接入和构建集成都属于 `src/extensions/openui/`。构建时关闭 OpenUI 会排除该扩展的浏览器与服务端入口及计算资源；核心聊天、MCP、请求处理和 JSON 工具不导入 QuickJS。模板的依赖清单仍保留相关包，供启用 OpenUI 时构建使用。服务地址、API Key 和 MCP 连接定义仍放在服务端绑定中，它们负责连接参数，不负责扩展启停。关闭 MCP 会停止建立连接及注册工具，宿主仍保留已有未知结果的保护记录。
 
 ## 部署到 Cloudflare
 

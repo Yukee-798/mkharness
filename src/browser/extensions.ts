@@ -4,6 +4,7 @@ export type ExtensionUI = {
   toolTitleMeta?: ComponentType<{ part: ToolCallMessagePartProps }>;
   assistantActions?: ComponentType;
   assistantFooter?: ComponentType;
+  composerFooter?: ComponentType;
 };
 export type ExtensionDecoration = ExtensionUI & { id: string };
 export type BrowserExtension = {

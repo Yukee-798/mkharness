@@ -68,7 +68,9 @@ test('disabled generated UI never evaluates its module, CSS, Worker or Inspect a
   await expect(page.getByText('文字包含 3 个字符。')).toBeVisible();
   await expect(page.getByText('Base chat remains available.')).toBeVisible();
   expect(
-    loaded.some((url) => /extensions\/openui|openuidev|compute\.worker|devtools/.test(url)),
+    loaded.some((url) =>
+      /extensions\/openui|openuidev|compute\.worker|quickjs|emscripten|devtools/.test(url),
+    ),
   ).toBe(false);
   expect(await page.evaluate(() => (window as any).workerCount)).toBe(0);
   const input = await page.getByLabel('消息', { exact: true }).elementHandle();

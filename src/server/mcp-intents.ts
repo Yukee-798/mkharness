@@ -26,25 +26,9 @@ export function mcpIntentUnresolved(
   );
 }
 
-export type RemoteIntent = {
-  taskId: number;
-  childTaskId: number;
-  runId: string;
-  callId: string;
-  service: string;
-  toolName: string;
-  fingerprint: string;
-  key: string;
-  remoteId: string | null;
-  status: string;
-  remoteStatus: string;
-  deadline: number;
-  nextPollAt: number;
-  retryRunId: string | null;
-  retryTaskId: number | null;
-};
-export const RemoteIntents = defineDoc<{
-  operations: Record<string, RemoteIntent>;
+export const McpIntents = defineDoc<{
+  // Reserved legacy field owned by the optional async example. Never interpreted by MCP.
+  operations: Record<string, import('../shared/json').Json>;
   mcp?: Record<string, McpIntent>;
 }>({
   kind: 'app.remote-intents',

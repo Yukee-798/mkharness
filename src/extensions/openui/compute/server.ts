@@ -1,6 +1,6 @@
-import wasm from '#quickjs.wasm';
+import wasm from '#openui-quickjs.wasm';
 import variant from '@jitl/quickjs-wasmfile-release-sync';
 import { newVariant, newQuickJSWASMModuleFromVariant } from 'quickjs-emscripten-core';
-import { createCompute } from '../shared/compute';
+import { createCompute } from './engine';
 const modulePromise = newQuickJSWASMModuleFromVariant(newVariant(variant, { wasmModule: wasm }));
 export const computeProgram = createCompute(() => modulePromise);

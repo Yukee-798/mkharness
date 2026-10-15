@@ -1,7 +1,7 @@
 import { expect, it, vi, beforeEach } from 'vitest';
 vi.mock('vite', () => ({ createServer: vi.fn(), isRunnableDevEnvironment: () => true }));
 import { createServer } from 'vite';
-import { openuiServerCatalog } from '../../config/openui-catalog';
+import { openuiBuild } from '../../src/extensions/openui/build';
 const close = vi.fn(),
   load = vi.fn();
 beforeEach(() => {
@@ -17,8 +17,8 @@ beforeEach(() => {
     close,
   } as any);
 });
-function hooks(prepare?: () => boolean) {
-  const plugin = openuiServerCatalog(prepare);
+function hooks(enabled = true) {
+  const plugin = openuiBuild({ enabled });
   return {
     plugin,
     start: plugin.configureServer as () => Promise<void>,
@@ -43,7 +43,7 @@ it('prepares before startup resolves, and every load reuses the same cached gene
   expect(load).toHaveBeenCalledOnce();
 });
 it('does not evaluate disabled OpenUI during startup', async () => {
-  await hooks(() => false).start();
+  await hooks(false).start();
   expect(createServer).not.toHaveBeenCalled();
 });
 it('reports invalid catalog preparation at startup and closes the temporary loader', async () => {

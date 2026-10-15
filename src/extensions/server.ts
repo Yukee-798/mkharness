@@ -1,10 +1,19 @@
+import {
+  extensionConfiguration,
+  extensionEnabled,
+  validateConfiguration,
+  type ExtensionConfiguration,
+} from './configuration';
 import type { EntryRecord } from '@earendil-works/pi-durable';
-import type { ServerContribution } from '../server/contributions';
+import type { ServerContribution, ContributionHost } from '../server/contributions';
 import { validateContributionIds } from '../server/contributions';
-type Context = { env: Env; entries: () => Promise<readonly EntryRecord[]> };
+type Context = {
+  env: Env;
+  entries: () => Promise<readonly EntryRecord[]>;
+  host?: ContributionHost;
+};
 type Definition = {
   id: string;
-  enabled?: (env: Env) => boolean;
   create: (context: Context) => Promise<ServerContribution>;
 };
 
@@ -40,7 +49,6 @@ export const definitions: readonly Definition[] = [
   },
   {
     id: 'openui',
-    enabled: (env) => (env as Env & { ENABLE_GENERATIVE_UI?: string }).ENABLE_GENERATIVE_UI !== '0',
     create: async ({ entries }) => {
       const { openuiContribution } = await import('./openui/server');
       return openuiContribution(entries);
@@ -54,18 +62,32 @@ export const definitions: readonly Definition[] = [
     },
   },
   {
+    id: 'async-example',
+    create: async ({ env, host }) => {
+      const { asyncExampleContribution } = await import('./async-example/server');
+      const { remoteConfiguration } = await import('./async-example/runtime');
+      return asyncExampleContribution(
+        remoteConfiguration(env as unknown as Record<string, unknown>),
+        host,
+      );
+    },
+  },
+  exampleDefinition,
+  {
     id: 'skills-example',
-    enabled: (env) => (env as Env & { ENABLE_EXAMPLE_SKILL?: string }).ENABLE_EXAMPLE_SKILL === '1',
     create: async () => {
       const { staticSkills, exampleSkillSource } = await import('../server/skills');
       return { id: 'skills-example', extension: await staticSkills([exampleSkillSource()]) };
     },
   },
 ];
-export const enabledDefinitions = (env: Env) => {
-  const enabled = definitions.filter((definition) => definition.enabled?.(env) ?? true);
-  validateContributionIds(enabled.map((definition) => definition.id));
-  return enabled;
+export const enabledDefinitions = (config: ExtensionConfiguration = extensionConfiguration) => {
+  validateContributionIds(definitions.map((definition) => definition.id));
+  validateConfiguration(
+    config,
+    definitions.map((definition) => definition.id),
+  );
+  return definitions.filter((definition) => extensionEnabled(definition.id, config));
 };
-export const extensionIds = (env: Env) =>
-  enabledDefinitions(env).map((definition) => definition.id);
+export const extensionIds = (config: ExtensionConfiguration = extensionConfiguration) =>
+  enabledDefinitions(config).map((definition) => definition.id);

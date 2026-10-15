@@ -1,9 +1,9 @@
-import { openuiServerCatalog } from './config/openui-catalog';
+import { openuiBuild } from './src/extensions/openui/build';
 import { defineConfig } from 'vitest/config';
 import { cloudflareTest } from '@cloudflare/vitest-plugin';
 export default defineConfig({
   plugins: [
-    openuiServerCatalog(),
+    openuiBuild(),
     cloudflareTest({
       main: './tests/workers/lifecycle-entry.ts',
       remoteBindings: false,

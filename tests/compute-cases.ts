@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import type { ComputeResult, Json, Program } from '../src/shared/compute';
+import type { Json } from '../src/shared/json';
+import type { ComputeResult, Program } from '../src/extensions/openui/compute/contracts';
 export function computationContract(compute: (p: Program, i: Json) => Promise<ComputeResult>) {
   it('computes 24 recurrence steps with an independently checked result', async () => {
     const result = await compute(

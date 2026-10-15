@@ -1,5 +1,5 @@
 import type { RawState } from '../shared/contracts';
-import { jsonEqual } from '../shared/compute';
+import { jsonEqual } from '../shared/json';
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error' | 'conflict';
 export function createDraftSaver(
   save: (state: RawState, revision: number) => Promise<number>,

@@ -1,5 +1,5 @@
 import type { RawState } from '../../shared/contracts';
-import { finiteJson } from '../../shared/compute';
+import { finiteJson } from '../../shared/json';
 
 /** Encode the SDK snapshot at the extension boundary, before saving or submitting.
  * Native unbound fields include optional metadata such as componentType: undefined.

@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool, type Extension } from '@earendil-works/pi-durable';
-import { jsonText } from '../shared/compute';
+import { jsonText } from '../shared/json';
 import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
 export function publicAddress(raw: string) {
   const ip = raw.replace(/^\[|\]$/g, '');

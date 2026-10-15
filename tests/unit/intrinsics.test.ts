@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { computeProgram } from '../../src/shared/compute';
+import { computeProgram } from '../../src/extensions/openui/compute/engine';
 it('cannot bypass finite-output checks by changing guest serialization intrinsics', async () => {
   for (const code of [
     'Object.keys=()=>[];export function compute(){return {bad:NaN}}',

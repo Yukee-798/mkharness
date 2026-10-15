@@ -1,7 +1,9 @@
 import wasmUrl from '@jitl/quickjs-wasmfile-release-sync/wasm?url';
 import variant from '@jitl/quickjs-wasmfile-release-sync';
 import { newVariant, newQuickJSWASMModuleFromVariant } from 'quickjs-emscripten-core';
-import { createCompute, type Json, type Program } from '../shared/compute';
+import { createCompute } from './engine';
+import type { Program } from './contracts';
+import type { Json } from '../../../shared/json';
 const modulePromise = newQuickJSWASMModuleFromVariant(
   newVariant(variant, { wasmLocation: wasmUrl }),
 );

@@ -30,7 +30,6 @@ it('clones public extension projection callbacks and ignores foreign run state',
     () => {},
     () => {},
     () => {},
-    () => {},
     new Map(),
     () => {},
     projection,
@@ -98,9 +97,26 @@ it('committed progress rejects foreign-run and older projections; no execution i
   ];
   const events = [
     { type: 'RUN_STARTED', threadId: 'c', runId: 'r' },
-    { type: 'STATE_SNAPSHOT', snapshot: { runId: 'foreign', remoteRevision: 99, remote } },
-    { type: 'STATE_SNAPSHOT', snapshot: { runId: 'r', remoteRevision: 8, remote } },
-    { type: 'STATE_SNAPSHOT', snapshot: { runId: 'r', remoteRevision: 7, remote: [] } },
+    {
+      type: 'STATE_SNAPSHOT',
+      snapshot: {
+        runId: 'foreign',
+        extensionStateRevision: 99,
+        extensionState: { 'async-example': remote },
+      },
+    },
+    {
+      type: 'STATE_SNAPSHOT',
+      snapshot: {
+        runId: 'r',
+        extensionStateRevision: 8,
+        extensionState: { 'async-example': remote },
+      },
+    },
+    {
+      type: 'STATE_SNAPSHOT',
+      snapshot: { runId: 'r', extensionStateRevision: 7, extensionState: { 'async-example': [] } },
+    },
     { type: 'RUN_FINISHED', threadId: 'c', runId: 'r' },
   ];
   const network = vi.fn(
@@ -116,6 +132,8 @@ it('committed progress rejects foreign-run and older projections; no execution i
       () => {},
       () => {},
       () => {},
+      new Map(),
+      () => {},
       progress,
     );
     await new Promise<void>((resolve, reject) =>
@@ -123,7 +141,7 @@ it('committed progress rejects foreign-run and older projections; no execution i
         .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
         .subscribe({ complete: resolve, error: reject }),
     );
-    expect(progress).toHaveBeenCalledExactlyOnceWith('r', remote);
+    expect(progress).toHaveBeenCalledExactlyOnceWith('r', { 'async-example': remote });
     expect(network).toHaveBeenCalledTimes(1);
   } finally {
     vi.unstubAllGlobals();
@@ -187,7 +205,6 @@ it('cloned observations retain committed identities across runs without acceptin
       () => {},
       () => {},
       () => {},
-      () => {},
       ids,
       toolProgress,
     );
@@ -246,7 +263,6 @@ it('uses the existing attach to deliver scoped runtime issues and their clearanc
       () => {},
       () => {},
       () => {},
-      () => {},
       new Map(),
       () => {},
       () => {},
@@ -292,7 +308,6 @@ it('delivers native queue changes over the same cloned attach and ignores foreig
   try {
     const agent = new AttachAgent(
       'c',
-      () => {},
       () => {},
       () => {},
       () => {},

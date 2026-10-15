@@ -5,7 +5,7 @@ import {
   runDurableObjectAlarm,
 } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
-import { RemoteIntents } from '../../src/server/remote-intents';
+import { McpIntents } from '../../src/server/mcp-intents';
 import { BG } from '../../src/server/conversation';
 
 it.each(['lost-receipt', 'invalid-result', 'stop-during-call', 'stop-before-result'])(
@@ -103,15 +103,12 @@ it.each(['lost-receipt', 'invalid-result', 'stop-during-call', 'stop-before-resu
       expect(mutations).toBe(1);
       if (!fault.startsWith('stop-'))
         expect(JSON.stringify(snapshot.entries)).toContain('remote_outcome_unknown');
-      expect(snapshot.remote).toEqual([]); // Generic MCP does not invent the async-job retry UI.
+      expect(snapshot.extensionState['async-example']).toEqual([]); // Generic MCP does not invent the async-job retry UI.
       const intents = await runInDurableObject(
         stub,
         async (instance) =>
-          (
-            await (
-              await instance.harness.pi()
-            ).snapshot(RemoteIntents, (await instance.root()).id, BG)
-          )?.mcp,
+          (await (await instance.harness.pi()).snapshot(McpIntents, (await instance.root()).id, BG))
+            ?.mcp,
       );
       expect(Object.values(intents ?? {})).toMatchObject([
         {

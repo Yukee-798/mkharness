@@ -1,3 +1,4 @@
+import { ComposerFooterExtensions } from '../../src/browser/extension-ui';
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -26,6 +27,7 @@ const part = {
 } as ToolCallMessagePartProps;
 const metadata: ExtensionDecoration = {
   id: 'metadata',
+  composerFooter: () => <span>Optional composer footer</span>,
   toolTitleMeta: ({ part }) => <span>Metadata for {part.toolName}</span>,
   assistantFooter: () => <span>Optional footer</span>,
   assistantActions: () => <button>Optional reply action</button>,
@@ -64,6 +66,7 @@ function App({ ui }: { ui: readonly ExtensionDecoration[] }) {
           ui,
         }}
       >
+        <ComposerFooterExtensions />
         <MessageByIndexProvider index={0}>
           <MessagePrimitive.Root>
             <ToolActivity part={part} />
@@ -77,6 +80,7 @@ function App({ ui }: { ui: readonly ExtensionDecoration[] }) {
 it('composes independent decorations for any shared tool and footer without replacing their state', async () => {
   const view = render(<App ui={[metadata, independent]} />);
   await waitFor(() => expect(view.queryByText('Optional footer')).not.toBeNull());
+  expect(view.queryByText('Optional composer footer')).not.toBeNull();
   const copy = view.getByRole('button', { name: 'Copy response' });
   const action = view.getByRole('button', { name: 'Optional reply action' });
   expect(copy.parentElement?.contains(action)).toBe(true);
@@ -87,6 +91,7 @@ it('composes independent decorations for any shared tool and footer without repl
   fireEvent.click(view.getByRole('button', { name: 'Footer 2: 0' }));
   view.rerender(<App ui={[independent]} />);
   expect(view.queryByText('Optional footer')).toBeNull();
+  expect(view.queryByText('Optional composer footer')).toBeNull();
   expect(view.queryByRole('button', { name: 'Optional reply action' })).toBeNull();
   expect(view.queryByText('Metadata for another_extension_tool')).toBeNull();
   expect(view.queryByText('Original tool result')).not.toBeNull();

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
-vi.mock('../../src/server/compute', () => ({ computeProgram: vi.fn() }));
+vi.mock('../../src/extensions/openui/compute/server', () => ({ computeProgram: vi.fn() }));
 import { openuiContribution } from '../../src/extensions/openui/server';
 import { toolkit, activity } from '../../src/extensions/openui/browser';
 it('assembles the catalog and execution instructions in the same optional native extension', () => {

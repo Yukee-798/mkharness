@@ -3,7 +3,7 @@ import type { ServerContribution } from '../../server/contributions';
 import { panelTools } from './tools';
 import { uiInstructions } from './instructions';
 import { AppError } from '../../shared/contracts';
-import { finiteJson } from '../../shared/compute';
+import { finiteJson } from '../../shared/json';
 import { validateUI } from './tools';
 import { actionParams } from './contracts';
 export function openuiContribution(
@@ -37,7 +37,7 @@ export function openuiContribution(
             program: program
               ? {
                   code: String(program.args.code),
-                  data: program.args.data as import('../../shared/compute').Json,
+                  data: program.args.data as import('../../shared/json').Json,
                 }
               : null,
           },

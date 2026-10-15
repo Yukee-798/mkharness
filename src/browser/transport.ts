@@ -8,7 +8,6 @@ import {
   type ToolCallResultEvent,
 } from '@ag-ui/core';
 import { Observable } from 'rxjs';
-import type { RemoteProgress } from '../shared/remote-progress';
 import { aliasMessages, messageAliases } from '../shared/stream';
 import type { ToolProgressMap } from '../shared/tool-progress';
 import type { RuntimeIssue } from '../shared/runtime-issues';
@@ -22,7 +21,6 @@ export class AttachAgent extends AbstractAgent {
     private finished: () => void,
     private replaced: () => void,
     private connected: () => void = () => {},
-    private progress: (runId: string, value: RemoteProgress[]) => void = () => {},
     private messageIds = new Map<string, string>(),
     private toolProgress: (runId: string, value: ToolProgressMap) => void = () => {},
     private extensionState: (runId: string, value: ExtensionState) => void = () => {},
@@ -37,7 +35,6 @@ export class AttachAgent extends AbstractAgent {
       this.finished,
       this.replaced,
       this.connected,
-      this.progress,
       this.messageIds,
       this.toolProgress,
       this.extensionState,
@@ -75,8 +72,7 @@ export class AttachAgent extends AbstractAgent {
               event as BaseEvent & {
                 snapshot?: {
                   runId?: string;
-                  remoteRevision?: number;
-                  remote?: RemoteProgress[];
+                  extensionStateRevision?: number;
                   messageIds?: Record<string, string>;
                   toolProgress?: ToolProgressMap;
                   extensionState?: ExtensionState;
@@ -92,8 +88,14 @@ export class AttachAgent extends AbstractAgent {
                 if (!this.messageIds.has(canonicalId)) this.messageIds.set(canonicalId, liveId);
             if (state?.runId === runId && Array.isArray(state.runtimeIssues))
               this.runtimeIssues(runId, state.runtimeIssues);
-            if (state?.runId === runId && state.extensionState)
+            if (
+              state?.runId === runId &&
+              state.extensionState &&
+              (state.extensionStateRevision ?? 0) >= lastRevision
+            ) {
+              lastRevision = state.extensionStateRevision ?? 0;
               this.extensionState(runId, state.extensionState);
+            }
             if (state?.runId === runId && state.toolProgress) {
               const inverse = new Map(
                 Object.entries(state.messageIds ?? {}).map(([canonical, live]) => [
@@ -115,15 +117,6 @@ export class AttachAgent extends AbstractAgent {
                   }),
                 ),
               );
-            }
-            if (
-              state?.runId === runId &&
-              Array.isArray(state.remote) &&
-              typeof state.remoteRevision === 'number' &&
-              state.remoteRevision >= lastRevision
-            ) {
-              lastRevision = state.remoteRevision;
-              this.progress(runId, state.remote);
             }
           }
           if (event.type === EventType.MESSAGES_SNAPSHOT) {

@@ -1,5 +1,5 @@
 import type { AgentEvent, EntryRecord } from '@earendil-works/pi-durable';
-import { jsonText, type Json } from './compute';
+import { jsonText, type Json } from './json';
 import { toolRef } from './references';
 export type ToolProgress = {
   status: 'pending' | 'running' | 'complete' | 'failed';

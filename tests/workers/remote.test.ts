@@ -1,6 +1,7 @@
+import { remoteActionSource } from '../../src/extensions/async-example/contracts';
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
-import { RemoteIntents, type RemoteIntent } from '../../src/server/remote-example';
+import { RemoteIntents, type RemoteIntent } from '../../src/extensions/async-example/runtime';
 import { BG } from '../../src/server/conversation';
 
 it('native owned child state survives eviction; known IDs are queried without another remote submission', async () => {
@@ -250,13 +251,13 @@ it('only explicit retry authorizes one new operation with original inputs; reado
       await alien.submitRun({
         runId: crypto.randomUUID(),
         text: 'retry',
-        source: { action: 'retry_remote', taskId: original.taskId },
+        source: remoteActionSource('retry', original.taskId),
       }),
     ).toMatchObject({ error: { code: 'remote_reference_not_found', status: 404 } });
     await stub.submitRun({
       runId: crypto.randomUUID(),
       text: 'recheck',
-      source: { action: 'recheck_remote', taskId: original.taskId },
+      source: remoteActionSource('recheck', original.taskId),
     });
     await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
     expect(submits).toBe(1);
@@ -269,7 +270,7 @@ it('only explicit retry authorizes one new operation with original inputs; reado
     const retry = {
       runId: crypto.randomUUID(),
       text: 'retry',
-      source: { action: 'retry_remote' as const, taskId: original.taskId },
+      source: remoteActionSource('retry', original.taskId),
     };
     await Promise.all([stub.submitRun(retry), stub.submitRun(retry)]);
     await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
@@ -277,13 +278,15 @@ it('only explicit retry authorizes one new operation with original inputs; reado
     expect(prompts).toEqual(['hello', 'hello']);
     expect(Object.values(await operations(stub))).toHaveLength(2);
     const snapshot = JSON.parse(await stub.snapshot());
-    expect(snapshot.remote).toEqual(
+    expect(snapshot.extensionState['async-example']).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ taskId: original.taskId, status: 'unknown' }),
       ]),
     );
-    expect(JSON.stringify(snapshot.remote)).not.toContain('explicit-new-operation');
-    expect(JSON.stringify(snapshot.remote)).not.toContain('fingerprint');
+    expect(JSON.stringify(snapshot.extensionState['async-example'])).not.toContain(
+      'explicit-new-operation',
+    );
+    expect(JSON.stringify(snapshot.extensionState['async-example'])).not.toContain('fingerprint');
     await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example bypass' });
     await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
     expect(submits).toBe(2);
@@ -324,7 +327,7 @@ it('readonly recheck exposes only status and result, not supplier references or 
     await stub.submitRun({
       runId: crypto.randomUUID(),
       text: 'recheck',
-      source: { action: 'recheck_remote', taskId: original.taskId },
+      source: remoteActionSource('recheck', original.taskId),
     });
     await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
     const history = JSON.stringify(JSON.parse(await stub.snapshot()).entries);
@@ -369,7 +372,7 @@ it('readonly recheck preserves an unresolved reference when completion has no re
     await stub.submitRun({
       runId: crypto.randomUUID(),
       text: 'recheck',
-      source: { action: 'recheck_remote', taskId: original.taskId },
+      source: remoteActionSource('recheck', original.taskId),
     });
     await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
     expect((await operations(stub))[original.taskId]).toMatchObject({
@@ -386,7 +389,7 @@ it('readonly recheck preserves an unresolved reference when completion has no re
     await stub.submitRun({
       runId: crypto.randomUUID(),
       text: 'recheck',
-      source: { action: 'recheck_remote', taskId: original.taskId },
+      source: remoteActionSource('recheck', original.taskId),
     });
     await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
     expect((await operations(stub))[original.taskId].status).toBe('completed');
@@ -421,12 +424,16 @@ it('committed progress reaches AG-UI state snapshots and restoration without lea
       .filter((l) => l.startsWith('data: '))
       .map((l) => JSON.parse(l.slice(6)));
     const states = events.filter((e) => e.type === 'STATE_SNAPSHOT');
-    expect(states.some((e) => e.snapshot.remote.some((o: any) => o.status === 'waiting'))).toBe(
-      true,
-    );
-    expect(states.some((e) => e.snapshot.remote.some((o: any) => o.status === 'completed'))).toBe(
-      true,
-    );
+    expect(
+      states.some((e) =>
+        e.snapshot.extensionState['async-example'].some((o: any) => o.status === 'waiting'),
+      ),
+    ).toBe(true);
+    expect(
+      states.some((e) =>
+        e.snapshot.extensionState['async-example'].some((o: any) => o.status === 'completed'),
+      ),
+    ).toBe(true);
     expect(states.every((e) => e.snapshot.runId === runId)).toBe(true);
     expect(JSON.stringify(states)).not.toContain('server-private-job-id');
     expect(JSON.stringify(states)).not.toContain('fingerprint');
@@ -469,7 +476,7 @@ it('service reconfiguration never sends an old reference to a new endpoint', asy
       await stub.submitRun({
         runId: crypto.randomUUID(),
         text: 'recheck',
-        source: { action: 'recheck_remote', taskId: original.taskId },
+        source: remoteActionSource('recheck', original.taskId),
       }),
     ).toMatchObject({ error: { code: 'remote_configuration_changed' } });
   } finally {
@@ -623,3 +630,43 @@ it.each(['before-submit', 'completed-before-result', 'stop-marker'] as const)(
     }
   },
 );
+
+it('disabling and re-enabling the example preserves an interrupted outcome and never silently resubmits', async () => {
+  let submits = 0;
+  const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === 'POST') {
+      submits++;
+      return Response.json({ id: 'original' });
+    }
+    return Response.json({ status: 'pending' });
+  });
+  let stub = await setup('key');
+  try {
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example' });
+    await waitUntil(async () => !!Object.values(await operations(stub))[0]?.remoteId);
+    await runInDurableObject(stub, (_, state) => {
+      state.storage.sql.exec('CREATE TABLE test_extensions (id TEXT PRIMARY KEY, enabled INTEGER)');
+      state.storage.sql.exec("INSERT INTO test_extensions VALUES('async-example',0)");
+    });
+    await abortAllDurableObjects();
+    stub = env.CONVERSATIONS.get(stub.id);
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(JSON.parse(await stub.snapshot()).extensionState['async-example']).toBeUndefined();
+    await runInDurableObject(stub, (_, state) => {
+      state.storage.sql.exec('UPDATE test_extensions SET enabled=1');
+    });
+    await abortAllDurableObjects();
+    stub = env.CONVERSATIONS.get(stub.id);
+    expect(JSON.parse(await stub.snapshot()).extensionState['async-example']).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: 'unknown' })]),
+    );
+    await stub.submitRun({ runId: crypto.randomUUID(), text: 'remote example changed arguments' });
+    await waitUntil(async () => !JSON.parse(await stub.snapshot()).pending.length);
+    expect(submits).toBe(1);
+    expect(Object.values(await operations(stub))[0]?.status).toBe('unknown');
+  } finally {
+    await abortAllDurableObjects();
+    network.mockRestore();
+  }
+});

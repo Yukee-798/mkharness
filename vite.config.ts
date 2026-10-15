@@ -1,4 +1,5 @@
-import { openuiServerCatalog } from './config/openui-catalog';
+import extensionConfiguration from './extensions.config';
+import { openuiBuild } from './src/extensions/openui/build';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { cloudflare } from '@cloudflare/vite-plugin';
@@ -7,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { durableReload } from './config/durable-reload';
-import { unstable_readConfig, unstable_getVarsForDev } from 'wrangler';
 // Miniflare's local trace store has no retention policy. Keep console diagnostics,
 // but only collect persistent spans/logs when explicitly requested for debugging.
 process.env.X_LOCAL_OBSERVABILITY ??= 'false';
@@ -19,31 +19,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      ...(process.env.OPENUI_INSPECT === '1'
-        ? {}
-        : {
-            '@openuidev/devtools': fileURLToPath(
-              new URL('./src/extensions/openui/devtools.ts', import.meta.url),
-            ),
-          }),
     },
   },
   plugins: [
-    openuiServerCatalog(() => {
-      // Use Wrangler's own precedence for config/.dev.vars; disabled OpenUI
-      // must not evaluate the browser catalog during development startup.
-      const env = process.env.CLOUDFLARE_ENV;
-      const config = unstable_readConfig({ config: configPath, env }, { hideWarnings: true });
-      const vars = unstable_getVarsForDev(
-        config.configPath,
-        undefined,
-        config.vars,
-        env,
-        true,
-        config.secrets,
-      );
-      return vars.ENABLE_GENERATIVE_UI?.value !== '0';
-    }),
+    openuiBuild(extensionConfiguration.openui),
     durableReload(),
     {
       name: 'browser-test-fixtures',

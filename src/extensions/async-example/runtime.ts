@@ -9,36 +9,42 @@ import {
   type EntryRecord,
   type TaskRuntime,
 } from '@earendil-works/pi-durable';
-import { AppError, type RunCommand } from '../shared/contracts';
-import { canonicalJson, jsonText, finiteJson, type Json } from '../shared/compute';
-import { boundedText } from './web';
-import { JSON_TOOL_OUTPUT_LIMITS } from './tool-output';
+import { AppError, type StoredCommand } from '../../shared/contracts';
+import { remoteSource } from './contracts';
+import { canonicalJson, jsonText, finiteJson, type Json } from '../../shared/json';
+import { boundedText } from '../../server/web';
+import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/tool-output';
 
-import { RemoteIntents, type RemoteIntent } from './remote-intents';
-export { RemoteIntents, type RemoteIntent } from './remote-intents';
+import { RemoteIntents, type RemoteIntent } from './intents';
+export { RemoteIntents, type RemoteIntent } from './intents';
 
 export const remoteBlocked = (operation: RemoteIntent) =>
   ['unknown', 'timeout', 'cancel_unknown', 'cancel_failed', 'cancel_unsupported'].includes(
     operation.status,
   );
-export function remoteModelAllowed(operations: Record<string, RemoteIntent>, command?: RunCommand) {
-  if (command?.source?.action === 'recheck_remote') return !!operations[command.source.taskId];
-  if (command?.source?.action === 'retry_remote') {
-    const original = operations[command.source.taskId];
+export function remoteModelAllowed(
+  operations: Record<string, RemoteIntent>,
+  command?: StoredCommand,
+) {
+  const source = remoteSource(command?.source);
+  if (source?.action === 'recheck_remote') return !!operations[source.taskId];
+  if (source?.action === 'retry_remote') {
+    const original = operations[source.taskId];
     return (
       !!original &&
-      (remoteBlocked(original) || original.retryRunId === command.runId) &&
-      !Object.values(operations).some((o) => o.runId === command.runId && remoteBlocked(o))
+      (remoteBlocked(original) || original.retryRunId === command?.runId) &&
+      !Object.values(operations).some((o) => o.runId === command?.runId && remoteBlocked(o))
     );
   }
   return !Object.values(operations).some(
     (o) => remoteBlocked(o) && (!command || o.runId === command.runId),
   );
 }
-function remoteSideEffectAllowed(operations: Record<string, RemoteIntent>, command: RunCommand) {
-  return command.source?.action === 'retry_remote'
+function remoteSideEffectAllowed(operations: Record<string, RemoteIntent>, command: StoredCommand) {
+  const source = remoteSource(command.source);
+  return source?.action === 'retry_remote'
     ? remoteModelAllowed(operations, command)
-    : command.source?.action !== 'recheck_remote' && !Object.values(operations).some(remoteBlocked);
+    : source?.action !== 'recheck_remote' && !Object.values(operations).some(remoteBlocked);
 }
 export function remoteRunBlocked(entries: readonly EntryRecord[]) {
   return entries
@@ -107,7 +113,7 @@ export function remoteConfiguration(env: Record<string, unknown>): RemoteConfig 
 /** Concrete example service, not a generic job scheduler or SDK. Pi owns its durable state. */
 export function remoteExample(
   config: RemoteConfig,
-  host: { identity: string; command: () => Promise<RunCommand> },
+  host: { identity: string; command: () => Promise<StoredCommand> },
 ): Extension {
   const intervals = config.pollMs ?? [1000, 2000, 5000, 10000, 15000];
   remoteConfiguration({ ASYNC_SERVICE_URL: config.endpoint, ASYNC_RECOVERY: config.recovery });
@@ -459,13 +465,14 @@ export function remoteExample(
         beforeTool: async (call, api, context) => {
           if (call.name !== 'example_generate') return;
           const command = await host.command();
+          const source = remoteSource(command.source);
           const operations =
             (await api.snapshot(RemoteIntents, api.conversationId, context))?.operations ?? {};
           if (
-            command.source?.action === 'recheck_remote' ||
+            source?.action === 'recheck_remote' ||
             !remoteSideEffectAllowed(operations, command) ||
-            (command.source?.action === 'retry_remote' &&
-              operations[command.source.taskId]?.retryRunId === command.runId)
+            (source?.action === 'retry_remote' &&
+              operations[source.taskId]?.retryRunId === command.runId)
           )
             return { block: 'remote_outcome_unknown: use an explicit retry or recheck action' };
         },
@@ -482,9 +489,9 @@ export function remoteExample(
         execute: async ({ prompt: requestedPrompt }, api, context) => {
           const command = await host.command(),
             runId = command.runId;
+          const source = remoteSource(command.source);
           let prompt = requestedPrompt;
-          const originalId =
-            command.source?.action === 'retry_remote' ? command.source.taskId : undefined;
+          const originalId = source?.action === 'retry_remote' ? source.taskId : undefined;
           if (originalId !== undefined) {
             const original = (await api.snapshot(RemoteIntents, api.conversationId, context))
               ?.operations[originalId];
@@ -512,7 +519,7 @@ export function remoteExample(
             const existing = doc.operations[api.taskId];
             if (existing) return existing.childTaskId as TaskId<Result>;
             if (
-              command.source?.action === 'recheck_remote' ||
+              source?.action === 'recheck_remote' ||
               !remoteSideEffectAllowed(doc.operations, command) ||
               (originalId !== undefined && doc.operations[originalId]?.retryRunId === runId)
             )
@@ -570,9 +577,10 @@ export function remoteExample(
         replay: 'safe',
         execute: async (_, api, context) => {
           const command = await host.command();
-          if (command.source?.action !== 'recheck_remote')
+          const source = remoteSource(command.source);
+          if (source?.action !== 'recheck_remote')
             throw new AppError(409, 'remote_action_required');
-          const originalId = command.source.taskId;
+          const originalId = source.taskId;
           const original = (await api.snapshot(RemoteIntents, api.conversationId, context))
             ?.operations[originalId];
           if (!original) throw new AppError(404, 'remote_reference_not_found');
