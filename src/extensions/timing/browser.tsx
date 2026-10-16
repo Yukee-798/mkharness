@@ -1,7 +1,10 @@
-import { useLocale } from '../../browser/locale';
+import { useLocale } from '../../browser/app/locale';
 import { useAuiState, type ToolCallMessagePartProps } from '@assistant-ui/react';
-import { canonicalMessageId, useExtensionContext } from '../../browser/extension-context';
-import type { BrowserExtension } from '../../browser/extensions';
+import {
+  canonicalMessageId,
+  useExtensionContext,
+} from '../../browser/extensions/extension-context';
+import type { BrowserExtension } from '../../browser/extensions/extensions';
 import { formatDuration, type TimingState } from './contracts';
 
 function ToolDuration({ part }: { part: ToolCallMessagePartProps }) {

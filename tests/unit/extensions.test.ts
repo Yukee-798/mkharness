@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { validateExtensions } from '../../src/server/extensions';
+import { validateExtensions } from '../../src/server/extensions/registry';
 import { checkRunLimits } from '../../src/server/limits';
 
 it('rejects duplicate extension, tool and task names before native installation', () => {

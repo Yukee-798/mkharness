@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { applicationModels } from '../../src/server/models';
-import { bindExecution, executionModels } from '../../src/server/execution-models';
+import { applicationModels } from '../../src/server/models/catalog';
+import { bindExecution, executionModels } from '../../src/server/models/execution';
 async function bound() {
   const models = executionModels(
     applicationModels({ MODEL_PROVIDER: 'openrouter', MODEL_ID: 'openrouter/free' }),

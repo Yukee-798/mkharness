@@ -1,8 +1,8 @@
 import handler from '@tanstack/react-start/server-entry';
 import api from './server/index';
 
-export { ConversationAgent } from './server/conversation';
-export { McpConnection } from './server/mcp-connections/connection';
+export { ConversationAgent } from './server/conversations/agent';
+export { McpConnection } from './server/mcp/connections/connection';
 
 export default {
   async fetch(request, env, ctx) {

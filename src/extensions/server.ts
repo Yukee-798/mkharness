@@ -5,8 +5,8 @@ import {
   type ExtensionConfiguration,
 } from './configuration';
 import type { EntryRecord } from '@earendil-works/pi-durable';
-import type { ServerContribution, ContributionHost } from '../server/contributions';
-import { validateContributionIds } from '../server/contributions';
+import type { ServerContribution, ContributionHost } from '../server/extensions/contributions';
+import { validateContributionIds } from '../server/extensions/contributions';
 type Context = {
   env: Env;
   entries: () => Promise<readonly EntryRecord[]>;
@@ -38,9 +38,9 @@ export const definitions: readonly Definition[] = [
   },
   {
     id: 'mcp',
-    create: async ({ env, host }) => {
+    create: async ({ env, host, configuration = extensionConfiguration }) => {
       const { userMcpContribution } = await import('./mcp/server');
-      return userMcpContribution(env, host);
+      return userMcpContribution(env, host, configuration);
     },
   },
   {
@@ -53,12 +53,19 @@ export const definitions: readonly Definition[] = [
   {
     id: 'web',
     create: async ({ env }) => {
-      const { webTools } = await import('../server/web');
+      const { webTools } = await import('./web/server');
       const { projectSources } = await import('./web/sources');
       return {
         id: 'web',
         extension: webTools((env as Env & { TAVILY_API_KEY?: string }).TAVILY_API_KEY),
         projectState: projectSources,
+        projectHistory: (facts) =>
+          Object.fromEntries(
+            Object.entries(projectSources(facts).replies).map(([id, sources]) => [
+              id,
+              { replies: { [id]: sources } },
+            ]),
+          ),
       };
     },
   },
@@ -93,7 +100,8 @@ export const definitions: readonly Definition[] = [
     create: async ({ configuration = extensionConfiguration }) => {
       // Both source kinds share one native Skills extension and one pair of tools.
       if (extensionEnabled('skills', configuration)) return { id: 'skills-example' };
-      const { staticSkills, exampleSkillSource } = await import('../server/skills');
+      const { staticSkills } = await import('../server/skills/static');
+      const { exampleSkillSource } = await import('./skills/example');
       return { id: 'skills-example', extension: await staticSkills([exampleSkillSource()]) };
     },
   },

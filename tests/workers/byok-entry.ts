@@ -1,4 +1,4 @@
-import { ConversationAgent } from '../../src/server/conversation';
+import { ConversationAgent } from '../../src/server/conversations/agent';
 import { fixtureModels } from '../fixture-model';
 export class BYOKProbe extends ConversationAgent {
   protected override models() {

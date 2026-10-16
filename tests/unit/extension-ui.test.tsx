@@ -1,4 +1,4 @@
-import { ComposerFooterExtensions } from '../../src/browser/extension-ui';
+import { ComposerFooterExtensions } from '../../src/browser/extensions/extension-ui';
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -11,10 +11,10 @@ import {
   useExternalStoreRuntime,
   type ToolCallMessagePartProps,
 } from '@assistant-ui/react';
-import { ExtensionContext } from '../../src/browser/extension-context';
-import type { ExtensionDecoration } from '../../src/browser/extensions';
-import { ToolActivity } from '../../src/browser/tool-activity';
-import { AssistantFooter } from '../../src/browser/assistant-footer';
+import { ExtensionContext } from '../../src/browser/extensions/extension-context';
+import type { ExtensionDecoration } from '../../src/browser/extensions/extensions';
+import { ToolActivity } from '../../src/browser/chat/messages/tool-activity';
+import { AssistantFooter } from '../../src/browser/chat/messages/assistant-footer';
 
 afterEach(cleanup);
 const part = {

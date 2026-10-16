@@ -236,7 +236,7 @@ test('a genuine streaming response renders an inert native preview before the to
         return route.fulfill({
           json: resource({ panelRef: '2.call', ui, program: null, revision: 0 }),
         });
-      if (url.endsWith('/snapshot'))
+      if (new URL(url).pathname.endsWith('/snapshot'))
         return route.fulfill({
           json: {
             entries: committed

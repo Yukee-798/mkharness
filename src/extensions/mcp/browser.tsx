@@ -1,13 +1,16 @@
 import { useRef, useState } from 'react';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 import { Plug } from 'lucide-react';
-import { canonicalMessageId, useExtensionContext } from '../../browser/extension-context';
-import { useLocale } from '../../browser/locale';
-import { ApprovalCard, type ApprovalState } from '../../browser/approval-card';
+import {
+  canonicalMessageId,
+  useExtensionContext,
+} from '../../browser/extensions/extension-context';
+import { useLocale } from '../../browser/app/locale';
+import { ApprovalCard, type ApprovalState } from '../../browser/chat/messages/approval-card';
 import { request } from '../../browser/api';
 import { Alert, AlertDescription } from '../../browser/ui/alert';
-import type { ExtensionUI } from '../../browser/extensions';
-import type { McpRequest } from '../../server/mcp-connections/requests';
+import type { ExtensionUI } from '../../browser/extensions/extensions';
+import type { McpRequest } from '../../server/mcp/connections/requests';
 
 type ProjectedRequest = McpRequest & { toolCallId?: string };
 type McpState = {

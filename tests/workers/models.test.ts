@@ -6,7 +6,7 @@ import {
   applicationModelCatalog,
   validateModelSelection,
   configuredModelCatalog,
-} from '../../src/server/models';
+} from '../../src/server/models/catalog';
 import { runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 it('enables low reasoning by default and respects an explicit off setting', async () => {
   expect(applicationThinkingLevel({})).toBe('low');

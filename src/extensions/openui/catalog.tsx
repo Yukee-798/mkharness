@@ -1,4 +1,4 @@
-import { useLocale } from '../../browser/locale';
+import { useLocale } from '../../browser/app/locale';
 import {
   cloneElement,
   createContext,
@@ -20,19 +20,11 @@ import {
 // Share the root export with ThemeProvider; the genui-lib bundle has a separate context.
 import { openuiLibrary } from '@openuidev/react-ui';
 import { z } from 'zod';
-import { finiteJson, jsonEqual } from '../../shared/json';
+import { jsonEqual } from '../../shared/json';
 import { validateSlider } from './slider';
 import { Progress } from './progress-component';
-export type PanelGuard = {
-  epoch: number;
-  ready: boolean;
-  halted: boolean;
-  isCurrent?: (frame: unknown) => boolean;
-  markUserCommit?: () => void;
-  captureBinding?: (key: string, value: unknown) => void;
-  report: (message: string) => void;
-};
-export const PanelContext = createContext<PanelGuard | null>(null);
+import { PanelSession } from './panel/session';
+export const PanelContext = createContext<PanelSession | null>(null);
 export const StateSync = defineComponent({
   name: 'StateSync',
   description:
@@ -48,28 +40,11 @@ export const StateSync = defineComponent({
       { value, setValue } = useStateField('StateSync', props.value),
       streaming = useIsStreaming(),
       loading = useIsQueryLoading();
-    const chain = useRef({ epoch: -1, writes: 0, halted: false });
+    const binding = useRef({});
     useEffect(() => {
-      if (!guard) return;
-      if (chain.current.epoch !== guard.epoch)
-        chain.current = { epoch: guard.epoch, writes: 0, halted: false };
-      if (!props.enabled || streaming || loading || !guard.ready || chain.current.halted) return;
-      if (guard.isCurrent && !guard.isCurrent(props.computed)) return;
-      try {
-        finiteJson(props.next);
-      } catch {
-        guard.report('Automatic update is not finite JSON');
-        return;
-      }
-      if (value !== undefined && jsonEqual(value, props.next)) return;
-      if (chain.current.writes >= 3) {
-        chain.current.halted = true;
-        guard.halted = true;
-        guard.report('Automatic input updates did not converge. Edit an input to retry.');
-        return;
-      }
-      chain.current.writes++;
-      setValue(props.next);
+      if (!guard || !props.enabled || streaming || loading) return;
+      if (guard.automaticWrite(binding.current, value, props.next, props.computed))
+        setValue(props.next);
     }, [guard, value, setValue, props.next, props.enabled, props.computed, streaming, loading]);
     return null;
   },

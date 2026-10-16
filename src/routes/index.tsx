@@ -1,7 +1,7 @@
 import { ClientOnly, createFileRoute } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 
-const Application = lazy(() => import('../browser/application'));
+const Application = lazy(() => import('../browser/app/application'));
 
 export const Route = createFileRoute('/')({
   validateSearch: (

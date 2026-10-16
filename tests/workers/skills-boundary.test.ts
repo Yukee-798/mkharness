@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { staticSkills } from '../../src/server/skills';
+import { staticSkills } from '../../src/server/skills/static';
 const source = () => ({
   id: 'guide',
   fingerprint: 'v1',

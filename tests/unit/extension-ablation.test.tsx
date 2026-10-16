@@ -11,7 +11,7 @@ import {
 } from '@assistant-ui/react';
 import { toolkit as exampleToolkit } from '../../src/extensions/example/browser';
 import { ToolProgressFold } from '../../src/shared/tool-progress';
-import { loadBrowserExtensions } from '../../src/browser/extensions';
+import { loadBrowserExtensions } from '../../src/browser/extensions/extensions';
 afterEach(cleanup);
 it('does not evaluate unselected modules and distinguishes missing native Toolkit results', async () => {
   const openui = vi.fn(async () => ({ toolkit: {} }));

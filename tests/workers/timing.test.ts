@@ -1,7 +1,7 @@
 import { env, abortAllDurableObjects, runInDurableObject } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
-import { createExtensionProjection } from '../../src/server/extension-state';
-import { BG } from '../../src/server/conversation';
+import { createExtensionProjection } from '../../src/server/extensions/state';
+import { BG } from '../../src/server/conversations/context';
 
 it('projects real Pi tool/run durations over SSE and restores the same facts after DO reconstruction', async () => {
   let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());

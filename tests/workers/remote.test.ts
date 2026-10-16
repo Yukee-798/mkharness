@@ -2,7 +2,7 @@ import { remoteActionSource } from '../../src/extensions/async-example/contracts
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
 import { RemoteIntents, type RemoteIntent } from '../../src/extensions/async-example/runtime';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 
 it('native owned child state survives eviction; known IDs are queried without another remote submission', async () => {
   let submits = 0,

@@ -30,7 +30,7 @@ test('a directory read failure cannot reject a successfully created chat', async
       json: { items: [{ id: 'existing', title: '旧聊天', updated_at: 1 }], next: null },
     });
   });
-  await page.route('**/api/conversations/*/snapshot', (route) =>
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
   );
   await page.route('**/api/conversations/*/runs', (route) =>
@@ -93,7 +93,7 @@ test('sidebar collapse retains the chat and draft; bottom account menu reports s
       },
     }),
   );
-  await page.route('**/api/conversations/current/snapshot', async (route) => {
+  await page.route('**/api/conversations/current/snapshot*', async (route) => {
     snapshots++;
     await initialRead;
     return route.fulfill({ json: { entries: [], pending: [], stopping: false } });
@@ -103,7 +103,8 @@ test('sidebar collapse retains the chat and draft; bottom account menu reports s
   );
   await page.goto('/?chat=current');
   const composer = page.getByRole('textbox', { name: '消息', exact: true });
-  await expect(composer).toBeDisabled();
+  await expect(page.getByRole('status').filter({ hasText: '正在恢复聊天…' })).toBeVisible();
+  await expect(composer).toHaveCount(0);
   releaseInitial();
   await composer.fill('尚未发送的草稿');
   const original = await composer.elementHandle();
@@ -219,7 +220,7 @@ test('personal directory creates and restores a chat with keyboard access on mob
             },
     });
   });
-  await page.route('**/api/conversations/*/snapshot', (route) =>
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
   );
   await page.route('**/api/conversations/*/runs', (route) =>

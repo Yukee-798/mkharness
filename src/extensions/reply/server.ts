@@ -1,4 +1,4 @@
-import type { ServerContribution } from '../../server/contributions';
+import type { ServerContribution } from '../../server/extensions/contributions';
 import { AppError } from '../../shared/contracts';
 import { defineTool, type EntryId } from '@earendil-works/pi-durable';
 import { Type } from '@earendil-works/pi-ai';
@@ -71,6 +71,13 @@ export const replyContribution = (): ServerContribution => ({
     ],
   },
   projectState: projectSuggestions,
+  projectHistory: (facts) =>
+    Object.fromEntries(
+      Object.entries(projectSuggestions(facts).replies).map(([id, prompts]) => [
+        id,
+        { replies: { [id]: prompts } },
+      ]),
+    ),
   actions: {
     regenerate: {
       async normalize(payload, context) {

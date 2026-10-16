@@ -1,12 +1,15 @@
 import { useRef, useState, type MouseEvent } from 'react';
 import { ActionBarPrimitive, ThreadPrimitive, useAuiState } from '@assistant-ui/react';
 import { RefreshCw, LoaderCircle } from 'lucide-react';
-import { canonicalMessageId, useExtensionContext } from '../../browser/extension-context';
-import { useLocale } from '../../browser/locale';
+import {
+  canonicalMessageId,
+  useExtensionContext,
+} from '../../browser/extensions/extension-context';
+import { useLocale } from '../../browser/app/locale';
 import { Button } from '../../browser/ui/button';
-import { TooltipIconButton } from '../../browser/tooltip-icon-button';
+import { TooltipIconButton } from '../../browser/ui/tooltip-icon-button';
 import type { RunCommand } from '../../shared/contracts';
-import type { BrowserExtension } from '../../browser/extensions';
+import type { BrowserExtension } from '../../browser/extensions/extensions';
 import type { SuggestionsState } from './suggestions';
 import { SUGGESTIONS_TOOL } from './suggestions';
 

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { SettingsDialog } from '../../src/browser/Settings';
+import { SettingsDialog } from '../../src/browser/settings/Settings';
 import type { ModelSettings, CredentialMetadata } from '../../src/shared/model-settings';
 import { userKeys } from '../../src/browser/queries';
 const metadata: CredentialMetadata = {

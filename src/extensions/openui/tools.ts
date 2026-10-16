@@ -13,7 +13,7 @@ import type { Program } from './compute/contracts';
 import { validateSlider } from './slider';
 import { validateProgress } from './progress';
 import { validateUIActions } from './contracts';
-import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/tool-output';
+import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/extensions/tool-output';
 function difference(
   expected: Json | undefined,
   actual: Json | undefined,

@@ -1,7 +1,7 @@
 import { exampleExtension } from '../../src/extensions/example/server';
-import { ConversationAgent } from '../../src/server/conversation';
-import { executionModels } from '../../src/server/execution-models';
-import { applicationModels } from '../../src/server/models';
+import { ConversationAgent } from '../../src/server/conversations/agent';
+import { executionModels } from '../../src/server/models/execution';
+import { applicationModels } from '../../src/server/models/catalog';
 import type { Models } from '@earendil-works/pi-ai/models';
 
 /** Test-only native protocol fixture; all task, tool, resource and SSE behavior remains production code. */

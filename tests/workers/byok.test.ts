@@ -1,8 +1,8 @@
 import { env, abortAllDurableObjects, runInDurableObject } from 'cloudflare:test';
 import { it, expect } from 'vitest';
-import { ModelCredentials } from '../../src/server/model-credentials';
+import { ModelCredentials } from '../../src/server/models/credentials';
 import { AppError } from '../../src/shared/contracts';
-import type { CredentialAccess } from '../../src/server/execution-models';
+import type { CredentialAccess } from '../../src/server/models/execution';
 import type { PiHarness } from 'agents/harness/pi';
 async function fixture() {
   const owner = crypto.randomUUID(),

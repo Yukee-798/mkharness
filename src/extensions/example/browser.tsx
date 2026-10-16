@@ -1,6 +1,6 @@
-import { useLocale } from '../../browser/locale';
+import { useLocale } from '../../browser/app/locale';
 import type { Toolkit } from '@assistant-ui/react';
-import { ToolActivity } from '../../browser/tool-activity';
+import { ToolActivity } from '../../browser/chat/messages/tool-activity';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 
 function DescribeTextResult(part: ToolCallMessagePartProps) {

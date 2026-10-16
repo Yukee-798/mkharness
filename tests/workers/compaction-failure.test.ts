@@ -1,7 +1,7 @@
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { LiveDoc } from '@earendil-works/pi-durable';
 import { expect, it } from 'vitest';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 
 it('projects native compaction model-resolution failure in REST and SSE without exposing the error, including reconstruction', async () => {
   let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());

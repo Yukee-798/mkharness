@@ -1,6 +1,6 @@
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { it, expect } from 'vitest';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 const stub = () => env.CONVERSATIONS.getByName(crypto.randomUUID());
 async function idle(target: ReturnType<typeof stub>) {
   for (let i = 0; i < 250; i++) {

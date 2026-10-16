@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { AssistantEntry, ToolResultEntry, UserEntry } from '@earendil-works/pi-durable';
 import { expect, it, vi } from 'vitest';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 import { usage } from '../fixture-model';
 
 it.each([100, 500])(

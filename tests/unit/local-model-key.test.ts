@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { readModelKey, rememberModelKey, retainModelKeys } from '../../src/browser/local-model-key';
+import {
+  readModelKey,
+  rememberModelKey,
+  retainModelKeys,
+} from '../../src/browser/models/local-model-key';
 afterEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();

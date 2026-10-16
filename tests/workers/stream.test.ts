@@ -20,15 +20,19 @@ it.each(['slow observer race', 'progress seam'])(
       runId = crypto.randomUUID();
     await stub.submitRun({ runId, text });
     const body = await runInDurableObject(stub, async (instance) => {
-      const projector = instance.progressProjector.bind(instance);
-      instance.progressProjector = async () => {
+      const projector = instance.extensionProjection.bind(instance);
+      let delayed = false;
+      instance.extensionProjection = async () => {
+        delayed = true;
         await untilDone(() => instance.submission(runId));
         return projector();
       };
       try {
-        return await (await instance.observeRun(runId)).text();
+        const body = await (await instance.observeRun(runId)).text();
+        expect(delayed).toBe(true);
+        return body;
       } finally {
-        instance.progressProjector = projector;
+        instance.extensionProjection = projector;
       }
     });
     const attached = events(body);

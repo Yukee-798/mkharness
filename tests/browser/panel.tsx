@@ -1,4 +1,4 @@
-import { LocaleProvider } from '../../src/browser/locale';
+import { LocaleProvider } from '../../src/browser/app/locale';
 import { createRoot } from 'react-dom/client';
 import { Panel } from '../../src/extensions/openui/Panel';
 import '../../src/browser/styles.css';

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { AppError } from '../../shared/contracts';
 import { SKILL_LIMITS } from '../../shared/skills';
-import { boundedText } from '../web';
+import { boundedText } from '../http/body';
 import { importSkill } from './package';
 import {
   skillsEnabled,

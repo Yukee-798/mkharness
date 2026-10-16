@@ -1,11 +1,31 @@
 import { extensionConfiguration } from '../../src/extensions/configuration';
 import * as activation from '../../src/extensions/server';
 import { afterEach, expect, it, vi } from 'vitest';
-import { collectContributions } from '../../src/server/contributions';
-import { loadBrowserExtensions } from '../../src/browser/extensions';
+import { collectContributions } from '../../src/server/extensions/contributions';
+import { loadBrowserExtensions } from '../../src/browser/extensions/extensions';
 import { definitions, extensionIds } from '../../src/extensions/server';
-import { applicationContributions } from '../../src/server/assembly';
+import { applicationContributions } from '../../src/server/extensions/assembly';
 afterEach(() => vi.restoreAllMocks());
+
+it('uses the supplied custom MCP setting instead of the deployment default', async () => {
+  const first = vi.fn(async () => ({ owner: 'owner', bindings: '[]' }));
+  const prepare = vi.fn(() => ({ bind: () => ({ first }) }));
+  const env = { DB: { prepare } } as unknown as Env;
+  const host = { identity: 'chat', conversationId: 'chat', pi: vi.fn(), command: vi.fn() };
+  for (const custom of [false, true]) {
+    prepare.mockClear();
+    await applicationContributions(env, async () => [], host, {
+      mcp: { enabled: true, custom },
+    });
+    expect(prepare).toHaveBeenCalledTimes(custom ? 1 : 0);
+  }
+  expect(() => activation.extensionIds({ mcp: { enabled: true, custom: 'yes' } } as any)).toThrow(
+    'invalid_extension_configuration',
+  );
+  expect(() => activation.extensionIds({ openui: { enabled: true, inspect: 1 } } as any)).toThrow(
+    'invalid_extension_configuration',
+  );
+});
 
 it('rejects a factory identity that disagrees with the static activation namespace', async () => {
   vi.spyOn(definitions[0]!, 'create').mockResolvedValue({ id: 'different-id' });

@@ -1,7 +1,7 @@
-import type { ToolRegistration } from '@earendil-works/pi-durable';
-import type { ContributionHost, ServerContribution } from '../../server/contributions';
+import type { EntryRecord, ToolRegistration } from '@earendil-works/pi-durable';
+import type { ContributionHost, ServerContribution } from '../../server/extensions/contributions';
 import { conversationSkills, skillSource } from '../../server/skills/catalog';
-import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/tool-output';
+import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/extensions/tool-output';
 import { jsonText } from '../../shared/json';
 
 /** User packages are data sources for the SDK bridge, never executable extensions. */
@@ -17,13 +17,18 @@ export async function skillsContribution(
   if (!bindings.length && !includeExample) return { id: 'skills' };
   const sources = await Promise.all(bindings.map((binding) => skillSource(env, owner, binding)));
   if (includeExample) {
-    const { exampleSkillSource } = await import('../../server/skills');
+    const { exampleSkillSource } = await import('./example');
     sources.push(exampleSkillSource());
   }
   const { skills } = await import('agents/harness/pi');
   const extension = await skills(sources);
   return {
     id: 'skills',
+    projectConversation: () => ({ available: bindings }),
+    projectHistory: ({ entries }) =>
+      Object.fromEntries(
+        loadedSkills(entries).map((skill) => [String(skill.entryId), { loaded: [skill] }]),
+      ),
     extension: {
       ...extension,
       sections: [
@@ -77,20 +82,24 @@ export async function skillsContribution(
     },
     projectState: ({ entries }) => ({
       available: bindings,
-      loaded: entries.flatMap((entry) =>
-        (entry.model ?? []).flatMap((message) => {
-          if (
-            message.role !== 'toolResult' ||
-            message.isError ||
-            message.toolName !== 'activate_skill' ||
-            !message.content.some((part) => part.type === 'text' && part.text.length > 0)
-          )
-            return [];
-          const details = message.details as
-            { skill?: { id: string; name: string; version: string } } | undefined;
-          return details?.skill ? [{ ...details.skill, entryId: Number(entry.id) }] : [];
-        }),
-      ),
+      loaded: loadedSkills(entries),
     }),
   };
+}
+
+function loadedSkills(entries: readonly EntryRecord[]) {
+  return entries.flatMap((entry) =>
+    (entry.model ?? []).flatMap((message) => {
+      if (
+        message.role !== 'toolResult' ||
+        message.isError ||
+        message.toolName !== 'activate_skill' ||
+        !message.content.some((part) => part.type === 'text' && part.text.length > 0)
+      )
+        return [];
+      const details = message.details as
+        { skill?: { id: string; name: string; version: string } } | undefined;
+      return details?.skill ? [{ ...details.skill, entryId: Number(entry.id) }] : [];
+    }),
+  );
 }

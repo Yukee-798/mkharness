@@ -1,10 +1,10 @@
-import { useLocale } from '../../browser/locale';
+import { useLocale } from '../../browser/app/locale';
 import { useAuiState, type ToolCallMessagePartProps } from '@assistant-ui/react';
-import type { BrowserExtension } from '../../browser/extensions';
-import { useExtensionContext } from '../../browser/extension-context';
+import type { BrowserExtension } from '../../browser/extensions/extensions';
+import { useExtensionContext } from '../../browser/extensions/extension-context';
 import { Panel } from './Panel';
 import { partialUI } from './partial';
-import { useToolProgress } from '../../browser/tool-progress';
+import { useToolProgress } from '../../browser/chat/messages/tool-progress';
 function Present(part: ToolCallMessagePartProps) {
   const { t } = useLocale();
   const { id, userId, submit } = useExtensionContext();

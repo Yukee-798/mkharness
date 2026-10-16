@@ -1,6 +1,6 @@
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
-import { useExtensionContext } from '../../browser/extension-context';
-import type { ExtensionUI } from '../../browser/extensions';
+import { useExtensionContext } from '../../browser/extensions/extension-context';
+import type { ExtensionUI } from '../../browser/extensions/extensions';
 import type { SkillBinding } from '../../shared/skills';
 type State = { available: SkillBinding[] };
 function SkillMeta({ part }: { part: ToolCallMessagePartProps }) {

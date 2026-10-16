@@ -103,6 +103,24 @@ it('validates malformed and oversized input bodies before invoking Pi', async ()
   );
   expect(big.status).toBe(413);
 });
+it('rejects an oversized queue action before invoking the durable object', async () => {
+  const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
+  const created = await app.request(
+    'http://localhost:5173/api/conversations',
+    { method: 'POST', headers },
+    env,
+  );
+  const { id } = (await created.json()) as { id: string };
+  const actOnQueuedInput = vi.fn(async () => JSON.stringify({ queue: [] }));
+  const response = await app.request(
+    `http://localhost:5173/api/conversations/${id}/runs/${crypto.randomUUID()}/queue`,
+    { method: 'POST', headers, body: ' '.repeat(2048) + '{"action":"remove"}' },
+    { ...env, CONVERSATIONS: { getByName: () => ({ actOnQueuedInput }) } } as unknown as Env,
+  );
+  expect(response.status).toBe(400);
+  expect(actOnQueuedInput).not.toHaveBeenCalled();
+});
+
 it('returns the Better Auth error shape when OAuth is not configured', async () => {
   const response = await app.request(
     'http://localhost:5173/api/auth/get-session',

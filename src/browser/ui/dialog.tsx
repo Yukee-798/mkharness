@@ -1,5 +1,5 @@
 'use client';
-import { useLocale } from '../locale';
+import { useLocale } from '../app/locale';
 
 import * as React from 'react';
 import { cn } from './utils';

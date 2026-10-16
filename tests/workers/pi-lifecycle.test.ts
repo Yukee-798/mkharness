@@ -1,7 +1,7 @@
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
 import { Harness } from '@earendil-works/pi-durable';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 import type { LifecycleProbe } from './lifecycle-entry';
 
 const probes = (env as unknown as { LIFECYCLE_PROBES: DurableObjectNamespace<LifecycleProbe> })

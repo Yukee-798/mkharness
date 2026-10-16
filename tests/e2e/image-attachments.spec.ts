@@ -86,7 +86,7 @@ test('an image-only first message travels in one frozen command and remains visi
     accepted = true;
     return route.fulfill({ status: 202, json: { accepted: true } });
   });
-  await page.route('**/api/conversations/*/snapshot', (route) =>
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({
       json: { entries: accepted ? history(command) : [], pending: [], stopping: false },
     }),
@@ -131,7 +131,7 @@ test('a failed image receipt retries exactly once with unchanged bytes and does 
         })
       : route.fulfill({ status: 202, json: { accepted: true } });
   });
-  await page.route('**/api/conversations/*/snapshot', (route) =>
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({
       json: {
         entries: commands.length > 1 ? history(commands[0]) : [],

@@ -10,10 +10,10 @@ import {
   within,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Skills } from '../../src/browser/Skills';
+import { Skills } from '../../src/extensions/skills/Settings';
 import { SkillPicker, useSkillSelection } from '../../src/extensions/skills/selection';
 import { skillQueryKey } from '../../src/extensions/skills/queries';
-import { useSubmission } from '../../src/browser/use-submission';
+import { useSubmission } from '../../src/browser/chat/session/use-submission';
 import type { SkillPreview, SkillView } from '../../src/shared/skills';
 const preview: SkillPreview = {
   name: 'delivery-guide',

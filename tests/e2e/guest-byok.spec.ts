@@ -119,7 +119,7 @@ test('first submission retains conversation and run identity after an uncertain 
       ? route.abort('failed')
       : route.fulfill({ status: 202, json: { accepted: true } });
   });
-  await page.route('**/api/conversations/*/snapshot', (route) =>
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
   );
   await page.getByLabel('消息', { exact: true }).fill('hello');

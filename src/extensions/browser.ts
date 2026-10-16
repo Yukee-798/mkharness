@@ -1,4 +1,4 @@
-import type { BrowserLoaders } from '../browser/extensions';
+import type { BrowserLoaders } from '../browser/extensions/extensions';
 /** Static reviewed imports; server IDs cannot supply executable URLs. */
 export const browserLoaders: BrowserLoaders = {
   skills: () => import('./skills/browser'),

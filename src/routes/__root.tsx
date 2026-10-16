@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createRootRouteWithContext, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import stylesheet from '../browser/styles.css?url';
-import { ThemeProvider } from '../browser/theme';
+import { ThemeProvider } from '../browser/app/theme';
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({

@@ -1,11 +1,11 @@
 import { extensionConfiguration } from '../../src/extensions/configuration';
 import { Harness, MemoryStorage, createRegistry, type Extension } from '@earendil-works/pi-durable';
 import { it, expect, vi } from 'vitest';
-import { webTools } from '../../src/server/web';
-import { staticSkills } from '../../src/server/skills';
+import { webTools } from '../../src/extensions/web/server';
+import { staticSkills } from '../../src/server/skills/static';
 import { fixtureModels } from '../fixture-model';
-import { BG } from '../../src/server/conversation';
-import { applicationExtensions } from '../../src/server/assembly';
+import { BG } from '../../src/server/conversations/context';
+import { applicationContributions } from '../../src/server/extensions/assembly';
 
 it.each([
   { key: undefined, enabled: false },
@@ -13,13 +13,13 @@ it.each([
   { key: 'fixture-key', enabled: true },
 ])('native model tool catalog respects search configuration: %j', async ({ key, enabled }) => {
   const registry = createRegistry();
-  for (const extension of await applicationExtensions(
+  for (const contribution of await applicationContributions(
     { TAVILY_API_KEY: key } as unknown as Env,
     async () => [],
     undefined,
     { ...extensionConfiguration, openui: { enabled: false } },
   ))
-    registry.install(extension);
+    if (contribution.extension) registry.install(contribution.extension);
   const names = registry
     .snapshot()
     .tools()

@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
-import { useExtensionConfig } from '../../src/browser/extension-config';
+import { useExtensionConfig } from '../../src/browser/extensions/extension-config';
 import { browserLoaders } from '../../src/extensions/browser';
 
 afterEach(() => {

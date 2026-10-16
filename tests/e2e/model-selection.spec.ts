@@ -24,7 +24,7 @@ test('model and effort apply on new HTTP submissions and restore selection witho
   let selection = catalog.defaultSelection;
   await page.route('**/api/conversations/**', async (route) => {
     const req = route.request(),
-      url = req.url();
+      url = new URL(req.url()).pathname;
     if (url.endsWith('/runs') && req.method() === 'POST') {
       const command = req.postDataJSON();
       commands.push(command);

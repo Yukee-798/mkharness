@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ProjectionContext } from '../../server/contributions';
+import type { ProjectionContext } from '../../server/extensions/contributions';
 
 export const SUGGESTIONS_TOOL = 'set_reply_suggestions';
 export const suggestionsSchema = z

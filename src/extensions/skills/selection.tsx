@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BookOpen } from 'lucide-react';
 import { skillQuery } from './queries';
-import { useLocale } from '../../browser/locale';
+import { useLocale } from '../../browser/app/locale';
 import { Button } from '../../browser/ui/button';
 import { Checkbox } from '../../browser/ui/checkbox';
 import { Label } from '../../browser/ui/label';

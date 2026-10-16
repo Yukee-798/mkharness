@@ -145,7 +145,18 @@ export async function publishSkill(
     if (saved?.prefix !== prefix && written.length) await store.delete(written);
     return view(await ownedSkill(env, owner, id));
   } catch (e) {
-    if (!committed && written.length) await store.delete(written);
+    if (!committed && written.length) {
+      // A rejected batch can have committed before its acknowledgement was lost.
+      // Delete only an unreferenced upload; a failed verification leaves an orphan
+      // for later cleanup rather than erasing a published immutable version.
+      const saved = await env.DB.prepare(
+        'SELECT prefix FROM skill_versions WHERE skill_id=? AND version=?',
+      )
+        .bind(id, preview.version)
+        .first<{ prefix: string }>()
+        .catch(() => undefined);
+      if (saved !== undefined && saved?.prefix !== prefix) await store.delete(written);
+    }
     if (String(e).includes('UNIQUE constraint failed'))
       throw new AppError(409, 'duplicate_skill_name');
     throw e;

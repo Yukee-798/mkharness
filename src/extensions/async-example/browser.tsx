@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
-import { useExtensionContext } from '../../browser/extension-context';
-import { useLocale } from '../../browser/locale';
+import { useExtensionContext } from '../../browser/extensions/extension-context';
+import { useLocale } from '../../browser/app/locale';
 import { Button } from '../../browser/ui/button';
-import type { ExtensionUI } from '../../browser/extensions';
+import type { ExtensionUI } from '../../browser/extensions/extensions';
 import { ASYNC_EXAMPLE_ID, remoteActionSource } from './contracts';
 import type { RemoteProgress } from './progress';
 

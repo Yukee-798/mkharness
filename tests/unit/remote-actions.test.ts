@@ -5,7 +5,7 @@ import {
 } from '../../src/extensions/async-example/contracts';
 import { expect, it } from 'vitest';
 import { commandSchema, storedRequestSchema } from '../../src/shared/contracts';
-import { createSubmitter } from '../../src/browser/submission';
+import { createSubmitter } from '../../src/browser/chat/session/submission';
 it('remote actions accept only a scoped original task reference', () => {
   const command = {
     runId: crypto.randomUUID(),

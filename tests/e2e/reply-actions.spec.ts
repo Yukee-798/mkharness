@@ -33,7 +33,7 @@ test('native Sources persist on refetch, suggestions submit over HTTP and preser
       answered = true;
       return route.fulfill({ status: 202, json: { accepted: true } });
     }
-    if (request.url().endsWith('/snapshot'))
+    if (new URL(request.url()).pathname.endsWith('/snapshot'))
       return route.fulfill({
         json: {
           entries: answered
@@ -113,7 +113,7 @@ test('regeneration preempts native reload, deduplicates double clicks and retrie
       completed = true;
       return route.fulfill({ status: 202, json: { accepted: true } });
     }
-    if (route.request().url().endsWith('/snapshot'))
+    if (new URL(route.request().url()).pathname.endsWith('/snapshot'))
       return route.fulfill({
         json: {
           entries: completed

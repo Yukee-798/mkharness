@@ -4,7 +4,7 @@ import {
   bindExecution,
   executionModels,
   restoreExecutionModels,
-} from '../../src/server/execution-models';
+} from '../../src/server/models/execution';
 import {
   Harness,
   MemoryStorage,

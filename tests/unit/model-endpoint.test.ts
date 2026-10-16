@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { modelBaseUrl, modelEndpointFetch } from '../../src/server/model-endpoint';
+import { modelBaseUrl, modelEndpointFetch } from '../../src/server/models/endpoint';
 afterEach(() => vi.restoreAllMocks());
 
 it('normalizes a public HTTPS base path and rejects credential-bearing or private URLs', () => {

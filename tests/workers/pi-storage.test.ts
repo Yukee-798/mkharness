@@ -4,17 +4,49 @@ import {
   defineDoc,
   LiveDoc,
   ROOT_CONVERSATION_ID,
+  UserEntry,
 } from '@earendil-works/pi-durable';
 import { openPiSessionStore } from 'agents/harness/pi';
 import { expect, it, vi } from 'vitest';
-import { BG } from '../../src/server/conversation';
-import { claimPiStorage } from '../../src/server/pi-storage';
+import { BG } from '../../src/server/conversations/context';
+import { claimPiStorage } from '../../src/server/conversations/pi-storage';
+import { ConversationFactsIndex } from '../../src/server/conversations/facts-index';
 
 const Probe = defineDoc({
   kind: 'test.writer-probe',
   version: 1,
   scope: 'session',
   initial: () => ({ generation: { message: { content: [{ text: 'first' }] } } }),
+});
+
+it('rolls native writes and derived locators back together when indexing fails', async () => {
+  const target = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  await runInDurableObject(target, async (instance, state) => {
+    await instance.root();
+    await instance.harness.dispose();
+    const index = new ConversationFactsIndex(state.storage);
+    const before = state.storage.sql.exec('SELECT count(*) AS n FROM pi_entries').one().n;
+    const revision = index.revision;
+    const storage = await openPiSessionStore(state.storage);
+    const session = createSession(
+      claimPiStorage(storage, state.storage, undefined, (writes, seq) => {
+        index.committed(writes, seq);
+        throw new Error('index write failed');
+      }),
+    );
+    await expect(
+      session.commit(
+        (tx) =>
+          tx.appendEntry(UserEntry, ROOT_CONVERSATION_ID, {
+            model: [{ role: 'user', content: 'must roll back', timestamp: 1 }],
+          }),
+        BG,
+      ),
+    ).rejects.toThrow('index write failed');
+    expect(state.storage.sql.exec('SELECT count(*) AS n FROM pi_entries').one().n).toBe(before);
+    expect(index.revision).toBe(revision);
+    await session.close(BG);
+  });
 });
 
 it('fences a replaced writer before it persists a stale cached delta, preserving replay', async () => {

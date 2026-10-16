@@ -1,4 +1,4 @@
-import type { ProjectionContext, ServerContribution } from '../../server/contributions';
+import type { ProjectionContext, ServerContribution } from '../../server/extensions/contributions';
 import type { TimingState } from './contracts';
 import { toolRef } from '../../shared/references';
 
@@ -58,4 +58,13 @@ export function projectTiming({ entries, tasks, submissions }: ProjectionContext
 export const timingContribution = (): ServerContribution => ({
   id: 'timing',
   projectState: projectTiming,
+  projectHistory(facts) {
+    const state = projectTiming(facts);
+    const result: Record<string, TimingState> = {};
+    for (const [id, span] of Object.entries(state.replies))
+      (result[id] ??= { tools: {}, replies: {} }).replies[id] = span;
+    for (const [ref, span] of Object.entries(state.tools))
+      (result[ref.slice(0, ref.indexOf('.'))] ??= { tools: {}, replies: {} }).tools[ref] = span;
+    return result;
+  },
 });

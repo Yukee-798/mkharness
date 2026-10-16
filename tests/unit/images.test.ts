@@ -1,11 +1,11 @@
-import { executionModels } from '../../src/server/execution-models';
+import { executionModels } from '../../src/server/models/execution';
 import { fixtureModels } from '../fixture-model';
 import { expect, it } from 'vitest';
 import { fromAgUiMessages } from '@assistant-ui/react-ag-ui';
 import { commandSchema } from '../../src/shared/contracts';
 import { IMAGE_LIMITS, imagesSchema } from '../../src/shared/images';
 import { toMessages } from '../../src/shared/stream';
-import { createSubmitter } from '../../src/browser/submission';
+import { createSubmitter } from '../../src/browser/chat/session/submission';
 const image = {
   name: 'pixel.png',
   mimeType: 'image/png' as const,

@@ -55,6 +55,8 @@ pnpm dev
 
 ## 扩展 MkHarness
 
+目录职责见[源码架构](ARCHITECTURE.md)；本轮清理、问题修复与剩余架构风险见[工程审查](ENGINEERING_REVIEW.md)。
+
 扩展是经你审核、随应用部署发布的受信任代码。服务端能力与浏览器展示各有独立的静态装配入口，工具可以接入专属 renderer，无需在核心聊天逻辑增加工具名分支。
 
 | 扩展内容                             | 从这里开始                                                                                                |
@@ -62,8 +64,8 @@ pnpm dev
 | Agent 工具、提示词片段、hooks        | [`src/extensions/server.ts`](src/extensions/server.ts) — Pi 原生 Extension                                |
 | 工具 renderer、标题装饰、回复 Footer | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkit 与浏览器贡献              |
 | 生成 UI、资源、输入状态、继续动作    | [`src/extensions/openui/`](src/extensions/openui/) — 完整的可选扩展                                       |
-| 静态 Skills                          | [`src/server/skills.ts`](src/server/skills.ts)                                                            |
-| 部署级 MCP 工具                      | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` 配置                                             |
+| 静态 Skills                          | [`src/server/skills/static.ts`](src/server/skills/static.ts)                                              |
+| 部署级 MCP 工具                      | [`src/server/mcp/deployment.ts`](src/server/mcp/deployment.ts) — `MCP_SERVERS` 配置                       |
 | 异步服务                             | [`src/extensions/async-example/`](src/extensions/async-example/) — 按实际服务契约接入 submit/query/cancel |
 
 最小工具示例只需在 [`extensions.config.ts`](extensions.config.ts) 将 `example.enabled` 设为 `true`。其[服务端工具、提示词与 hook](src/extensions/example/server.ts)及[浏览器 renderer](src/extensions/example/browser.tsx) 统一放在 `src/extensions/example/`，默认不启用。[耗时扩展](src/extensions/timing/)演示如何装饰已有工具和回复。
@@ -84,7 +86,7 @@ root = Stack([
 
 范围滑块使用两个值，例如 `[20, 80]`。进度未知时使用 `Progress(null, "等待数据")`；它不会自动追踪后台 Agent 任务。
 
-具体接口与配置见[服务端契约](src/server/contributions.ts)、[浏览器契约](src/browser/extensions.ts)及 [.dev.vars.example](.dev.vars.example)。不包含运行时插件安装器或外部插件市场兼容层。
+具体接口与配置见[服务端契约](src/server/extensions/contributions.ts)、[浏览器契约](src/browser/extensions/extensions.ts)及 [.dev.vars.example](.dev.vars.example)。不包含运行时插件安装器或外部插件市场兼容层。
 
 异步服务示例以 `async-example` contribution 接入服务端与浏览器注册表。配置 `ASYNC_SERVICE_URL` 后安装其原生工具和任务；未配置服务时，扩展仍可展示和保护已有任务的未知结果。服务协议、重试与复查授权、原生任务恢复和进度卡片都位于该扩展目录。要完全停用示例，在统一配置中将 `async-example.enabled` 设为 `false`，基础聊天、历史、Stop 和 MCP 保持独立。
 
@@ -104,9 +106,9 @@ root = Stack([
 
 模块分工：
 
-- `src/server/mcp-connections/`：账号归属、连接目录、加密存储、原生 SDK 适配、HTTP 路由和端点策略。
+- `src/server/mcp/connections/`：账号归属、连接目录、加密存储、原生 SDK 适配、HTTP 路由和端点策略。
 - `src/extensions/mcp/`：通过 Pi 原生工具、任务和文档实现确认与中断恢复，通过现有扩展插槽呈现界面。确认决定走通用扩展 control 接口，不会启动第二次模型请求。
-- `src/server/mcp.ts`：保留部署级 `MCP_SERVERS`，与用户连接凭据独立。
+- `src/server/mcp/deployment.ts`：保留部署级 `MCP_SERVERS`，与用户连接凭据独立。
 
 首版支持公开 HTTPS Streamable HTTP、受限 JSON 工具 schema、文本和结构化 JSON 结果。不支持的 schema 会展示但无法启用。不会执行本地 stdio 命令或抓取远程 schema 引用，暂未将 MCP Apps、sampling、resources 和 prompts 作为产品能力开放。MCP 和 OAuth 请求均限制私网/保留地址、重定向、超时和响应大小，并做 DNS 预检；DNS 预检属于纵深防御，需要严格抵御 DNS 重绑定的部署还应配置网络出口隔离。
 

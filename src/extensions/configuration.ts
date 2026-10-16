@@ -8,7 +8,10 @@ export type ExtensionConfiguration = Readonly<
       readonly enabled: boolean;
       readonly [option: string]: unknown;
     }
-  >
+  > & {
+    mcp?: { readonly enabled: boolean; readonly custom?: boolean };
+    openui?: { readonly enabled: boolean; readonly inspect?: boolean };
+  }
 >;
 
 export { configuration as extensionConfiguration };
@@ -24,6 +27,10 @@ export function validateConfiguration(
   for (const [id, setting] of Object.entries(config)) {
     if (!known.has(id)) throw new AppError(503, 'unknown_extension_configuration');
     if (!setting || typeof setting.enabled !== 'boolean')
+      throw new AppError(503, 'invalid_extension_configuration');
+    const option = id === 'mcp' ? 'custom' : id === 'openui' ? 'inspect' : undefined;
+    const options: Readonly<Record<string, unknown>> = setting;
+    if (option && options[option] !== undefined && typeof options[option] !== 'boolean')
       throw new AppError(503, 'invalid_extension_configuration');
   }
 }

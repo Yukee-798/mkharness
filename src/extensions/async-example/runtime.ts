@@ -12,8 +12,8 @@ import {
 import { AppError, type StoredCommand } from '../../shared/contracts';
 import { remoteSource } from './contracts';
 import { canonicalJson, jsonText, finiteJson, type Json } from '../../shared/json';
-import { boundedText } from '../../server/web';
-import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/tool-output';
+import { boundedText } from '../../server/http/body';
+import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/extensions/tool-output';
 
 import { RemoteIntents, type RemoteIntent } from './intents';
 export { RemoteIntents, type RemoteIntent } from './intents';

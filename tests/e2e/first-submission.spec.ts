@@ -56,7 +56,7 @@ test('creation works while OpenUI is loading, retains the message across chats, 
     accepted = true;
     await route.fulfill({ status: 202, json: { accepted: true } });
   });
-  await page.route('**/api/conversations/*/snapshot', async (route) => {
+  await page.route('**/api/conversations/*/snapshot*', async (route) => {
     const captured = accepted;
     if (route.request().url().includes('/created/')) {
       snapshots++;
@@ -135,7 +135,7 @@ test('a lost first receipt retries its frozen command after navigation without c
     historyAvailable = true;
     return route.fulfill({ status: 202, json: { accepted: true } });
   });
-  await page.route('**/api/conversations/*/snapshot', (route) =>
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({
       json: {
         entries:
@@ -202,7 +202,7 @@ test('an accepted task observed before its HTTP receipt keeps one SSE connection
     await receipt;
     return route.fulfill({ status: 202, json: { accepted: true } });
   });
-  await page.route('**/api/conversations/*/snapshot', async (route) => {
+  await page.route('**/api/conversations/*/snapshot*', async (route) => {
     await accepted;
     return route.fulfill({
       json: {

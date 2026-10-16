@@ -1,5 +1,9 @@
 import { it, expect, vi } from 'vitest';
-import { createDraftSaver, createResourceDrafts, type SaveStatus } from '../../src/browser/draft';
+import {
+  createDraftSaver,
+  createResourceDrafts,
+  type SaveStatus,
+} from '../../src/browser/extensions/draft';
 it('serializes saves, coalesces edits and uses acknowledged revisions without replacing raw drafts', async () => {
   vi.useFakeTimers();
   const calls: { state: unknown; revision: number }[] = [];

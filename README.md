@@ -55,6 +55,8 @@ Use this foundation for research assistants, data workflows, or creative Agents 
 
 ## Extend MkHarness
 
+See [source architecture](ARCHITECTURE.md) for module ownership and the [engineering review](ENGINEERING_REVIEW.md) for the current cleanup and remaining architecture risks.
+
 Extensions are trusted code that you review and ship with your application. Server capabilities and browser presentation have separate static registration points, so a tool can have a custom renderer without adding tool-specific branches to core chat logic.
 
 | Add or customize                                           | Start here                                                                                                              |
@@ -62,8 +64,8 @@ Extensions are trusted code that you review and ship with your application. Serv
 | Agent tools, prompt sections, hooks                        | [`src/extensions/server.ts`](src/extensions/server.ts) — native Pi Extensions                                           |
 | Tool renderers, title decorations, reply/composer footers  | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkits and browser contributions              |
 | Generated UI, resources, input state, continuation actions | [`src/extensions/openui/`](src/extensions/openui/) — a complete optional extension                                      |
-| Static Skills                                              | [`src/server/skills.ts`](src/server/skills.ts)                                                                          |
-| Deployment MCP tools                                       | [`src/server/mcp.ts`](src/server/mcp.ts) — `MCP_SERVERS` configuration                                                  |
+| Static Skills                                              | [`src/server/skills/static.ts`](src/server/skills/static.ts)                                                            |
+| Deployment MCP tools                                       | [`src/server/mcp/deployment.ts`](src/server/mcp/deployment.ts) — `MCP_SERVERS` configuration                            |
 | An async service                                           | [`src/extensions/async-example/`](src/extensions/async-example/) — adapt to your service's submit/query/cancel contract |
 
 Manage all extension switches in [`extensions.config.ts`](extensions.config.ts). For a small example, set `example.enabled` to `true` there. Its [server tool, prompt section and hook](src/extensions/example/server.ts) and [browser renderer](src/extensions/example/browser.tsx) live together in `src/extensions/example/` and are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
@@ -84,7 +86,7 @@ root = Stack([
 
 Use two slider values for a range, such as `[20, 80]`. Use `Progress(null, "Waiting for data")` when progress is unknown; it does not track background Agent tasks automatically.
 
-See the [server contracts](src/server/contributions.ts), [browser contracts](src/browser/extensions.ts), and [.dev.vars.example](.dev.vars.example) for the available interfaces and configuration. Runtime plugin installation and marketplace compatibility are not included.
+See the [server contracts](src/server/extensions/contributions.ts), [browser contracts](src/browser/extensions/extensions.ts), and [.dev.vars.example](.dev.vars.example) for the available interfaces and configuration. Runtime plugin installation and marketplace compatibility are not included.
 
 The async-service sample is assembled as the `async-example` contribution in the same server and browser registration lists. Set `ASYNC_SERVICE_URL` to install its native tools and tasks; the contribution can still display and guard previously saved outcomes when the service is unconfigured. Its directory owns the provider contract, retry/recheck authorization, native task recovery and progress cards. To omit the sample entirely, set `'async-example'.enabled` to `false`; basic chat, history, Stop and MCP remain independent.
 
@@ -104,9 +106,9 @@ The configuration UI reuses `@assistant-ui/react-mcp` primitives with a server-b
 
 The module boundaries are:
 
-- `src/server/mcp-connections/`: user ownership/catalog, encrypted connection state, native SDK adapter, HTTP routes and endpoint policy.
+- `src/server/mcp/connections/`: user ownership/catalog, encrypted connection state, native SDK adapter, HTTP routes and endpoint policy.
 - `src/extensions/mcp/`: native Pi tools/tasks/documents for confirmation and interruption recovery, plus browser presentation through the existing extension slot. Confirmation decisions use the generic extension control endpoint and never start a second model run.
-- `src/server/mcp.ts`: existing deployment-managed `MCP_SERVERS`; independent of user connection credentials.
+- `src/server/mcp/deployment.ts`: existing deployment-managed `MCP_SERVERS`; independent of user connection credentials.
 
 The first version supports public HTTPS Streamable HTTP endpoints, bounded JSON tool schemas, and text/structured-JSON results. Unsupported schemas are visible but cannot be enabled. It does not execute local stdio commands, fetch remote schema references, or implement MCP Apps, sampling, resources or prompts as user-facing capabilities. Private/reserved destinations and HTTP redirects are rejected for both MCP and OAuth requests, with DNS preflight, timeouts and response limits. DNS preflight is defense in depth; deployments needing strict DNS-rebinding protection must also enforce a network egress boundary.
 

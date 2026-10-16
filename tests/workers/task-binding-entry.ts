@@ -1,4 +1,4 @@
-import { ModelCredentials } from '../../src/server/model-credentials';
+import { ModelCredentials } from '../../src/server/models/credentials';
 import { Agent } from 'agents';
 import { PiHarness } from 'agents/harness/pi';
 import {

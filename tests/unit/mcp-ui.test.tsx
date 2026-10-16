@@ -3,14 +3,17 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
-import { McpConnections } from '../../src/browser/McpConnections';
-import { ExtensionContext } from '../../src/browser/extension-context';
-import { ToolFooterExtensions, ComposerFooterExtensions } from '../../src/browser/extension-ui';
+import { McpConnections } from '../../src/extensions/mcp/Settings';
+import { ExtensionContext } from '../../src/browser/extensions/extension-context';
+import {
+  ToolFooterExtensions,
+  ComposerFooterExtensions,
+} from '../../src/browser/extensions/extension-ui';
 import { ui } from '../../src/extensions/mcp/browser';
 import { ui as skillsUi } from '../../src/extensions/skills/browser';
 import { connectionState } from '../../src/extensions/mcp/manager';
 import type { ConnectionView } from '../../src/shared/mcp-connections';
-import type { McpRequest } from '../../src/server/mcp-connections/requests';
+import type { McpRequest } from '../../src/server/mcp/connections/requests';
 
 const connection: ConnectionView = {
   id: 'remote',

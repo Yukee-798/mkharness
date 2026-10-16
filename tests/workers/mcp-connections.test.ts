@@ -5,9 +5,9 @@ import {
   connectionViews,
   newConversationBindings,
   ownedConnection,
-} from '../../src/server/mcp-connections/catalog';
-import { McpRequests } from '../../src/server/mcp-connections/requests';
-import { BG } from '../../src/server/conversation';
+} from '../../src/server/mcp/connections/catalog';
+import { McpRequests } from '../../src/server/mcp/connections/requests';
+import { BG } from '../../src/server/conversations/context';
 
 afterEach(() => vi.restoreAllMocks());
 function mockServer(

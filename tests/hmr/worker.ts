@@ -1,4 +1,5 @@
-import { ConversationAgent as Base, BG } from '../../src/server/conversation';
+import { ConversationAgent as Base } from '../../src/server/conversations/agent';
+import { BG } from '../../src/server/conversations/context';
 import type { Harness } from '@earendil-works/pi-durable';
 import { fixtureModels } from '../fixture-model';
 import { revision } from './revision';

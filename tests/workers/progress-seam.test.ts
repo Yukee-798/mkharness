@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { watchEvents, type AgentEvent } from '@earendil-works/pi-durable';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 
 it('native watch retains bounded progress and separates repeated provider ids by ToolTask input', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());

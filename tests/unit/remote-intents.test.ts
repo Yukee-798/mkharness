@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { mcpIntentUnresolved, type McpIntent } from '../../src/server/mcp-intents';
+import { mcpIntentUnresolved, type McpIntent } from '../../src/server/mcp/intents';
 
 it('requires a native completed result receipt, not just a returned remote response', () => {
   const intent: McpIntent = {

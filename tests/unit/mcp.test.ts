@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { MCPClientManager } from 'agents/mcp/client';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
-import { buildMcp, configureMcpStartup, mcpConfiguration } from '../../src/server/mcp';
+import { buildMcp, configureMcpStartup, mcpConfiguration } from '../../src/server/mcp/deployment';
 const configs = [
   {
     serverId: 'reference',

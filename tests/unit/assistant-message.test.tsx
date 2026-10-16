@@ -7,8 +7,8 @@ import {
   useExternalStoreRuntime,
   type ThreadMessageLike,
 } from '@assistant-ui/react';
-import { Assistant } from '../../src/browser/Chat';
-import { ExtensionContext } from '../../src/browser/extension-context';
+import { Assistant } from '../../src/browser/chat/messages/AssistantMessage';
+import { ExtensionContext } from '../../src/browser/extensions/extension-context';
 import { DraftProjection, toMessages } from '../../src/shared/stream';
 import { fromAgUiMessages } from '@assistant-ui/react-ag-ui';
 import { RunAggregator } from '../../node_modules/@assistant-ui/react-ag-ui/dist/runtime/adapter/run-aggregator.js';

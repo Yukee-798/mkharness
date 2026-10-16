@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { projectTiming } from '../../src/extensions/timing/server';
 import { formatDuration } from '../../src/extensions/timing/contracts';
-import { loadBrowserExtensions } from '../../src/browser/extensions';
+import { loadBrowserExtensions } from '../../src/browser/extensions/extensions';
 
 it('uses canonical native receipts, excludes queue time and never sums parallel tool spans', () => {
   const entries = [

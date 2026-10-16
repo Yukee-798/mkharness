@@ -101,4 +101,4 @@ export { BYOKProbe } from './byok-entry';
 
 export { OpenRouterProbe } from './openrouter-entry';
 
-export { McpConnection } from '../../src/server/mcp-connections/connection';
+export { McpConnection } from '../../src/server/mcp/connections/connection';

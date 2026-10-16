@@ -1,5 +1,6 @@
+import { publicAddress } from '../../src/server/http/public-network';
 import { it, expect, vi } from 'vitest';
-import { createWebReader, publicAddress, searchWeb, webTools } from '../../src/server/web';
+import { createWebReader, searchWeb, webTools } from '../../src/extensions/web/server';
 const resolve = async () => ['93.184.216.34'];
 it.each([undefined, '', '   ', '\t\n'])('omits search when its key is %j', (key) => {
   expect(webTools(key).tools?.map((tool) => tool.name)).toEqual(['read_web']);

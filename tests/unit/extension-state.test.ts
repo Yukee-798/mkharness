@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { createExtensionProjection } from '../../src/server/extension-state';
+import { createExtensionProjection } from '../../src/server/extensions/state';
 import { ROOT_CONVERSATION_ID, defineDoc } from '@earendil-works/pi-durable';
 
 it('removing public projections removes their reads and listeners too', async () => {

@@ -4,7 +4,12 @@ import { makeSignature } from 'better-auth/crypto';
 import { zipSync, strToU8 } from 'fflate';
 import app from '../../src/server/index';
 import { importSkill } from '../../src/server/skills/package';
-import { skillSource, newSkillBindings, changeSkill } from '../../src/server/skills/catalog';
+import {
+  skillSource,
+  newSkillBindings,
+  changeSkill,
+  publishSkill,
+} from '../../src/server/skills/catalog';
 import type { SkillView } from '../../src/shared/skills';
 
 const markdown = (body = 'Read references/checklist.md before answering. PRIVATE_SKILL_V1') =>
@@ -17,6 +22,24 @@ const bundle = (body?: string) =>
     ),
     'delivery-guide/scripts/helper.py': strToU8('raise Exception("MUST_NOT_RUN")'),
   });
+
+it('retains published files when the D1 commit acknowledgement is lost', async () => {
+  const { id: owner } = await identity();
+  const database = {
+    prepare: env.DB.prepare.bind(env.DB),
+    batch: async (statements: D1PreparedStatement[]) => {
+      await env.DB.batch(statements);
+      throw new Error('lost commit acknowledgement');
+    },
+  } as unknown as D1Database;
+  await expect(
+    publishSkill({ ...env, DB: database }, owner, new TextEncoder().encode(markdown()), 'SKILL.md'),
+  ).rejects.toThrow('lost commit acknowledgement');
+  const [binding] = await newSkillBindings(env, owner);
+  expect(binding).toBeDefined();
+  const source = await skillSource(env, owner, binding!);
+  expect((await source.load(binding!.name))?.body).toContain('PRIVATE_SKILL_V1');
+});
 async function identity() {
   const id = crypto.randomUUID(),
     token = crypto.randomUUID();

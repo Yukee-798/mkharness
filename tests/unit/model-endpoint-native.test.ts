@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { applicationModels, modelProviders } from '../../src/server/models';
-import { executionModels, bindExecution } from '../../src/server/execution-models';
+import { applicationModels, modelProviders } from '../../src/server/models/catalog';
+import { executionModels, bindExecution } from '../../src/server/models/execution';
 
 afterEach(() => vi.restoreAllMocks());
 it.each(modelProviders)(

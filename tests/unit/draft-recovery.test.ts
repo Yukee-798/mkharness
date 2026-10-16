@@ -1,5 +1,5 @@
 import { expect, it, vi, afterEach } from 'vitest';
-import { createDraftSaver, type SaveStatus } from '../../src/browser/draft';
+import { createDraftSaver, type SaveStatus } from '../../src/browser/extensions/draft';
 afterEach(() => vi.useRealTimers());
 
 it('negative control without the GET seam reproduces a false permanent conflict', async () => {

@@ -1,9 +1,32 @@
 import { extensionConfiguration } from '../../src/extensions/configuration';
 import { defineTask } from '@earendil-works/pi-durable';
-import { validateExtensions } from '../../src/server/extensions';
-import { BG } from '../../src/server/conversation';
+import { validateExtensions } from '../../src/server/extensions/registry';
+import { BG } from '../../src/server/conversations/context';
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
+import { definitions } from '../../src/extensions/server';
+
+it('retries transient extension initialization in the same durable object', async () => {
+  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  // Start Lifecycle before injecting a failure; a startup exception closes the
+  // input gate rather than reaching the in-object regression assertion below.
+  await stub.snapshot();
+  await runInDurableObject(stub, async (instance) => {
+    const definition = definitions.find((item) => item.id === 'skills')!;
+    const factory = vi
+      .spyOn(definition, 'create')
+      .mockRejectedValueOnce(new Error('temporary source failure'));
+    try {
+      (instance as any).contributionSet = undefined;
+      await expect((instance as any).contributions()).rejects.toThrow('temporary source failure');
+      await expect((instance as any).contributions()).resolves.toBeDefined();
+      await (instance as any).contributions();
+      expect(factory).toHaveBeenCalledTimes(2);
+    } finally {
+      factory.mockRestore();
+    }
+  });
+});
 
 it('an async native extension runs through Pi history after UI repair exhaustion', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
@@ -60,11 +83,12 @@ it('missing native task definitions settle with an explicit recovery diagnostic'
 });
 
 it('optional UI can be disabled without removing local tools or base rules', async () => {
-  const { applicationExtensions } = await import('../../src/server/assembly');
-  const extensions = await applicationExtensions({} as Env, async () => [], undefined, {
+  const { applicationContributions } = await import('../../src/server/extensions/assembly');
+  const contributions = await applicationContributions({} as Env, async () => [], undefined, {
     ...extensionConfiguration,
     openui: { enabled: false },
   });
+  const extensions = contributions.flatMap((item) => (item.extension ? [item.extension] : []));
   validateExtensions(extensions);
   expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).toContain('read_web');
   expect(extensions.flatMap((e) => e.tools ?? []).map((t) => t.name)).not.toContain(

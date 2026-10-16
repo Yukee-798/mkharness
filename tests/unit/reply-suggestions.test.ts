@@ -5,10 +5,10 @@ import {
   SUGGESTIONS_TOOL,
 } from '../../src/extensions/reply/suggestions';
 import { replyContribution } from '../../src/extensions/reply/server';
-import type { ProjectionContext } from '../../src/server/contributions';
+import type { ProjectionContext } from '../../src/server/extensions/contributions';
 import { checkRunLimits } from '../../src/server/limits';
 import { toolkit, activity } from '../../src/extensions/reply/browser';
-import { loadBrowserExtensions } from '../../src/browser/extensions';
+import { loadBrowserExtensions } from '../../src/browser/extensions/extensions';
 
 const answer = (id: number, prompts: string[]) => ({
   id,

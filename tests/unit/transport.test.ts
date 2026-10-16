@@ -1,6 +1,6 @@
 import { partialUI } from '../../src/extensions/openui/partial';
 import { it, expect, vi } from 'vitest';
-import { AttachAgent } from '../../src/browser/transport';
+import { AttachAgent } from '../../src/browser/chat/session/transport';
 it('clones public extension projection callbacks and ignores foreign run state', async () => {
   const projection = vi.fn();
   const stream = (status: string) =>
@@ -25,15 +25,13 @@ it('clones public extension projection callbacks and ignores foreign run state',
     'fetch',
     vi.fn(async () => stream('placed')),
   );
-  const agent = new AttachAgent(
-    'c',
-    () => {},
-    () => {},
-    () => {},
-    new Map(),
-    () => {},
-    projection,
-  );
+  const agent = new AttachAgent({
+    conversationId: 'c',
+    finished: () => {},
+    state: (runId, value) => {
+      if (value.extensionState) projection(runId, value.extensionState);
+    },
+  });
   const attach = (instance: AttachAgent) =>
     new Promise<void>((resolve, reject) =>
       instance
@@ -65,11 +63,7 @@ it('only attaches with GET; abort detaches without POST or stop', async () => {
       );
     }),
   );
-  const agent = new AttachAgent(
-    'c',
-    () => {},
-    () => {},
-  );
+  const agent = new AttachAgent({ conversationId: 'c', finished: () => {} });
   await new Promise<void>((resolve, reject) =>
     agent
       .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
@@ -127,15 +121,13 @@ it('committed progress rejects foreign-run and older projections; no execution i
   );
   vi.stubGlobal('fetch', network);
   try {
-    const agent = new AttachAgent(
-      'c',
-      () => {},
-      () => {},
-      () => {},
-      new Map(),
-      () => {},
-      progress,
-    );
+    const agent = new AttachAgent({
+      conversationId: 'c',
+      finished: () => {},
+      state: (runId, value) => {
+        if (value.extensionState) progress(runId, value.extensionState);
+      },
+    });
     await new Promise<void>((resolve, reject) =>
       agent
         .run({ forwardedProps: { runConfig: { mode: 'attach', runId: 'r' } } } as any)
@@ -200,14 +192,14 @@ it('cloned observations retain committed identities across runs without acceptin
     ),
   );
   try {
-    const agent = new AttachAgent(
-      'c',
-      () => {},
-      () => {},
-      () => {},
-      ids,
-      toolProgress,
-    );
+    const agent = new AttachAgent({
+      conversationId: 'c',
+      finished: () => {},
+      messageIds: ids,
+      state: (runId, value) => {
+        if (value.toolProgress) toolProgress(runId, value.toolProgress);
+      },
+    });
     const observed: any[] = [];
     await new Promise<void>((resolve, reject) =>
       agent
@@ -258,16 +250,13 @@ it('uses the existing attach to deliver scoped runtime issues and their clearanc
   );
   vi.stubGlobal('fetch', network);
   try {
-    const agent = new AttachAgent(
-      'c',
-      () => {},
-      () => {},
-      () => {},
-      new Map(),
-      () => {},
-      () => {},
-      issues,
-    );
+    const agent = new AttachAgent({
+      conversationId: 'c',
+      finished: () => {},
+      state: (runId, value) => {
+        if (value.runtimeIssues) issues(runId, value.runtimeIssues);
+      },
+    });
     await new Promise<void>((resolve, reject) =>
       agent
         .clone()
@@ -306,17 +295,13 @@ it('delivers native queue changes over the same cloned attach and ignores foreig
   );
   vi.stubGlobal('fetch', network);
   try {
-    const agent = new AttachAgent(
-      'c',
-      () => {},
-      () => {},
-      () => {},
-      new Map(),
-      () => {},
-      () => {},
-      () => {},
-      queue,
-    );
+    const agent = new AttachAgent({
+      conversationId: 'c',
+      finished: () => {},
+      state: (runId, value) => {
+        if (value.queue) queue(runId, value.queue);
+      },
+    });
     await new Promise<void>((resolve, reject) =>
       agent
         .clone()

@@ -1,6 +1,6 @@
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { it, expect } from 'vitest';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 import type { SubmissionRecord } from '@earendil-works/pi-durable';
 import { InboxDoc } from '@earendil-works/pi-durable';
 const command = (text: string) => ({ runId: crypto.randomUUID(), text });

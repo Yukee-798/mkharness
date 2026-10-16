@@ -4,7 +4,7 @@ import type {
   ContributionHost,
   ExecutionContext,
   ServerContribution,
-} from '../../server/contributions';
+} from '../../server/extensions/contributions';
 import { ASYNC_EXAMPLE_ID, remoteActionPayload, remoteSource } from './contracts';
 import { RemoteIntents, type RemoteIntent } from './intents';
 import { remoteProgress } from './progress';
@@ -97,6 +97,14 @@ export function asyncExampleContribution(
       : {}),
     actions: { retry: action('retry'), recheck: action('recheck') },
     stateDocuments: [RemoteIntents],
+    historyScope: 'none',
+    taskReferences: (documents) =>
+      Object.values(
+        (documents.get(RemoteIntents.definition.kind)?.operations ?? {}) as Record<
+          string,
+          RemoteIntent
+        >,
+      ).map((operation) => operation.childTaskId),
     projectState: ({ documents, tasks }) => {
       const records = new Map(tasks.map((task) => [Number(task.id), task]));
       const operations = (documents?.get(RemoteIntents.definition.kind)?.operations ??

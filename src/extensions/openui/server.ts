@@ -1,5 +1,5 @@
 import type { EntryRecord } from '@earendil-works/pi-durable';
-import type { ServerContribution } from '../../server/contributions';
+import type { ServerContribution } from '../../server/extensions/contributions';
 import { panelTools } from './tools';
 import { uiInstructions } from './instructions';
 import { AppError } from '../../shared/contracts';

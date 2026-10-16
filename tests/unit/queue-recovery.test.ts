@@ -1,7 +1,7 @@
 import { Harness, MemoryStorage, createRegistry } from '@earendil-works/pi-durable';
 import { expect, it } from 'vitest';
 import { fixtureModels } from '../fixture-model';
-import { withdrawIdleInputs } from '../../src/server/queue-recovery';
+import { withdrawIdleInputs } from '../../src/server/conversations/queue-recovery';
 const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
 
 it('native negative control stays queued; recovery withdraws without replay and keeps a live queue', async () => {

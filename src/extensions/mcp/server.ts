@@ -1,19 +1,20 @@
 import { defineTask, defineTool, type TaskId } from '@earendil-works/pi-durable';
 import { Type } from '@earendil-works/pi-ai';
 import { z } from 'zod';
-import type { ServerContribution, ContributionHost } from '../../server/contributions';
+import { extensionConfiguration, type ExtensionConfiguration } from '../configuration';
+import type { ServerContribution, ContributionHost } from '../../server/extensions/contributions';
 import {
   conversationBindings,
   ownedConnection,
   connectionView,
   customMcpEnabled,
-} from '../../server/mcp-connections/catalog';
+} from '../../server/mcp/connections/catalog';
 import { toolRef } from '../../shared/references';
 import { AppError } from '../../shared/contracts';
 import { jsonText, type Json } from '../../shared/json';
-import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/tool-output';
+import { JSON_TOOL_OUTPUT_LIMITS } from '../../server/extensions/tool-output';
 
-import { McpRequests, type McpRequest } from '../../server/mcp-connections/requests';
+import { McpRequests, type McpRequest } from '../../server/mcp/connections/requests';
 const errorResult = (code: string) => ({
   isError: true,
   output: [{ type: 'text' as const, text: JSON.stringify({ error: { code } }) }],
@@ -30,8 +31,9 @@ type Result = { text: string };
 export async function userMcpContribution(
   env: Env,
   host?: ContributionHost,
+  configuration: ExtensionConfiguration = extensionConfiguration,
 ): Promise<ServerContribution> {
-  if (!customMcpEnabled() || !host?.conversationId || !env.DB) return { id: 'mcp' };
+  if (!customMcpEnabled(configuration) || !host?.conversationId || !env.DB) return { id: 'mcp' };
   const { owner, bindings } = await conversationBindings(env, host.conversationId);
   if (!bindings.length) return { id: 'mcp' };
   const client = (id: string) => ownedConnection(env, owner, id);
@@ -283,6 +285,14 @@ export async function userMcpContribution(
       },
     },
     stateDocuments: [McpRequests],
+    historyScope: 'none',
+    taskReferences: (documents) => {
+      const requests = (documents.get(McpRequests.definition.kind)?.requests ?? {}) as Record<
+        string,
+        McpRequest
+      >;
+      return Object.values(requests).flatMap((request) => [request.parentId, request.taskId]);
+    },
     projectState: ({ documents, tasks }) => {
       const doc = documents?.get(McpRequests.definition.kind) as {
         requests?: Record<string, McpRequest>;

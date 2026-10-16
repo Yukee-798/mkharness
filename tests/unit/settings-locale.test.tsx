@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { LocaleProvider, localeStorageKey, useLocale } from '../../src/browser/locale';
-import { SettingsDialog } from '../../src/browser/Settings';
-import { Chat } from '../../src/browser/Chat';
+import { LocaleProvider, localeStorageKey, useLocale } from '../../src/browser/app/locale';
+import { SettingsDialog } from '../../src/browser/settings/Settings';
+import { Chat } from '../../src/browser/chat/Chat';
 import { Button } from '../../src/browser/ui/button';
 const settings = {
   providers: [

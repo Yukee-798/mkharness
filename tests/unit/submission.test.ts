@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { createSubmitter } from '../../src/browser/submission';
+import { createSubmitter } from '../../src/browser/chat/session/submission';
 it('keeps the client operation id after an uncertain acknowledgement, and changes it after acceptance', async () => {
   const commands: any[] = [];
   let fail = true;

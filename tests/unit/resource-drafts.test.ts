@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { createResourceDrafts } from '../../src/browser/draft';
+import { createResourceDrafts } from '../../src/browser/extensions/draft';
 it('isolates users, chats, extensions and refs and cleans only the selected chat', async () => {
   vi.useFakeTimers();
   const drafts = createResourceDrafts(),

@@ -1,9 +1,10 @@
+import { exampleSkillSource } from '../../src/extensions/skills/example';
 import { extensionEnabled, type ExtensionConfiguration } from '../../src/extensions/configuration';
 import { asyncExampleContribution } from '../../src/extensions/async-example/server';
 import type { RemoteConfig } from '../../src/extensions/async-example/runtime';
-import { ConversationAgent as Base } from '../../src/server/conversation';
+import { ConversationAgent as Base } from '../../src/server/conversations/agent';
 import { exampleExtension } from '../../src/extensions/example/server';
-import { staticSkills, exampleSkillSource } from '../../src/server/skills';
+import { staticSkills } from '../../src/server/skills/static';
 import { fixtureModels } from '../fixture-model';
 import { Type } from '@earendil-works/pi-ai';
 import {

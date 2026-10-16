@@ -5,8 +5,8 @@ import {
   runDurableObjectAlarm,
 } from 'cloudflare:test';
 import { expect, it, vi } from 'vitest';
-import { McpIntents } from '../../src/server/mcp-intents';
-import { BG } from '../../src/server/conversation';
+import { McpIntents } from '../../src/server/mcp/intents';
+import { BG } from '../../src/server/conversations/context';
 
 it.each(['lost-receipt', 'invalid-result', 'stop-during-call', 'stop-before-result'])(
   'does not repeat unsafe MCP effects after %s, another call or DO reconstruction',

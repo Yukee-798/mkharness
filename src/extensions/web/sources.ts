@@ -1,4 +1,4 @@
-import type { ProjectionContext } from '../../server/contributions';
+import type { ProjectionContext } from '../../server/extensions/contributions';
 import { safeHref } from '../../shared/source-url';
 
 export type WebSource = { url: string; title: string; snippet?: string };

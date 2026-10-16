@@ -1,11 +1,14 @@
-import { useLocale } from '../../browser/locale';
+import { useLocale } from '../../browser/app/locale';
 import { Globe, Search } from 'lucide-react';
 import { useAuiState, type Toolkit, type ToolCallMessagePartProps } from '@assistant-ui/react';
 import { useState } from 'react';
-import { canonicalMessageId, useExtensionContext } from '../../browser/extension-context';
-import { Sources } from '../../browser/sources';
+import {
+  canonicalMessageId,
+  useExtensionContext,
+} from '../../browser/extensions/extension-context';
+import { Sources } from '../../browser/chat/messages/sources';
 import type { SourcesState } from './sources';
-import { ToolActivity } from '../../browser/tool-activity';
+import { ToolActivity } from '../../browser/chat/messages/tool-activity';
 function Read(part: ToolCallMessagePartProps) {
   const { t } = useLocale();
   let query: string;

@@ -1,5 +1,5 @@
 import { hook, ToolTask, type EntryRecord, type Extension } from '@earendil-works/pi-durable';
-import { publicModelProvider } from './execution-models';
+import { publicModelProvider } from './models/execution';
 import { AppError } from '../shared/contracts';
 export function toolBudget(env: Record<string, unknown>) {
   const limit = Number(env.TOOL_CALL_LIMIT ?? 40);

@@ -1,7 +1,7 @@
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 import { AppError } from '../../src/shared/contracts';
-import type { CredentialAccess } from '../../src/server/execution-models';
+import type { CredentialAccess } from '../../src/server/models/execution';
 
 it.each([false, true])(
   'withdraws an unexecuted follower after model failure (reconstruct=%s)',

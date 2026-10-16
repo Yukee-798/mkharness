@@ -1,8 +1,8 @@
-import { LocaleProvider } from '../../src/browser/locale';
+import { LocaleProvider } from '../../src/browser/app/locale';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Chat } from '../../src/browser/Chat';
+import { Chat } from '../../src/browser/chat/Chat';
 import '../../src/browser/styles.css';
 function App() {
   const [id, setId] = useState(new URLSearchParams(location.search).get('chat') ?? 'a');

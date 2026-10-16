@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { expect, it } from 'vitest';
-import { ModelCredentials } from '../../src/server/model-credentials';
+import { ModelCredentials } from '../../src/server/models/credentials';
 const master = btoa('x'.repeat(32));
 const canary = 'personal-canary-never-public';
 async function owner() {

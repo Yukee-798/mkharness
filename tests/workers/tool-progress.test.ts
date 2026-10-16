@@ -1,5 +1,5 @@
 import { ToolTask } from '@earendil-works/pi-durable';
-import { BG } from '../../src/server/conversation';
+import { BG } from '../../src/server/conversations/context';
 import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
 import { expect, it } from 'vitest';
 function events(body: string) {
