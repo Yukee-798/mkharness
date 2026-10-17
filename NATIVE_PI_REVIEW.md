@@ -1,8 +1,24 @@
 # Pi 1.3.0 修复与复审记录
 
+## 首次聊天并发初始化修复：2026-10-17
+
+已复现首次快照与首次提交并发返回 503 `chat_not_initialized`。`authorize()` 中的首次 D1 查询可跨请求交错；后完成的请求重新赋值 manifest，覆盖 `open()` 正在初始化的对象。实际探针显示同一 chat/owner/generation 的持久化 manifest 已有 `mainConversationId=1`，内存 manifest 却没有这个字段，导致之后的提交持续失败。真实 Chrome 登录页面也复现同一错误。
+
+改为只发布一次 manifest 对象，让并发首次请求与 runtime 初始化共享该对象；D1 owner/generation/lifecycle 检查仍逐请求执行。没有重置聊天、修改当前存储格式、增加历史读取分支或改变免费模型配置。
+
+新增 4 项 Worker 回归：受控的首次读取/提交并发与同消息重试、冷重启恢复及单主会话验证；单独首次提交对照；真实 Better Auth → 创建目录 → 并发 snapshot/runs 的两种请求顺序。受控用例通过 D1 完成顺序屏障制造交错，不依赖固定延时；将生产赋值暂时恢复为原写法时，该用例必然返回相同 `chat_not_initialized`，随后恢复修复代码。此前串行后端调用与 mock 浏览器接口没有覆盖这条实际并发链路。
+
+复现与负对照记录：`/tmp/mkharness-chat-init-minimal-red.log`、`/tmp/mkharness-chat-init-probe.log`、`/tmp/mkharness-chat-init-negative-control.log`；定向修复验证：`/tmp/mkharness-chat-init-controlled-green.log`。
+
+修复后全量验证通过：单元 258/258、Native 68/68、Workers 283/283，共 609 项；lint、typecheck、全局格式检查、生产构建及 dry-run 均通过。移除临时诊断后再次通过 4 项初始化回归与生产构建。记录：`/tmp/mkharness-chat-init-unit.log`、`/tmp/mkharness-chat-init-native.log`、`/tmp/mkharness-chat-init-workers.log`、`/tmp/mkharness-chat-init-final-regression.log`。
+
+最终发布到 `mkharness-native` / `template.mkharness.com` 的版本为 `435f0162-7303-4d9f-91c3-1b8ab0c6b6f5`。本次显式使用 `--durable-objects-code-update-mode immediate`；安装的 Wrangler 4.149.0 默认使用 deferred、最长延迟 300 秒，普通发布完成时已有热 DO 可能暂未更新。最终版本已移除临时诊断代码，未修改资源或重置数据。发布记录：`/tmp/mkharness-chat-init-final-deploy.log`。
+
+真实登录 Chrome 验收：保留线上已复现失败的原聊天与同一条提交，点击 Retry submission 后 `/runs` 返回 202、事件流返回 200，免费模型实际回复“初始化验证成功。”；最终清理版发布后刷新，用户消息与回复各保留一条，未再出现初始化错误。另一个新聊天首次提交也已受理，但该次免费供应商返回暂不可用提示，没有切换付费模型。生产仍为 `openrouter/free`、thinking off；本地及 test 的 BYOK 设置未改。
+
 ## template 免费默认恢复：2026-10-17
 
-用户确认免费模型仅用于 `template.mkharness.com` 对外展示。已在该 production Worker 恢复 `MODEL_PROVIDER=openrouter`、`MODEL_ID=openrouter/free`、`MODEL_THINKING_LEVEL=off`、`ALLOW_SERVER_MODEL_KEY=1`，并通过加密 Secret 配置 `MODEL_API_KEY`。当前线上版本 `4dc246e5-3a01-484a-80bf-cf1ba3edd1db`，流量 100%。此次仅修正部署配置，没有修改运行时代码或引入历史兼容路径。
+用户确认免费模型仅用于 `template.mkharness.com` 对外展示。已在该 production Worker 恢复 `MODEL_PROVIDER=openrouter`、`MODEL_ID=openrouter/free`、`MODEL_THINKING_LEVEL=off`、`ALLOW_SERVER_MODEL_KEY=1`，并通过加密 Secret 配置 `MODEL_API_KEY`。恢复时版本 `4dc246e5-3a01-484a-80bf-cf1ba3edd1db`，流量 100%。此次仅修正部署配置，没有修改运行时代码或引入历史兼容路径。
 
 本地和 test 环境仍为 `ALLOW_SERVER_MODEL_KEY=0`；远端 test 未配置该模型 Secret。宿主的现有凭据授权仅允许部署 Key 调用明确配置的 `openrouter/free`，限额或不可用时返回错误，不自动切换付费模型。个人 Key 继续独立使用。
 

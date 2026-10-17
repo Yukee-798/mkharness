@@ -201,7 +201,8 @@ export class ChatSession extends DurableObject<Env> {
         .bind(actor.chatId, actor.ownerId, actor.generation)
         .first<string>('lifecycle');
       if (!deletion && active !== 'active') throw new AppError(404, 'not_found');
-      this.manifest = { ...actor, mcpBindings, skillBindings, deploymentBindings };
+      // Concurrent first requests must retain the object that open() is initializing.
+      this.manifest ??= { ...actor, mcpBindings, skillBindings, deploymentBindings };
       await this.ctx.storage.put('manifest', this.manifest);
     }
     if (this.deleted && !deletion) throw new AppError(404, 'not_found');
