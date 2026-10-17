@@ -140,14 +140,14 @@ pnpm exec wrangler r2 bucket create mkharness-native-skills
 
 Edit **`env.production`** in [`wrangler.jsonc`](wrangler.jsonc) before building:
 
-| Setting                                         | Value                                                                                 |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `name`                                          | `mkharness-native`, or another unused Worker name                                     |
-| `d1_databases[0].database_name` / `database_id` | Name and ID returned by the new `d1 create`                                           |
-| `r2_buckets[0].bucket_name`                     | The new private bucket name                                                           |
-| `vars.APP_URL`                                  | Your deployment's exact origin; change `template.mkharness.com` for your installation |
-| `vars.AUTH_MODE`                                | `account` with Google OAuth, or `guest` without a sign-in screen                      |
-| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0` for personal API keys only                                                        |
+| Setting                                         | Value                                                                                   |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `name`                                          | `mkharness-native`, or another unused Worker name                                       |
+| `d1_databases[0].database_name` / `database_id` | Name and ID returned by the new `d1 create`                                             |
+| `r2_buckets[0].bucket_name`                     | The new private bucket name                                                             |
+| `vars.APP_URL`                                  | Your deployment's exact origin; change `template.mkharness.com` for your installation   |
+| `vars.AUTH_MODE`                                | `account` with Google OAuth, or `guest` without a sign-in screen                        |
+| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0` for your own installation; the public template demo uses `1` with `openrouter/free` |
 
 Keep `DB`, `SKILL_FILES`, `CONVERSATIONS` → `ChatSession`, and `MCP_CONNECTIONS` → `McpConnection`. Wrangler's declarative `exports` declares both DO classes with SQLite storage. Do not add historical DO migration tags or transfer old namespaces. Replace the production and test database IDs with IDs from your own newly created resources. The local configuration omits its ID; Wrangler supports automatic D1 provisioning on deployment, but the explicit creation above lets you apply the baseline before first deployment. Never reuse an old database ID.
 
@@ -157,7 +157,7 @@ Keep `DB`, `SKILL_FILES`, `CONVERSATIONS` → `ChatSession`, and `MCP_CONNECTION
 | `production`                | `mkharness-native`      | `mkharness-native`       | `mkharness-native-skills`       |
 | `test`                      | `mkharness-native-test` | `mkharness-native-test`  | `mkharness-native-test-skills`  |
 
-The repository's production environment publishes at `template.mkharness.com`. For your own installation, change both `vars.APP_URL` and the custom domain in `routes`. Use `test` for independent remote acceptance with its own new resources and exact `APP_URL`. Do not expose either R2 bucket publicly.
+The repository's production environment publishes at `template.mkharness.com` and supplies `openrouter/free` for the public demo, using a `MODEL_API_KEY` secret configured only on that Worker. Local and test environments keep deployment-funded models disabled. For your own installation, change both `vars.APP_URL` and the custom domain in `routes`, and set `ALLOW_SERVER_MODEL_KEY=0` unless you intend to fund a default model. Use `test` for independent remote acceptance with its own new resources and exact `APP_URL`. Do not expose either R2 bucket publicly.
 
 ### 2. Set secrets and deploy
 

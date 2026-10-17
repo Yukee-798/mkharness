@@ -55,9 +55,10 @@
       "vars": {
         "APP_URL": "https://template.mkharness.com",
         "AUTH_MODE": "account",
-        "ALLOW_SERVER_MODEL_KEY": "0",
-        "MODEL_PROVIDER": "",
-        "MODEL_ID": "",
+        // Public template demo only; other deployments use personal keys.
+        "ALLOW_SERVER_MODEL_KEY": "1",
+        "MODEL_PROVIDER": "openrouter",
+        "MODEL_ID": "openrouter/free",
         "MODEL_THINKING_LEVEL": "off",
       },
       "routes": [{ "pattern": "template.mkharness.com", "custom_domain": true }],

@@ -1,10 +1,20 @@
 # Pi 1.3.0 修复与复审记录
 
-## 生产部署记录：2026-10-17
+## template 免费默认恢复：2026-10-17
 
-已按用户确认将 `https://template.mkharness.com` 切换到新 Worker `mkharness-native`，线上版本为 `173c81d7-2fb9-4fcd-9757-93f6b612e19e`，流量比例 100%。正式环境关闭 workers.dev 和预览地址，仅使用此自定义域名。
+用户确认免费模型仅用于 `template.mkharness.com` 对外展示。已在该 production Worker 恢复 `MODEL_PROVIDER=openrouter`、`MODEL_ID=openrouter/free`、`MODEL_THINKING_LEVEL=off`、`ALLOW_SERVER_MODEL_KEY=1`，并通过加密 Secret 配置 `MODEL_API_KEY`。当前线上版本 `4dc246e5-3a01-484a-80bf-cf1ba3edd1db`，流量 100%。此次仅修正部署配置，没有修改运行时代码或引入历史兼容路径。
 
-新生产 D1 为 `mkharness-native`（`a063ea46-7733-492c-bd22-c95ff4493b6c`），仅应用 `0001_initial.sql`；R2 为私有桶 `mkharness-native-skills`；`ChatSession` 与 `McpConnection` 均使用新 namespace，已核对与旧部署不同。发布前账号、聊天、模型凭据、MCP 连接和 Skills 数量全部为 0，没有导入旧数据。会话签名和凭据加密使用两个新生成的独立密钥；Google OAuth 配置到新 Worker，仍使用原公开域名的回调地址。当前为 account 模式与个人 Key 模式，`ALLOW_SERVER_MODEL_KEY=0`。
+本地和 test 环境仍为 `ALLOW_SERVER_MODEL_KEY=0`；远端 test 未配置该模型 Secret。宿主的现有凭据授权仅允许部署 Key 调用明确配置的 `openrouter/free`，限额或不可用时返回错误，不自动切换付费模型。个人 Key 继续独立使用。
+
+验证：7 项 execution-models 单元回归与 10 项 OpenRouter/credentials Worker 回归通过，包含付费请求拒绝、免费限流终态及冷恢复不重放；typecheck、格式检查、生产构建和 dry-run 通过。用同一部署 Key 直连 `openrouter/free` 的真实请求返回 200，所选模型为 `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`，`usage.cost=0`。这项供应商调用验证与线上登录后的聊天验收分别记录，当前浏览器未登录。
+
+正式域名的页面、鉴权、OAuth 初始化和 Chat 资源 SHA-256 冒烟检查再次通过；Cloudflare 远端绑定确认 production 为免费默认、test 为 BYOK。记录：`/tmp/mkharness-template-free-unit.log`、`/tmp/mkharness-template-free-workers.log`、`/tmp/mkharness-template-free-deploy.log`、`/tmp/mkharness-template-free-smoke.log`。
+
+## 首次生产部署记录：2026-10-17
+
+已按用户确认将 `https://template.mkharness.com` 切换到新 Worker `mkharness-native`，切换时版本为 `173c81d7-2fb9-4fcd-9757-93f6b612e19e`，流量比例 100%。正式环境关闭 workers.dev 和预览地址，仅使用此自定义域名。
+
+新生产 D1 为 `mkharness-native`（`a063ea46-7733-492c-bd22-c95ff4493b6c`），仅应用 `0001_initial.sql`；R2 为私有桶 `mkharness-native-skills`；`ChatSession` 与 `McpConnection` 均使用新 namespace，已核对与旧部署不同。发布前账号、聊天、模型凭据、MCP 连接和 Skills 数量全部为 0，没有导入旧数据。会话签名和凭据加密使用两个新生成的独立密钥；Google OAuth 配置到新 Worker，仍使用原公开域名的回调地址。首次切换时为 account 模式与个人 Key 模式，`ALLOW_SERVER_MODEL_KEY=0`；template 展示用免费默认模型随后按上方记录恢复。
 
 先在独立 workers.dev 地址完成页面、鉴权和静态资源检查，再切换正式域名。切换后重新验证：首页 200，bootstrap 为 account，未登录 session 为 null，聊天/模型设置/MCP/Skills 接口返回 401；线上 Chat JS 的 SHA-256 与本次生产构建一致。浏览器显示正常登录页。Google OAuth 初始化成功，provider 与回调 `https://template.mkharness.com/api/auth/callback/google` 正确；未完成真实账号登录、模型请求或 MCP/Skills 外部验收。
 
