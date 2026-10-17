@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from './env';
 import { it, expect } from 'vitest';
 async function settle(stub: ReturnType<typeof env.CONVERSATIONS.getByName>) {
   for (let i = 0; i < 500; i++) {

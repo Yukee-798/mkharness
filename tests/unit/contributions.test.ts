@@ -11,13 +11,37 @@ it('uses the supplied custom MCP setting instead of the deployment default', asy
   const first = vi.fn(async () => ({ owner: 'owner', bindings: '[]' }));
   const prepare = vi.fn(() => ({ bind: () => ({ first }) }));
   const env = { DB: { prepare } } as unknown as Env;
-  const host = { identity: 'chat', conversationId: 'chat', pi: vi.fn(), command: vi.fn() };
+  const host = {
+    identity: 'chat',
+    ownerId: 'owner',
+    conversationId: 'chat',
+    pi: vi.fn(),
+    command: vi.fn(),
+    mcpBindings: [
+      {
+        connectionId: 'connection',
+        connectionName: 'Docs',
+        endpoint: 'https://mcp.example.test',
+        grant: 1,
+        name: 'mcp_user_docs',
+        tool: {
+          name: 'docs',
+          description: 'Read docs',
+          schema: { type: 'object' },
+          hash: 'hash',
+          permission: 'ask' as const,
+          supported: true,
+        },
+      },
+    ],
+  };
   for (const custom of [false, true]) {
     prepare.mockClear();
-    await applicationContributions(env, async () => [], host, {
+    const contributions = await applicationContributions(env, async () => [], host, {
       mcp: { enabled: true, custom },
     });
-    expect(prepare).toHaveBeenCalledTimes(custom ? 1 : 0);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(!!contributions.find((item) => item.id === 'mcp')?.extension).toBe(custom);
   }
   expect(() => activation.extensionIds({ mcp: { enabled: true, custom: 'yes' } } as any)).toThrow(
     'invalid_extension_configuration',
@@ -107,7 +131,7 @@ it('removing the async definition removes tools, actions, guards and document pr
   const env = {
     ASYNC_SERVICE_URL: 'https://async.example.test',
   } as unknown as Env;
-  const host = { identity: 'chat', pi: vi.fn(), command: vi.fn() };
+  const host = { identity: 'chat', ownerId: 'owner', pi: vi.fn(), command: vi.fn() };
   const config = { ...extensionConfiguration, openui: { enabled: false } };
   const installed = await applicationContributions(env, async () => [], host, config);
   const example = installed.find((item) => item.id === 'async-example')!;
@@ -117,11 +141,7 @@ it('removing the async definition removes tools, actions, guards and document pr
   ]);
   expect(example.extension?.tasks?.[0]?.definition.name).toBe('app.remote-example');
   expect(Object.keys(example.actions!)).toEqual(['retry', 'recheck']);
-  expect(Object.keys(example.execution!)).toEqual([
-    'beforeModel',
-    'beforeSubmit',
-    'taskUnavailable',
-  ]);
+  expect(Object.keys(example.execution!)).toEqual(['beforeModel', 'beforeSubmit']);
   expect(example.stateDocuments?.[0]?.definition.kind).toBe('app.remote-intents');
   const remaining = activation
     .enabledDefinitions(config)

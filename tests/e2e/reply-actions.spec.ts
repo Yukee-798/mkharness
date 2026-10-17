@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
 test.use({ uiLocale: 'en' });
 const sources = [
@@ -13,8 +14,18 @@ const sources = [
   },
 ];
 const history = [
-  { id: 1, model: [{ role: 'user', content: 'Explain the architecture' }] },
-  { id: 2, model: [{ role: 'assistant', content: [{ type: 'text', text: 'Original answer' }] }] },
+  {
+    conversationId: 1,
+    kind: 'app.input',
+    id: 1,
+    model: [{ role: 'user', content: 'Explain the architecture' }],
+  },
+  {
+    conversationId: 1,
+    kind: 'pi.assistant',
+    id: 2,
+    model: [{ role: 'assistant', content: [{ type: 'text', text: 'Original answer' }] }],
+  },
 ];
 const suggestions = {
   '2': ['Compare the architecture tradeoffs', 'Show how the extension boundary works'],
@@ -28,19 +39,26 @@ test('native Sources persist on refetch, suggestions submit over HTTP and preser
   let answered = false;
   await page.route('**/api/conversations/**', (route) => {
     const request = route.request();
-    if (request.url().endsWith('/runs')) {
+    if (new URL(request.url()).pathname.endsWith('/runs')) {
       commands.push(request.postDataJSON());
       answered = true;
       return route.fulfill({ status: 202, json: { accepted: true } });
     }
     if (new URL(request.url()).pathname.endsWith('/snapshot'))
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: answered
             ? [
                 ...history,
-                { id: 3, model: [{ role: 'user', content: commands.at(-1).text }] },
                 {
+                  conversationId: 1,
+                  kind: 'app.input',
+                  id: 3,
+                  model: [{ role: 'user', content: commands.at(-1).text }],
+                },
+                {
+                  conversationId: 1,
+                  kind: 'pi.assistant',
                   id: 4,
                   model: [{ role: 'assistant', content: [{ type: 'text', text: 'Next answer' }] }],
                 },
@@ -48,8 +66,18 @@ test('native Sources persist on refetch, suggestions submit over HTTP and preser
             : history,
           pending: [],
           stopping: false,
-          extensionState: { web: { replies: { '2': sources } }, reply: { replies: suggestions } },
-        },
+          history: {
+            upperEntryId: answered ? 4 : 2,
+            revision: answered ? 2 : 1,
+            annotations: {
+              '2': {
+                web: { replies: { '2': sources } },
+                reply: { replies: { '2': suggestions['2'] } },
+              },
+              ...(answered ? { '4': { reply: { replies: { '4': suggestions['4'] } } } } : {}),
+            },
+          },
+        }),
       });
     reads.push(new URL(request.url()).pathname);
     return route.fulfill({ status: 404 });
@@ -101,7 +129,7 @@ test('regeneration preempts native reload, deduplicates double clicks and retrie
     hold!: () => void;
   const held = new Promise<void>((resolve) => (hold = resolve));
   await page.route('**/api/conversations/**', async (route) => {
-    if (route.request().url().endsWith('/runs')) {
+    if (new URL(route.request().url()).pathname.endsWith('/runs')) {
       commands.push(route.request().postDataJSON());
       if (commands.length === 1) {
         await held;
@@ -115,12 +143,19 @@ test('regeneration preempts native reload, deduplicates double clicks and retrie
     }
     if (new URL(route.request().url()).pathname.endsWith('/snapshot'))
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: completed
             ? [
                 ...history,
-                { id: 3, model: [{ role: 'user', content: 'Regenerate response' }] },
                 {
+                  conversationId: 1,
+                  kind: 'app.input',
+                  id: 3,
+                  model: [{ role: 'user', content: 'Regenerate response' }],
+                },
+                {
+                  conversationId: 1,
+                  kind: 'pi.assistant',
                   id: 4,
                   model: [{ role: 'assistant', content: [{ type: 'text', text: 'Fresh answer' }] }],
                 },
@@ -128,7 +163,7 @@ test('regeneration preempts native reload, deduplicates double clicks and retrie
             : history,
           pending: [],
           stopping: false,
-        },
+        }),
       });
     throw new Error('Unexpected native run/attach: ' + route.request().url());
   });
@@ -162,12 +197,21 @@ test('removing optional reply and web display leaves native copy and chat intact
   await page.route('**/api/capabilities', (route) => route.fulfill({ json: { extensionIds: [] } }));
   await page.route('**/api/conversations/**', (route) =>
     route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries: history,
         pending: [],
         stopping: false,
-        extensionState: { web: { replies: { '2': sources } }, reply: { replies: suggestions } },
-      },
+        history: {
+          upperEntryId: 2,
+          revision: 1,
+          annotations: {
+            '2': {
+              web: { replies: { '2': sources } },
+              reply: { replies: { '2': suggestions['2'] } },
+            },
+          },
+        },
+      }),
     }),
   );
   await page.goto('/tests/browser/chat.html');
@@ -185,14 +229,18 @@ test('missing suggestions stay absent and Chinese model prompts keep their langu
   let include = false;
   await page.route('**/api/conversations/**', (route) =>
     route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries: history,
         pending: [],
         stopping: false,
-        ...(include
-          ? { extensionState: { reply: { replies: { '2': ['解释扩展隔离的作用'] } } } }
-          : {}),
-      },
+        history: {
+          upperEntryId: 2,
+          revision: include ? 1 : 0,
+          annotations: include
+            ? { '2': { reply: { replies: { '2': ['解释扩展隔离的作用'] } } } }
+            : {},
+        },
+      }),
     }),
   );
   await page.goto('/tests/browser/chat.html');

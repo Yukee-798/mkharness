@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from './env';
 import { it, expect } from 'vitest';
 it('accepts a structurally correct program case with reversed expected object keys', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());

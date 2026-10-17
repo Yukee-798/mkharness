@@ -154,7 +154,11 @@ it('freezes the selected creation options with the conversation, including an ex
   await waitFor(() => expect(network.mock.calls).toHaveLength(2));
   expect(network).toHaveBeenCalledWith(
     '/api/conversations',
-    expect.objectContaining({ method: 'POST', body: '{"skillIds":[]}' }),
+    expect.objectContaining({ method: 'POST', body: expect.any(String) }),
   );
+  expect(JSON.parse(String(network.mock.calls[0]?.[1]?.body))).toEqual({
+    requestId: expect.stringMatching(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),
+    skillIds: [],
+  });
   expect(network.mock.calls[1]?.[0]).toBe('/api/conversations/chat/runs');
 });

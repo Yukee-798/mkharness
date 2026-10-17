@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
 
 test.use({ uiLocale: 'en' });
@@ -22,8 +23,7 @@ for (const mobile of [false, true]) {
             user: { id: 'owner', name: 'Test User', email: 'test@example.com', isAnonymous: false },
           },
         });
-      if (path === '/api/conversations')
-        return route.fulfill({ json: { items: [], cursor: null } });
+      if (path === '/api/conversations') return route.fulfill({ json: { items: [], next: null } });
       if (path === '/api/settings/models')
         return route.fulfill({
           json: {
@@ -170,16 +170,18 @@ test('language and theme switching preserve the active SSE observer and runtime'
     if (path.endsWith('/snapshot')) {
       snapshots++;
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: [
             {
+              conversationId: 1,
+              kind: 'pi.assistant',
               id: 1,
               model: [{ role: 'assistant', content: [{ type: 'text', text: 'Existing answer' }] }],
             },
           ],
           pending: [{ operationId: '11111111-1111-4111-8111-111111111111', status: 'running' }],
           stopping: false,
-        },
+        }),
       });
     }
     if (path.endsWith('/events')) {

@@ -1,10 +1,13 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it } from 'vitest';
+import { Admissions, admissionKey } from '../../src/server/chat/documents';
+import { BG } from '../../src/server/chat/context';
 import { AppError, USER_ACTION_CONTEXT } from '../../src/shared/contracts';
 
 it('preserves the original payload and a normalized null through an acceptance gap', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
-  await runInDurableObject(stub, async (instance, state) => {
+  await runInDurableObject(stub, async (instance) => {
     const target = instance as any;
     const base = await target.contributions();
     let normalized = 0;
@@ -33,22 +36,17 @@ it('preserves the original payload and a normalized null through an acceptance g
         payload: { selected: 'A' },
       },
     } as const;
-    const enqueue = target.enqueue.bind(instance);
-    target.enqueue = async () => {
+    const place = target.place.bind(instance);
+    target.place = async () => {
       throw new AppError(503, 'acceptance_gap');
     };
     expect(await instance.submitRun(structuredClone(request))).toMatchObject({
       error: { code: 'acceptance_gap' },
     });
-    const stored = JSON.parse(
-      String(
-        state.storage.sql.exec('SELECT payload FROM app_requests WHERE id=?', request.runId).one()
-          .payload,
-      ),
-    );
+    const stored = await pendingInput(instance, request.runId);
     expect(stored.request).toEqual(request);
     expect(stored.sourceContext).toBeNull();
-    target.enqueue = enqueue;
+    target.place = place;
     expect(await instance.submitRun(structuredClone(request))).toMatchObject({ accepted: true });
     expect(normalized).toBe(1);
   });
@@ -61,7 +59,7 @@ it('preserves the original payload and a normalized null through an acceptance g
 
 it('freezes normalized action context once across the save/accept gap and compares the original request', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
-  await runInDurableObject(stub, async (instance, state) => {
+  await runInDurableObject(stub, async (instance) => {
     const target = instance as any;
     const base = await target.contributions();
     let calls = 0,
@@ -94,24 +92,19 @@ it('freezes normalized action context once across the save/accept gap and compar
       await instance.submitRun({ ...command, source: { ...command.source, name: 'missing' } }),
     ).toMatchObject({ error: { code: 'extension_action_unavailable' } });
     expect(calls).toBe(0);
-    const enqueue = target.enqueue.bind(instance);
-    target.enqueue = async () => {
+    const place = target.place.bind(instance);
+    target.place = async () => {
       throw new AppError(503, 'acceptance_gap');
     };
     expect(await instance.submitRun(command)).toMatchObject({ error: { code: 'acceptance_gap' } });
-    const stored = JSON.parse(
-      String(
-        state.storage.sql.exec('SELECT payload FROM app_requests WHERE id=?', command.runId).one()
-          .payload,
-      ),
-    );
+    const stored = await pendingInput(instance, command.runId);
     expect(stored).toMatchObject({
       request: command,
       execution: { provider: 'fixture', modelId: 'fixture' },
       sourceContext: { value: 'click-time' },
     });
     current = 'changed-after-save';
-    target.enqueue = enqueue;
+    target.place = place;
     expect(
       await instance.submitRun({
         ...command,
@@ -149,36 +142,40 @@ it.each([
         payload: {},
       },
     };
-    await runInDurableObject(stub, async (instance, state) => {
+    await runInDurableObject(stub, async (instance) => {
+      const probe = instance as any,
+        base = await probe.contributions();
+      probe.contributions = async () => [
+        ...base,
+        { id: 'removed-after-save', actions: { choose: { normalize: async () => sourceContext } } },
+      ];
       await instance.root();
-      state.storage.sql.exec(
-        'INSERT INTO app_requests(id,payload,accepted)VALUES(?,?,0)',
-        request.runId,
-        JSON.stringify({
-          request,
-          execution: {
-            provider: 'fixture',
-            modelId: 'fixture',
-            thinkingLevel: 'off',
-            credentialRef: { source: 'server', fingerprint: 'fixture-only' },
-          },
-          sourceContext,
-        }),
-      );
-      if (accepted)
-        await instance.harness.submit(
-          request.text + USER_ACTION_CONTEXT + '\n' + JSON.stringify(sourceContext),
-          { session: '1', operationId: request.runId, whenBusy: 'followUp' },
-        );
+      if (accepted) {
+        const pi = await instance.harness.pi(),
+          original = pi.conversation.bind(pi);
+        pi.conversation = async (...args) => {
+          const conversation = await original(...args);
+          if (!conversation) return;
+          const submit = conversation.submit.bind(conversation);
+          conversation.submit = async (...input: Parameters<typeof submit>) => {
+            await submit(...input);
+            throw new AppError(503, 'acceptance_gap');
+          };
+          return conversation;
+        };
+      } else
+        probe.place = async () => {
+          throw new AppError(503, 'acceptance_gap');
+        };
+      expect(await instance.submitRun(request as any)).toMatchObject({
+        error: { code: 'acceptance_gap' },
+      });
     });
     await abortAllDurableObjects();
     stub = env.CONVERSATIONS.get(stub.id);
     for (let i = 0; i < 200; i++) {
       const snapshot = JSON.parse(await stub.snapshot());
-      if (
-        !snapshot.pending.length &&
-        !(await runInDurableObject(stub, (instance) => instance.needsRecovery()))
-      ) {
+      if (!snapshot.pending.length) {
         const user = snapshot.entries
           .flatMap((entry: any) => entry.model ?? [])
           .filter((message: any) => message.role === 'user');
@@ -193,3 +190,10 @@ it.each([
     throw new Error('Frozen request did not settle');
   },
 );
+
+async function pendingInput(instance: import('./entry').ChatSession, runId: string) {
+  const pi = await instance.harness.pi(),
+    root = await instance.root();
+  const receipt = await pi.snapshot(Admissions, admissionKey(root.id, runId), BG);
+  return JSON.parse(receipt!.pendingInput!);
+}

@@ -1,5 +1,4 @@
 import { defineDoc } from '@earendil-works/pi-durable';
-import type { Json } from '../../shared/json';
 
 export type RemoteIntent = {
   taskId: number;
@@ -19,10 +18,9 @@ export type RemoteIntent = {
   retryTaskId: number | null;
 };
 
-/** Preserve the deployed native document identity and its unrelated MCP field. */
+/** Provider-specific intent data, scoped to its owning native conversation. */
 export const RemoteIntents = defineDoc<{
   operations: Record<string, RemoteIntent>;
-  mcp?: Record<string, Json>;
 }>({
   kind: 'app.remote-intents',
   version: 1,

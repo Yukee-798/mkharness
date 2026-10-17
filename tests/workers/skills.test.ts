@@ -1,4 +1,5 @@
-import { env, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env } from './env';
 import { it, expect } from 'vitest';
 it('skill activation and resource reads survive SQLite-preserving reconstruction in ordinary Pi history', async () => {
   let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());

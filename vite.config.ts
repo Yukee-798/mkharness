@@ -15,7 +15,7 @@ const browserTests = process.env.AGENT_E2E_FIXTURES === '1';
 const configPath = browserTests ? 'tests/e2e/worker.jsonc' : undefined;
 export default defineConfig({
   // Exercise bundled assets in E2E without mixing test fixtures into deploy output.
-  ...(browserTests ? { build: { outDir: '.wrangler/e2e-build' } } : {}),
+  ...(browserTests ? { build: { outDir: '.wrangler/native-e2e-build' } } : {}),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -44,7 +44,9 @@ export default defineConfig({
     cloudflare({
       configPath,
       viteEnvironment: { name: 'ssr' },
-      persistState: process.env.AGENT_E2E_FIXTURES === '1' ? { path: '.wrangler/e2e' } : true,
+      persistState: {
+        path: browserTests ? '.wrangler/native-e2e-state' : '.wrangler/native-state',
+      },
     }),
     tailwindcss(),
     tanstackStart({ server: { entry: './server.ts' } }),

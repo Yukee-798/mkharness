@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { expect, test } from './fixtures';
 
 for (const edit of ['new draft', 'same text', 'unchanged', 'failed receipt']) {
@@ -17,7 +18,9 @@ for (const edit of ['new draft', 'same text', 'unchanged', 'failed receipt']) {
         );
       }
       if (path.endsWith('/snapshot'))
-        return route.fulfill({ json: { entries: [], pending: [], stopping: false } });
+        return route.fulfill({
+          json: snapshotFixture({ entries: [], pending: [], stopping: false }),
+        });
       return route.fulfill({ status: 404 });
     });
     try {

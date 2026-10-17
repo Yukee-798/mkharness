@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { resource } from './fixtures';
 import { test, expect } from './fixtures';
 import { toMessages } from '../../src/shared/stream';
@@ -21,6 +22,8 @@ for (const answer of ['text', 'openui'] as const) {
           }));
     const entries: any[] = [
       {
+        conversationId: 1,
+        kind: 'pi.assistant',
         id: 2,
         model: [
           {
@@ -34,6 +37,8 @@ for (const answer of ['text', 'openui'] as const) {
         ],
       },
       ...calls.map((call, index) => ({
+        conversationId: 1,
+        kind: 'pi.tool-result',
         id: index + 3,
         model: [
           {
@@ -109,18 +114,18 @@ for (const answer of ['text', 'openui'] as const) {
         const url = route.request().url();
         if (url.endsWith('/capabilities'))
           return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
-        if (url.endsWith('/events'))
+        if (new URL(url).pathname.endsWith('/events'))
           return route.continue({ url: `http://127.0.0.1:${port}/events` });
         if (url.includes('/extensions/openui/resources/'))
           return route.fulfill({
             json: resource({ panelRef: '2.ui', ui, program: null, revision: 0 }),
           });
         return route.fulfill({
-          json: {
+          json: snapshotFixture({
             entries: committed ? entries : [],
             pending: done ? [] : [{ operationId: runId, status: 'running' }],
             stopping: false,
-          },
+          }),
         });
       });
       await page.goto('/tests/browser/chat.html');

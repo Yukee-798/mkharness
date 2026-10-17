@@ -1,6 +1,11 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect, type Page } from './fixtures';
+import {
+  createConversationSchema,
+  type CreateConversationRequest,
+} from '../../src/shared/contracts';
 
-async function workspace(page: Page) {
+async function workspace(page: Page, loseCreateReceipt = false) {
   await page.route('**/api/auth/get-session', (route) =>
     route.fulfill({
       json: {
@@ -10,9 +15,18 @@ async function workspace(page: Page) {
     }),
   );
   let created = false;
+  const creations: CreateConversationRequest[] = [];
   await page.route('**/api/conversations', (route) => {
     if (route.request().method() === 'POST') {
+      const creation = createConversationSchema.parse(route.request().postDataJSON());
+      creations.push(creation);
+      if (creations.length > 1) expect(creation).toEqual(creations[0]);
       created = true;
+      if (loseCreateReceipt && creations.length === 1)
+        return route.fulfill({
+          status: 503,
+          json: { error: { code: 'ack_lost', message: 'Create receipt unavailable' } },
+        });
       return route.fulfill({ status: 201, json: { id: 'created' } });
     }
     return route.fulfill({
@@ -25,11 +39,57 @@ async function workspace(page: Page) {
       },
     });
   });
+  return { creations };
 }
 const entries = (text: string) => [
-  { id: 1, model: [{ role: 'user', content: text }] },
-  { id: 2, model: [{ role: 'assistant', content: [{ type: 'text', text: 'Finished answer' }] }] },
+  { conversationId: 1, kind: 'app.input', id: 1, model: [{ role: 'user', content: text }] },
+  {
+    conversationId: 1,
+    kind: 'pi.assistant',
+    id: 2,
+    model: [{ role: 'assistant', content: [{ type: 'text', text: 'Finished answer' }] }],
+  },
 ];
+
+test('a lost create receipt retries the same requestId before submitting the first run once', async ({
+  page,
+}) => {
+  const { creations } = await workspace(page, true);
+  let submissions = 0;
+  await page.route('**/api/conversations/*/runs', (route) => {
+    submissions++;
+    return route.fulfill({ status: 202, json: { accepted: true } });
+  });
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
+    route.fulfill({
+      json: snapshotFixture({
+        entries: submissions ? entries('First message') : [],
+        pending: [],
+        stopping: false,
+      }),
+    }),
+  );
+  await page.goto('/');
+  await page.getByLabel('消息', { exact: true }).fill('First message');
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Create receipt unavailable');
+  expect(creations).toHaveLength(1);
+  expect(submissions).toBe(0);
+  await expect(page).not.toHaveURL(/chat=/);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByRole('button', { name: '重试提交', exact: true })).toBeVisible();
+  expect(creations).toHaveLength(1);
+  await page.getByRole('button', { name: '重试提交', exact: true }).click();
+  await expect(page).toHaveURL(/chat=created/);
+  await expect(page.getByText('Finished answer', { exact: true })).toBeVisible();
+  expect(creations).toHaveLength(2);
+  expect(creations[1]).toEqual(creations[0]);
+  expect(submissions).toBe(1);
+  await page.reload();
+  await expect(page.getByText('First message', { exact: true })).toHaveCount(1);
+  expect(creations).toHaveLength(2);
+  expect(submissions).toBe(1);
+});
 
 test('creation works while OpenUI is loading, retains the message across chats, then adopts Pi history once', async ({
   page,
@@ -63,15 +123,15 @@ test('creation works while OpenUI is loading, retains the message across chats, 
       if (snapshots === 1) await held;
     }
     return route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries:
           captured && route.request().url().includes('/created/') ? entries('First message') : [],
         pending: [],
         stopping: false,
-      },
+      }),
     });
   });
-  await page.route('**/api/conversations/*/runs/*/events', (route) => {
+  await page.route('**/api/conversations/*/runs/*/events*', (route) => {
     observations++;
     return route.fulfill({ contentType: 'text/event-stream', body: '' });
   });
@@ -116,7 +176,7 @@ test('creation works while OpenUI is loading, retains the message across chats, 
 test('a lost first receipt retries its frozen command after navigation without creating another chat or running twice', async ({
   page,
 }) => {
-  await workspace(page);
+  const { creations } = await workspace(page);
   const commands: any[] = [];
   const operations = new Set<string>();
   let historyAvailable = false;
@@ -137,14 +197,14 @@ test('a lost first receipt retries its frozen command after navigation without c
   });
   await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries:
           historyAvailable && route.request().url().includes('/created/')
             ? entries('Frozen message')
             : [],
         pending: [],
         stopping: false,
-      },
+      }),
     }),
   );
   try {
@@ -169,6 +229,7 @@ test('a lost first receipt retries its frozen command after navigation without c
     expect(commands).toHaveLength(2);
     expect(commands[1]).toEqual(commands[0]);
     expect(operations.size).toBe(1);
+    expect(creations).toHaveLength(1);
     releaseRetry();
     await expect(page.getByText('Finished answer', { exact: true })).toBeVisible();
     await expect(page.getByRole('alert')).toHaveCount(0);
@@ -205,16 +266,16 @@ test('an accepted task observed before its HTTP receipt keeps one SSE connection
   await page.route('**/api/conversations/*/snapshot*', async (route) => {
     await accepted;
     return route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries: done
           ? entries('Accepted before receipt')
           : [entries('Accepted before receipt')[0]],
         pending: done ? [] : [{ operationId: runId, status: 'running' }],
         stopping: false,
-      },
+      }),
     });
   });
-  await page.route('**/api/conversations/*/runs/*/events', async (route) => {
+  await page.route('**/api/conversations/*/runs/*/events*', async (route) => {
     observations++;
     await completed;
     return route.fulfill({

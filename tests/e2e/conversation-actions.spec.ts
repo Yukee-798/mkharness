@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect, type Page } from './fixtures';
 
 async function workspace(page: Page) {
@@ -24,7 +25,9 @@ async function workspace(page: Page) {
     const chat = chats.find((chat) => chat.id === id);
     if (!chat) return route.fulfill({ status: 404, json: { error: { code: 'not_found' } } });
     if (url.pathname.endsWith('/snapshot'))
-      return route.fulfill({ json: { entries: [], pending: [], stopping: false } });
+      return route.fulfill({
+        json: snapshotFixture({ entries: [], pending: [], stopping: false }),
+      });
     mutations.push(method);
     if (method === 'PATCH') {
       chat.title = route.request().postDataJSON().title;

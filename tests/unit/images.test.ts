@@ -34,6 +34,7 @@ it('projects native Pi images into assistant-ui restored attachments without dro
   const messages = toMessages([
     {
       id: 1,
+      kind: 'app.input',
       model: [
         {
           role: 'user',

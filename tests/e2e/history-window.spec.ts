@@ -1,8 +1,15 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
 import { toMessages } from '../../src/shared/stream';
+import { decodeHistoryPage, encodeHistoryPosition } from '../../src/shared/conversation';
+
+const cursor = (before: number, upper: number) =>
+  encodeHistoryPosition({ v: 1, chatId: 'a', conversationId: 1, before, upper });
 
 const entries = (first: number, last: number): any[] =>
   Array.from({ length: last - first + 1 }, (_, i) => ({
+    conversationId: 1,
+    kind: 'app.input',
     id: first + i,
     model: [{ role: 'user', content: `History message ${first + i}`, timestamp: first + i }],
   }));
@@ -13,6 +20,8 @@ const history = (olderCursor?: string) => ({
   ...(olderCursor ? { olderCursor } : {}),
 });
 const answer = (id: number) => ({
+  conversationId: 1,
+  kind: 'pi.assistant',
   id,
   model: [{ role: 'assistant', content: [{ type: 'text', text: `History message ${id}` }] }],
 });
@@ -25,28 +34,32 @@ for (const retry of [false, true])
     let release = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
     await page.route('**/api/conversations/**', async (route) => {
-      const path = new URL(route.request().url()).pathname;
+      const url = new URL(route.request().url());
+      const path = url.pathname;
+      expect(url.searchParams.has('view')).toBe(false);
       if (path.endsWith('/snapshot'))
         return route.fulfill({
-          json: {
+          json: snapshotFixture({
             entries: [...entries(101, 199), answer(200)],
             pending: [],
             stopping: false,
             history: {
-              ...history('older'),
+              ...history(cursor(101, 200)),
               annotations: {
                 '200': { reply: { replies: { '200': ['Follow this latest answer'] } } },
               },
             },
-          },
+          }),
         });
       if (path.endsWith('/history')) {
+        expect(url.searchParams.get('conversationId')).toBe('1');
+        expect(url.searchParams.get('cursor')).toBe(cursor(101, 200));
         reads++;
         if (retry && reads === 1)
           return route.fulfill({ status: 503, json: { error: { code: 'temporary' } } });
         await gate;
         return route.fulfill({
-          json: {
+          json: decodeHistoryPage({
             entries: [...entries(1, 99), answer(100)],
             history: {
               ...history(),
@@ -61,7 +74,7 @@ for (const retry of [false, true])
                 },
               },
             },
-          },
+          }),
         });
       }
       return route.fulfill({ status: 404 });
@@ -136,21 +149,31 @@ test('paging while generating keeps one stream and retains older messages throug
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
   await page.route('**/api/conversations/**', (route) => {
-    const path = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    expect(url.searchParams.has('view')).toBe(false);
     if (path.endsWith('/events')) return route.continue({ url: `http://127.0.0.1:${port}/events` });
     if (path.endsWith('/snapshot')) {
       snapshots++;
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: done ? entries(301, 400) : tail,
           pending: done ? [] : [{ operationId: runId, status: 'running' }],
           stopping: false,
-          history: { ...history('older'), upperEntryId: done ? 400 : 200 },
-        },
+          history: {
+            ...history(done ? cursor(301, 400) : cursor(101, 200)),
+            upperEntryId: done ? 400 : 200,
+          },
+        }),
       });
     }
-    if (path.endsWith('/history'))
-      return route.fulfill({ json: { entries: entries(1, 100), history: history() } });
+    if (path.endsWith('/history')) {
+      expect(url.searchParams.get('conversationId')).toBe('1');
+      expect(url.searchParams.get('cursor')).toBe(cursor(101, 200));
+      return route.fulfill({
+        json: decodeHistoryPage({ entries: entries(1, 100), history: history() }),
+      });
+    }
     return route.fulfill({ status: 404 });
   });
   try {

@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { resource } from './fixtures';
 import { test, expect } from './fixtures';
 test('refresh, switching and three queued tasks only attach; a completed chat never submits again', async ({
@@ -5,7 +6,7 @@ test('refresh, switching and three queued tasks only attach; a completed chat ne
 }) => {
   let submissions = 0,
     observations = 0;
-  const pending: { operationId: string; status: string }[] = [];
+  const pending: { operationId: string; status: 'running' | 'queued' }[] = [];
   const entries: any[] = [];
   let nextEntry = 1;
   await page.route('**/api/conversations/**', async (route) => {
@@ -21,11 +22,21 @@ test('refresh, switching and three queued tasks only attach; a completed chat ne
     }
     if (url.pathname.endsWith('/snapshot')) {
       await route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: chat === 'a' ? entries : [],
           pending: chat === 'a' ? pending : [],
+          queue:
+            chat === 'a'
+              ? pending
+                  .filter((input) => input.status === 'queued')
+                  .map((input) => ({
+                    runId: input.operationId,
+                    text: 'Queued message',
+                    mode: 'followUp' as const,
+                  }))
+              : [],
           stopping: false,
-        },
+        }),
       });
       return;
     }
@@ -36,8 +47,15 @@ test('refresh, switching and three queued tasks only attach; a completed chat ne
       const selected = pending.find((p) => p.operationId === runId);
       if (selected) {
         entries.push(
-          { id: nextEntry++, model: [{ role: 'user', content: 'message' }] },
           {
+            conversationId: 1,
+            kind: 'app.input',
+            id: nextEntry++,
+            model: [{ role: 'user', content: 'message' }],
+          },
+          {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: nextEntry++,
             model: [{ role: 'assistant', content: [{ type: 'text', text: 'completed ' + runId }] }],
           },
@@ -95,11 +113,11 @@ test('one composer action switches from send to stop without a running banner', 
     }
     if (path.endsWith('/snapshot'))
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: [],
           pending: pending ? [{ operationId: runId, status: 'running' }] : [],
           stopping,
-        },
+        }),
       });
     if (path.endsWith('/stop')) {
       stops++;
@@ -230,7 +248,7 @@ test('a genuine streaming response renders an inert native preview before the to
       const url = route.request().url();
       if (url.endsWith('/capabilities'))
         return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
-      if (url.endsWith('/events'))
+      if (new URL(url).pathname.endsWith('/events'))
         return route.continue({ url: `http://127.0.0.1:${port}/events` });
       if (url.includes('/extensions/openui/resources/'))
         return route.fulfill({
@@ -238,10 +256,12 @@ test('a genuine streaming response renders an inert native preview before the to
         });
       if (new URL(url).pathname.endsWith('/snapshot'))
         return route.fulfill({
-          json: {
+          json: snapshotFixture({
             entries: committed
               ? [
                   {
+                    conversationId: 1,
+                    kind: 'pi.assistant',
                     id: 2,
                     model: [
                       {
@@ -258,6 +278,8 @@ test('a genuine streaming response renders an inert native preview before the to
                     ],
                   },
                   {
+                    conversationId: 1,
+                    kind: 'pi.tool-result',
                     id: 3,
                     model: [
                       {
@@ -272,7 +294,7 @@ test('a genuine streaming response renders an inert native preview before the to
               : [],
             pending: committed ? [] : [{ operationId: runId, status: 'running' }],
             stopping: false,
-          },
+          }),
         });
       return route.fulfill({ status: 404 });
     });

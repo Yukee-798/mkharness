@@ -9,7 +9,7 @@ import { AppError } from '../../shared/contracts';
 
 export async function applicationContributions(
   env: Env,
-  entries: () => Promise<readonly EntryRecord[]>,
+  entries: (nativeConversationId: number) => Promise<readonly EntryRecord[]>,
   host?: ContributionHost,
   config: ExtensionConfiguration = extensionConfiguration,
 ) {

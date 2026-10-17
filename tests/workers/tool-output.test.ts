@@ -4,8 +4,9 @@ import { it, expect, vi } from 'vitest';
 import { webTools } from '../../src/extensions/web/server';
 import { staticSkills } from '../../src/server/skills/static';
 import { fixtureModels } from '../fixture-model';
-import { BG } from '../../src/server/conversations/context';
+import { BG } from '../../src/server/chat/context';
 import { applicationContributions } from '../../src/server/extensions/assembly';
+import { policyHarness, policyInput } from '../policy-fixture';
 
 it.each([
   { key: undefined, enabled: false },
@@ -84,7 +85,7 @@ it.each([true, false])(
           readResource: async () => ({ path: 'reference.md', kind: 'reference', content: text }),
         },
       ]);
-      const registry = createRegistry();
+      const selectedExtensions: Extension[] = [];
       for (const extension of [webTools('test-only'), skill]) {
         const selected: Extension = bridge
           ? extension
@@ -93,17 +94,17 @@ it.each([true, false])(
               tools: extension.tools?.map((tool) => ({ ...tool, outputLimits: undefined })),
               wraps: [], // Negative control removes the Skill wrapper as well as Web limits.
             };
-        registry.install(selected);
+        selectedExtensions.push(selected);
       }
-      pi = await Harness.open(
-        new MemoryStorage(),
-        { models: fixtureModels(), registry, settings: { toolExecution: 'sequential' } },
-        BG,
-      );
+      pi = await policyHarness({
+        extensions: selectedExtensions,
+        policy: { skills: ['large-static'], skillNames: { 'large-guide': 'large-static' } },
+        settings: { toolExecution: 'sequential' },
+      });
       const root = await pi.root(BG, {
         agent: { model: { provider: 'fixture', modelId: 'fixture' } },
       });
-      await root.submit({ type: 'input', content: 'large tool outputs' }, BG);
+      await policyInput(pi, root, 'large tool outputs', 'large-output');
       await root.waitForIdle(BG);
       const results = (await root.entries({}, 100, undefined, BG)).items
         .flatMap((entry) => entry.model ?? [])

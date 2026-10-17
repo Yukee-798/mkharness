@@ -35,17 +35,21 @@ export async function unseal<T>(key: CryptoKey, scope: string, envelope: Envelop
 export class SecretStore {
   constructor(
     private storage: DurableObjectStorage,
-    private key: Promise<CryptoKey>,
+    private key: Promise<CryptoKey> | (() => Promise<CryptoKey>),
     private scope: string,
   ) {}
+  private resolveKey() {
+    if (typeof this.key === 'function') this.key = this.key();
+    return this.key;
+  }
   async get<T>(name: string): Promise<T | undefined> {
     const value = await this.storage.get<Envelope>('secret:' + name);
-    return value ? unseal<T>(await this.key, this.scope + ':' + name, value) : undefined;
+    return value ? unseal<T>(await this.resolveKey(), this.scope + ':' + name, value) : undefined;
   }
   async put(name: string, value: unknown) {
     await this.storage.put(
       'secret:' + name,
-      await seal(await this.key, this.scope + ':' + name, value),
+      await seal(await this.resolveKey(), this.scope + ':' + name, value),
     );
   }
   async delete(name: string) {

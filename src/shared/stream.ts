@@ -285,7 +285,7 @@ export function toMessages(
   for (const entry of entries)
     for (const [index, message] of (entry.model ?? []).entries()) {
       const id = index ? `${entry.id}:${index}` : String(entry.id);
-      if (message.role === 'user')
+      if (message.role === 'user' && ['app.input', 'pi.user'].includes(entry.kind))
         result.push({
           id,
           role: 'user',

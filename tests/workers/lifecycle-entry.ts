@@ -1,7 +1,7 @@
-import { ConversationAgent as Fixture } from './entry';
+import { ChatSession as Fixture } from './entry';
 import type { ToolRegistration } from '@earendil-works/pi-durable';
 
-export { ConversationAgent } from './entry';
+export { ChatSession } from './entry';
 export { BindingProbe } from './task-binding-entry';
 
 /** Test observations over real DO reconstruction, without replacing lifecycle behavior. */
@@ -90,7 +90,7 @@ export class LifecycleProbe extends Fixture {
       counts: this.ctx.storage.sql
         .exec<{ name: string; n: number }>('SELECT * FROM test_lifecycle_counts ORDER BY name')
         .toArray(),
-      requests: this.ctx.storage.sql.exec('SELECT id,accepted FROM app_requests').toArray(),
+      requests: this.ctx.storage.sql.exec('SELECT id,status FROM app_read_submissions').toArray(),
     };
   }
 }
@@ -101,4 +101,4 @@ export { BYOKProbe } from './byok-entry';
 
 export { OpenRouterProbe } from './openrouter-entry';
 
-export { McpConnection } from '../../src/server/mcp/connections/connection';
+export { McpConnection } from './mcp-entry';

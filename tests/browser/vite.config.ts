@@ -30,7 +30,7 @@ export default defineConfig({
     },
   ],
   build: {
-    outDir: '.wrangler/e2e-build/client',
+    outDir: '.wrangler/native-e2e-build/client',
     emptyOutDir: false,
     assetsDir: 'fixture-assets',
     rolldownOptions: {

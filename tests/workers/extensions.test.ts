@@ -1,8 +1,9 @@
 import { extensionConfiguration } from '../../src/extensions/configuration';
 import { defineTask } from '@earendil-works/pi-durable';
 import { validateExtensions } from '../../src/server/extensions/registry';
-import { BG } from '../../src/server/conversations/context';
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { BG } from '../../src/server/chat/context';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it, vi } from 'vitest';
 import { definitions } from '../../src/extensions/server';
 

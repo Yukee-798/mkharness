@@ -22,6 +22,7 @@ import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import { useLocale } from '../app/locale';
 import type { QueueAction, QueueActionResult, QueueDraft, QueuedInput } from '../../shared/queue';
+import type { QueueEditRecovery } from '../../shared/conversation';
 
 const messages: [] = [];
 const unsupported = () => {
@@ -31,18 +32,22 @@ const unsupported = () => {
  * it has no send, cancel, scheduling, observation or model path. */
 export function TaskQueue({
   items,
+  recoveries,
   disabled,
   hasDraft,
   act,
   edit,
   editing,
+  acknowledge,
 }: {
   items: readonly QueuedInput[];
+  recoveries: readonly QueueEditRecovery[];
   disabled: boolean;
   hasDraft: boolean;
   act: (id: string, action: QueueAction) => Promise<QueueActionResult>;
   edit: (draft: QueueDraft) => void;
   editing: (value: boolean) => void;
+  acknowledge: (id: string) => Promise<unknown>;
 }) {
   const parent = useAui();
   const imageCount = useAuiState((s) => s.composer.attachments.length);
@@ -58,6 +63,10 @@ export function TaskQueue({
   const [busy, setBusy] = useState(false);
   const guard = useRef(false);
   const [failed, setFailed] = useState<{ id: string; action: QueueAction; message: string }>();
+  const [received, setReceived] = useState<ReadonlySet<string>>(new Set());
+  const recoverable = recoveries.filter(
+    (item) => !received.has(item.runId) && !(failed?.id === item.runId && failed.action === 'edit'),
+  );
   const perform = async (id: string, action: QueueAction) => {
     if (guard.current || disabled) return;
     if (action === 'edit' && (hasDraft || parent.composer().getState().attachments.length)) return;
@@ -69,22 +78,30 @@ export function TaskQueue({
       const result = await act(id, action);
       if (!mounted.current) return;
       if (result.draft) {
-        // Restore to the real composer, never the display-only queue provider.
-        edit(result.draft);
-        for (const image of result.draft.images ?? []) {
+        const images = (result.draft.images ?? []).map((image) => {
           const bytes = Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0));
-          await parent
-            .composer()
-            .addAttachment(new File([bytes], image.name, { type: image.mimeType }));
+          return new File([bytes], image.name, { type: image.mimeType });
+        });
+        // Restore to the real composer, never the display-only queue provider.
+        for (const image of images) {
+          await parent.composer().addAttachment(image);
+          if (!mounted.current) return;
         }
+        edit(result.draft);
+        setReceived((current) => new Set([...current, id]));
+        // A failed acknowledgement retains the server receipt until its bounded
+        // expiry; it must not report a failed transfer after the composer has it.
+        await acknowledge(id).catch(() => {});
       }
     } catch (error) {
       if (mounted.current)
         setFailed({ id, action, message: error instanceof Error ? error.message : String(error) });
     } finally {
       guard.current = false;
-      setBusy(false);
-      if (action === 'edit') editing(false);
+      if (mounted.current) {
+        setBusy(false);
+        if (action === 'edit') editing(false);
+      }
     }
   };
   const adapter: ExternalThreadQueueAdapter = {
@@ -117,7 +134,7 @@ export function TaskQueue({
     },
   };
   const config = AuiConfig({ thread: ExternalThread({ messages, queue: adapter }) });
-  if (!items.length && !failed) return null;
+  if (!items.length && !recoverable.length && !failed) return null;
   return (
     <section
       data-slot="task-queue"
@@ -229,6 +246,30 @@ export function TaskQueue({
           }}
         </ComposerPrimitive.Queue>
       </AuiProvider>
+      {recoverable.map((item) => (
+        <div
+          key={item.runId}
+          data-slot="queue-edit-recovery"
+          data-run-id={item.runId}
+          className="flex items-center gap-3 border-t px-3 py-2"
+        >
+          <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {t('已撤回的消息可恢复到输入框')}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={disabled || busy || hasDraft || !!imageCount}
+            title={hasDraft || imageCount ? t('先发送或清空当前草稿') : t('恢复草稿')}
+            onClick={() => void perform(item.runId, 'edit')}
+          >
+            <Pencil className="size-3.5" />
+            {t('恢复草稿')}
+          </Button>
+        </div>
+      ))}
       {failed && (
         <Alert variant="destructive" className="rounded-none border-0 border-t">
           <AlertDescription>
@@ -237,7 +278,9 @@ export function TaskQueue({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy || disabled}
+              disabled={
+                busy || disabled || (failed.action === 'edit' && (hasDraft || !!imageCount))
+              }
               onClick={() => void perform(failed.id, failed.action)}
             >
               {t('重试')}

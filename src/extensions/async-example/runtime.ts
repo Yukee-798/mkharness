@@ -48,7 +48,7 @@ function remoteSideEffectAllowed(operations: Record<string, RemoteIntent>, comma
 }
 export function remoteRunBlocked(entries: readonly EntryRecord[]) {
   return entries
-    .slice(entries.findLastIndex((e) => e.kind === 'pi.user'))
+    .slice(entries.findLastIndex((e) => ['app.input', 'pi.user'].includes(e.kind)))
     .some((e) =>
       e.model?.some(
         (m) =>
@@ -113,7 +113,7 @@ export function remoteConfiguration(env: Record<string, unknown>): RemoteConfig 
 /** Concrete example service, not a generic job scheduler or SDK. Pi owns its durable state. */
 export function remoteExample(
   config: RemoteConfig,
-  host: { identity: string; command: () => Promise<StoredCommand> },
+  host: { identity: string; command: (nativeConversationId: number) => Promise<StoredCommand> },
 ): Extension {
   const intervals = config.pollMs ?? [1000, 2000, 5000, 10000, 15000];
   remoteConfiguration({ ASYNC_SERVICE_URL: config.endpoint, ASYNC_RECOVERY: config.recovery });
@@ -464,7 +464,7 @@ export function remoteExample(
       hook(ToolTask, {
         beforeTool: async (call, api, context) => {
           if (call.name !== 'example_generate') return;
-          const command = await host.command();
+          const command = await host.command(Number(api.conversationId));
           const source = remoteSource(command.source);
           const operations =
             (await api.snapshot(RemoteIntents, api.conversationId, context))?.operations ?? {};
@@ -487,7 +487,7 @@ export function remoteExample(
         parameters: Type.Object({ prompt: Type.String({ minLength: 1, maxLength: 32000 }) }),
         replay: 'safe',
         execute: async ({ prompt: requestedPrompt }, api, context) => {
-          const command = await host.command(),
+          const command = await host.command(Number(api.conversationId)),
             runId = command.runId;
           const source = remoteSource(command.source);
           let prompt = requestedPrompt;
@@ -532,7 +532,7 @@ export function remoteExample(
               original.retryTaskId = Number(api.taskId);
             }
             const deadline = Date.now() + (config.waitMs ?? 600000),
-              key = host.identity + ':' + api.taskId;
+              key = host.identity + ':' + api.conversationId + ':' + api.taskId;
             const child = await tx.createTask(
               task,
               { prompt, parentId: Number(api.taskId), key, deadline },
@@ -576,7 +576,7 @@ export function remoteExample(
         parameters: Type.Object({}),
         replay: 'safe',
         execute: async (_, api, context) => {
-          const command = await host.command();
+          const command = await host.command(Number(api.conversationId));
           const source = remoteSource(command.source);
           if (source?.action !== 'recheck_remote')
             throw new AppError(409, 'remote_action_required');

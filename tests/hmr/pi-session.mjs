@@ -13,12 +13,12 @@ const persistence = await realpath(await mkdtemp(join(tmpdir(), 'pi-hmr-')));
 const file = join(persistence, 'worker.ts');
 const original = (await readFile(new URL('./worker.ts', import.meta.url), 'utf8'))
   .replace(
-    '../../src/server/conversations/agent',
-    fileURLToPath(new URL('../../src/server/conversations/agent', import.meta.url)),
+    '../../src/server/chat/runtime',
+    fileURLToPath(new URL('../../src/server/chat/runtime', import.meta.url)),
   )
   .replace(
-    '../../src/server/conversations/context',
-    fileURLToPath(new URL('../../src/server/conversations/context', import.meta.url)),
+    '../../src/server/chat/context',
+    fileURLToPath(new URL('../../src/server/chat/context', import.meta.url)),
   )
   .replace('../fixture-model', fileURLToPath(new URL('../fixture-model', import.meta.url)));
 const dependency = join(persistence, 'revision.ts');

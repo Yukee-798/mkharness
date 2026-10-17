@@ -1,5 +1,6 @@
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { it, expect } from 'vitest';
+import { ConversationReadModel } from '../../src/server/chat/read-model';
 function events(body: string) {
   return body
     .split('\n')
@@ -20,20 +21,20 @@ it.each(['slow observer race', 'progress seam'])(
       runId = crypto.randomUUID();
     await stub.submitRun({ runId, text });
     const body = await runInDurableObject(stub, async (instance) => {
-      const projector = instance.extensionProjection.bind(instance);
+      const root = await instance.root();
+      const source = (instance as any).readModel(root.id).source;
       let delayed = false;
-      instance.extensionProjection = async () => {
-        delayed = true;
-        await untilDone(() => instance.submission(runId));
-        return projector();
-      };
-      try {
-        const body = await (await instance.observeRun(runId)).text();
-        expect(delayed).toBe(true);
-        return body;
-      } finally {
-        instance.extensionProjection = projector;
-      }
+      const model = new ConversationReadModel({
+        ...source,
+        contributions: async () => {
+          delayed = true;
+          await untilDone(() => instance.submission(runId));
+          return source.contributions();
+        },
+      });
+      const result = await (await model.observe(runId, String(root.id))).text();
+      expect(delayed).toBe(true);
+      return result;
     });
     const attached = events(body);
     expect(attached.at(-1).type).toBe('RUN_FINISHED');
@@ -52,38 +53,16 @@ it('finishes an attachment when completion races observation bootstrap after the
     runId = crypto.randomUUID();
   await stub.submitRun({ runId, text: 'slow before watch' });
   const body = await runInDurableObject(stub, async (instance) => {
-    const original = instance.extensionProjection.bind(instance);
-    let delayed = false;
-    instance.extensionProjection = async () => {
-      const projection = await original();
-      const restore = projection.restore.bind(projection);
-      projection.restore = async (...args) => {
-        const facts = await restore(...args);
-        delayed = true;
+    const root = await instance.root();
+    const source = (instance as any).readModel(root.id).source;
+    const model = new ConversationReadModel({
+      ...source,
+      queuedInputs: async () => {
         await untilDone(() => instance.submission(runId));
-        return facts;
-      };
-      return projection;
-    };
-    try {
-      const response = await instance.observeRun(runId);
-      expect(delayed).toBe(true);
-      const reader = response.body!.getReader();
-      const timer = setTimeout(() => void reader.cancel(), 2000);
-      const decoder = new TextDecoder();
-      let body = '';
-      try {
-        for (;;) {
-          const chunk = await reader.read();
-          if (chunk.done) return body;
-          body += decoder.decode(chunk.value, { stream: true });
-        }
-      } finally {
-        clearTimeout(timer);
-      }
-    } finally {
-      instance.extensionProjection = original;
-    }
+        return source.queuedInputs();
+      },
+    });
+    return (await model.observe(runId, String(root.id))).text();
   });
   expect(events(body).at(-1).type).toBe('RUN_FINISHED');
   expect(body).toContain('slow before watch');
@@ -229,7 +208,6 @@ it('streams reasoning before completion and restores it from committed history w
   expect(reasoningEnd).toBeLessThan(events.findIndex((e) => e.type === 'TEXT_MESSAGE_CONTENT'));
   expect(events.at(-1).type).toBe('RUN_FINISHED');
   expect(await stub.snapshot()).not.toContain('fixture-private-signature');
-  const { runInDurableObject } = await import('cloudflare:test');
   expect(
     await runInDurableObject(stub, async (instance) => JSON.stringify(await instance.allEntries())),
   ).toContain('fixture-private-signature');

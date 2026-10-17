@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { panelTools, validateUI } from '../../src/extensions/openui/tools';
-import { env } from 'cloudflare:test';
+import { env } from './env';
 import { USER_ACTION_CONTEXT } from '../../src/shared/contracts';
 
 it('rejects unavailable actions and unsafe static links before publishing any branch', async () => {

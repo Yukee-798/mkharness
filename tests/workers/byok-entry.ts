@@ -1,6 +1,12 @@
-import { ConversationAgent } from '../../src/server/conversations/agent';
+import { ChatFixture as ChatSession } from './chat-fixture';
 import { fixtureModels } from '../fixture-model';
-export class BYOKProbe extends ConversationAgent {
+export class BYOKProbe extends ChatSession {
+  protected override async credentials() {
+    return new (await import('../../src/server/models/credentials')).ModelCredentials(
+      this.env,
+      (await this.actor()).ownerId,
+    );
+  }
   protected override models() {
     const models = fixtureModels(),
       provider = models.getProvider('fixture')!;
@@ -19,6 +25,17 @@ export class BYOKProbe extends ConversationAgent {
         options.apiKey?.split('-').at(-1) ?? 'missing',
         model.baseUrl,
       );
+      if (options.cacheRetention === 'none') {
+        this.ctx.storage.sql.exec(
+          'CREATE TABLE IF NOT EXISTS test_byok_summary(model TEXT,version TEXT,base_url TEXT)',
+        );
+        this.ctx.storage.sql.exec(
+          'INSERT INTO test_byok_summary VALUES(?,?,?)',
+          model.id,
+          options.apiKey?.split('-').at(-1) ?? 'missing',
+          model.baseUrl,
+        );
+      }
       return provider.streamSimple(model, context, options);
     };
     models.setProvider({
@@ -28,6 +45,13 @@ export class BYOKProbe extends ConversationAgent {
       streamSimple: record,
     });
     return models;
+  }
+  compactions() {
+    return this.ctx.storage.sql
+      .exec("SELECT name FROM sqlite_master WHERE name='test_byok_summary'")
+      .toArray().length
+      ? this.ctx.storage.sql.exec('SELECT * FROM test_byok_summary').toArray()
+      : [];
   }
   calls() {
     return this.ctx.storage.sql

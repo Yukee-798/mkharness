@@ -15,9 +15,9 @@
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:hmr": "node tests/hmr/pi-session.mjs",
     "test:e2e": "playwright test",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test:unit && pnpm test:workers && pnpm build",
-    "deploy": "pnpm build && wrangler deploy",
-    "db:migrate": "wrangler d1 migrations apply DB --local",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test:unit && pnpm test:native && pnpm test:workers && pnpm build",
+    "deploy": "pnpm deploy:production",
+    "db:migrate": "wrangler d1 migrations apply DB --local --persist-to .wrangler/native-state",
     "build:test": "CLOUDFLARE_ENV=test vite build",
     "deploy:test": "pnpm build:test && wrangler deploy --env test",
     "db:migrate:test": "wrangler d1 migrations apply DB --remote --env test",
@@ -28,7 +28,8 @@
     "format:check": "prettier --check .",
     "build:production": "CLOUDFLARE_ENV=production vite build",
     "deploy:production": "pnpm build:production && wrangler deploy --env production",
-    "db:migrate:production": "wrangler d1 migrations apply DB --remote --env production"
+    "db:migrate:production": "wrangler d1 migrations apply DB --remote --env production",
+    "test:native": "vitest run --config vitest.native.config.ts"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",
@@ -39,8 +40,8 @@
     "@assistant-ui/react-mcp": "0.1.22",
     "@assistant-ui/store": "0.3.18",
     "@assistant-ui/tap": "0.9.22",
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-durable": "1.2.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@openuidev/lang-core": "0.3.2",
     "@openuidev/react-headless": "0.17.0",

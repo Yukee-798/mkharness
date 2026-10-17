@@ -1,4 +1,5 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it } from 'vitest';
 it(
   'runs native OpenRouter tools and OpenUI through production SSE without a personal key and restores history',
@@ -13,13 +14,20 @@ it(
       .bind(owner, 'Free demo', owner + '@example.test', 0, Date.now(), Date.now())
       .run();
     await env.DB.prepare(
-      'INSERT INTO conversations(id,owner,title,created_at,updated_at)VALUES(?,?,?,?,?)',
+      'INSERT INTO conversations(id,owner,create_request_id,create_hash,instance_generation,title,created_at,updated_at)VALUES(?,?,?,?,?,?,?,?)',
     )
-      .bind(chat, owner, 'Free demo', Date.now(), Date.now())
+      .bind(
+        chat,
+        owner,
+        crypto.randomUUID(),
+        'fixture',
+        crypto.randomUUID(),
+        'Free demo',
+        Date.now(),
+        Date.now(),
+      )
       .run();
-    const namespace = (env as any).OPENROUTER_PROBES as DurableObjectNamespace<
-      import('./openrouter-entry').OpenRouterProbe
-    >;
+    const namespace = env.OPENROUTER_PROBES;
     let stub = namespace.getByName(chat);
     expect(await stub.submitRun({ runId, text: 'count and show UI' })).toMatchObject({
       accepted: true,
@@ -65,13 +73,20 @@ it('rejects paid deployment calls and settles exhausted free quota without repla
     .bind(owner, 'Quota demo', owner + '@example.test', 0, Date.now(), Date.now())
     .run();
   await env.DB.prepare(
-    'INSERT INTO conversations(id,owner,title,created_at,updated_at)VALUES(?,?,?,?,?)',
+    'INSERT INTO conversations(id,owner,create_request_id,create_hash,instance_generation,title,created_at,updated_at)VALUES(?,?,?,?,?,?,?,?)',
   )
-    .bind(chat, owner, 'Quota demo', Date.now(), Date.now())
+    .bind(
+      chat,
+      owner,
+      crypto.randomUUID(),
+      'fixture',
+      crypto.randomUUID(),
+      'Quota demo',
+      Date.now(),
+      Date.now(),
+    )
     .run();
-  const namespace = (env as any).OPENROUTER_PROBES as DurableObjectNamespace<
-    import('./openrouter-entry').OpenRouterProbe
-  >;
+  const namespace = env.OPENROUTER_PROBES;
   let stub = namespace.getByName(chat);
   expect(
     await stub.submitRun({

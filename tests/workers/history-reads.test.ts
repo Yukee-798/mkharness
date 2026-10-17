@@ -1,66 +1,46 @@
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { AssistantEntry, ToolResultEntry, UserEntry } from '@earendil-works/pi-durable';
 import { expect, it, vi } from 'vitest';
-import { BG } from '../../src/server/conversations/context';
+import { BG } from '../../src/server/chat/context';
 import { usage } from '../fixture-model';
 
 it.each([100, 500])(
-  'shares snapshot history instead of rereading it for each consumer (%s entries)',
+  'keeps idle snapshot reads proportional to the current page (%s entries)',
   async (size) => {
     const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
-    const measurement = await runInDurableObject(stub, async (instance, state) => {
-      const root = await instance.root();
-      await root.commit(async (tx) => {
+    await runInDurableObject(stub, async (instance, state) => {
+      const conversation = await instance.root();
+      await conversation.commit(async (tx) => {
         for (let n = 0; n < size; n++)
-          await tx.appendEntry(UserEntry, root.id, {
+          await tx.appendEntry(UserEntry, conversation.id, {
             model: [{ role: 'user', content: 'history ' + n, timestamp: n }],
           });
       }, BG);
-      const metadata = state.storage.sql.exec('SELECT * FROM pi_durable_metadata').toArray();
+      const before = state.storage.sql.exec('SELECT * FROM pi_durable_metadata').toArray();
       const sql = vi.spyOn(state.storage.sql, 'exec');
-      const measure = async () => {
-        sql.mockClear();
-        const snapshot = JSON.parse(await instance.snapshot());
-        const rows = sql.mock.calls.reduce((sum, [query], i) => {
-          const result = sql.mock.results[i];
-          return (
-            sum +
-            (/\b(?:FROM|JOIN)\s+"?pi_entries\b/i.test(query) && result?.type === 'return'
-              ? Number(result.value.rowsRead)
-              : 0)
-          );
-        }, 0);
-        return { snapshot, rows };
-      };
       try {
-        const shared = await measure();
-        expect(shared.snapshot.entries).toHaveLength(100);
-        expect(shared.rows).toBeLessThanOrEqual(2 * size + 20);
-        // Negative control: add back one independent full-history consumer.
-        const original = instance.extensionProjection.bind(instance);
-        instance.extensionProjection = async () => {
-          const projection = await original();
-          const restore = projection.restore.bind(projection);
-          projection.restore = async (...args) => {
-            await instance.allEntries();
-            return restore(...args);
-          };
-          return projection;
-        };
-        const repeated = await measure();
-        instance.extensionProjection = original;
-        expect(repeated.snapshot.entries).toEqual(shared.snapshot.entries);
-        expect(repeated.snapshot.extensionState).toEqual(shared.snapshot.extensionState);
-        expect(repeated.rows).toBeGreaterThanOrEqual(shared.rows + size);
-        expect(state.storage.sql.exec('SELECT * FROM pi_durable_metadata').toArray()).toEqual(
-          metadata,
+        const snapshot = JSON.parse(await instance.snapshot());
+        expect(snapshot.conversationId).toBe(Number(conversation.id));
+        expect(snapshot.entries).toHaveLength(100);
+        expect(snapshot.history).toBeDefined();
+        expect(snapshot).not.toHaveProperty('cursor');
+        const rows = sql.mock.calls.reduce(
+          (sum, [query], index) =>
+            sum +
+            (/\b(?:FROM|JOIN)\s+"?pi_entries\b/i.test(query) &&
+            sql.mock.results[index]?.type === 'return'
+              ? Number(sql.mock.results[index].value.rowsRead)
+              : 0),
+          0,
         );
-        return { size, shared: shared.rows, repeated: repeated.rows };
+        expect(rows).toBeLessThanOrEqual(220);
+        expect(state.storage.sql.exec('SELECT * FROM pi_durable_metadata').toArray()).toEqual(
+          before,
+        );
       } finally {
         sql.mockRestore();
       }
     });
-    console.log('HISTORY_READS', JSON.stringify(measurement));
   },
 );
 

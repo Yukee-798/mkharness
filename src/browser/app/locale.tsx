@@ -106,6 +106,10 @@ const chinese: Record<string, string> = {
     '远端结果尚无法确认。请先到外部服务核实，本次操作不会自动重放。',
 
   queue_item_started: '这项任务已开始或结束，队列已刷新。',
+  queue_edit_expired: '这份草稿已过期。',
+  queue_edit_limit: '请先恢复待领取草稿，再编辑更多排队消息。',
+  queue_edit_not_found: '这份草稿已不可用。',
+  queue_edit_not_ready: '草稿尚未准备好，请重试。',
   reply_not_found: '原回答不可用，请重新打开当前聊天后再试。',
   reply_context_unavailable: '原始输入不可用，请重新发送问题。',
   关闭思考: '关闭',

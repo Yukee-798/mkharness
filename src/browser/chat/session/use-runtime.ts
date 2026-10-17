@@ -13,6 +13,7 @@ import type { ExtensionState } from '../../../shared/extension-state';
 import type { QueuedInput } from '../../../shared/queue';
 import type { Snapshot } from './snapshot';
 import type { ConversationHistory } from './history-store';
+import type { ConversationRemote } from './remote';
 export function useConversationRuntime({
   id,
   userId,
@@ -25,6 +26,7 @@ export function useConversationRuntime({
   queue,
   historyStore,
   prependVersion,
+  remote,
 }: {
   id: string;
   userId: string;
@@ -37,6 +39,7 @@ export function useConversationRuntime({
   queue: (value: QueuedInput[]) => void;
   historyStore: ConversationHistory;
   prependVersion: number;
+  remote: ConversationRemote;
 }) {
   const extensions = useExtensionConfig(userId);
   const [runtimeIssues, setRuntimeIssues] = useState<RuntimeIssue[]>(snapshot.runtimeIssues ?? []);
@@ -82,7 +85,8 @@ export function useConversationRuntime({
         finished: () => callbacks.current.done(),
         connected: () => callbacks.current.connected(),
         messageIds,
-        window: () => !!callbacks.current.snapshot.history,
+        target: () => callbacks.current.snapshot.conversationId || undefined,
+        observe: remote.observe,
         mergeMessages: (messages) => historyStore.mergeMessages(messages, messageIds),
         state: (runId, value) => {
           const pending = callbacks.current.snapshot.pending;
@@ -105,7 +109,7 @@ export function useConversationRuntime({
           }
         },
       }),
-    [id, messageIds, historyStore],
+    [id, messageIds, historyStore, remote],
   );
   const runtime = useAgUiRuntime({
     agent,
@@ -117,11 +121,10 @@ export function useConversationRuntime({
   const activeRunId = (snapshot.pending.find((p) => p.status === 'running') ?? snapshot.pending[0])
     ?.operationId;
   const previousPrepend = useRef(prependVersion);
-  const windowed = !!snapshot.history;
   useEffect(() => {
     let imported = history;
     const prepending = previousPrepend.current !== prependVersion;
-    if (windowed) {
+    {
       const current = runtime.thread.export();
       const inverse = new Map([...messageIds].map(([canonical, live]) => [live, canonical]));
       const position = (id: string) => Number((inverse.get(id) ?? id).split(':')[0]);
@@ -147,7 +150,7 @@ export function useConversationRuntime({
     }
     previousPrepend.current = prependVersion;
     runtime.thread.import(imported);
-  }, [runtime, history, prependVersion, windowed, messageIds]);
+  }, [runtime, history, prependVersion, messageIds]);
   useEffect(() => {
     if (activeRunId)
       void runtime.thread.resumeRun({

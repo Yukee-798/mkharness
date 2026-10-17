@@ -5,11 +5,27 @@ import {
   connectionViews,
   newConversationBindings,
   ownedConnection,
+  userConnection,
 } from '../../src/server/mcp/connections/catalog';
 import { McpRequests } from '../../src/server/mcp/connections/requests';
-import { BG } from '../../src/server/conversations/context';
+import { BG } from '../../src/server/chat/context';
+import { userMcpContribution } from '../../src/extensions/mcp/server';
+import { Harness, MemoryStorage, createRegistry } from '@earendil-works/pi-durable';
+import { fixtureModels } from '../fixture-model';
+import {
+  drainMcpAcknowledgements,
+  mcpAcknowledgementTasks,
+} from '../../src/server/mcp/acknowledgement';
 
+async function pendingMcpAcknowledgements(pi: Harness, context: typeof BG) {
+  return (await pi.inspect(context)).tasks.some(({ record }) =>
+    ['app.mcp-acknowledgement', 'app.deployment-mcp-acknowledgement'].includes(record.kind),
+  );
+}
 afterEach(() => vi.restoreAllMocks());
+class ReopenableMemoryStorage extends MemoryStorage {
+  override async close() {}
+}
 function mockServer(
   options: {
     oauth?: boolean;
@@ -140,7 +156,7 @@ async function makeConnection(auth: 'none' | 'auto' | 'bearer' = 'none') {
   )
     .bind(id, owner, 'Remote docs', 'https://remote.example.test/mcp', Date.now())
     .run();
-  const stub = env.MCP_CONNECTIONS.getByName(id);
+  const stub = userConnection(env as Env, owner, id);
   await stub.initialize(owner, id, {
     name: 'Remote docs',
     endpoint: 'https://remote.example.test/mcp',
@@ -167,7 +183,7 @@ it('uses SDK discovery, isolates owners, encrypts bearer credentials and restore
   expect(remote.counts().calls).toBe(0);
   await abortAllDurableObjects();
   remote.network.mockClear();
-  const restored = env.MCP_CONNECTIONS.getByName(id);
+  const restored = userConnection(env as Env, owner, id);
   expect(JSON.parse(await restored.metadata(owner)).tools).toHaveLength(1);
   expect(remote.network).not.toHaveBeenCalled();
 });
@@ -212,14 +228,14 @@ it('keeps an interrupted deletion readable and safely retries revocation after r
 it('completes native OAuth discovery, DCR, state/PKCE callback and encrypted token storage', async () => {
   const remote = mockServer({ oauth: true });
   const { owner, id } = await makeConnection('auto');
-  let stub = env.MCP_CONNECTIONS.getByName(id);
+  let stub = userConnection(env as Env, owner, id);
   const start = await stub.connectRemote(owner);
   expect(JSON.parse(start.connection).status).toBe('authorizing');
   expect(start.authorizationUrl).toBeTruthy();
   const authorization = new URL(start.authorizationUrl!);
   expect(authorization.searchParams.get('code_challenge_method')).toBe('S256');
   await abortAllDurableObjects();
-  stub = env.MCP_CONNECTIONS.getByName(id);
+  stub = userConnection(env as Env, owner, id);
   const callback = new URL('/api/mcp/callback', env.APP_URL);
   callback.searchParams.set('state', authorization.searchParams.get('state')!);
   callback.searchParams.set('code', 'fixture-code');
@@ -233,7 +249,7 @@ it('completes native OAuth discovery, DCR, state/PKCE callback and encrypted tok
   expect(JSON.parse(await stub.metadata(owner)).status).toBe('ready');
   expect(remote.counts()).toMatchObject({ registrations: 1, exchanges: 1 });
   await abortAllDurableObjects();
-  stub = env.MCP_CONNECTIONS.getByName(id);
+  stub = userConnection(env as Env, owner, id);
   expect(JSON.parse((await stub.connectRemote(owner)).connection).status).toBe('ready');
   expect(remote.counts()).toMatchObject({ registrations: 1, exchanges: 1 });
   const stored = await runInDurableObject(stub, (_, state) => state.storage.list());
@@ -285,97 +301,116 @@ it('never repeats an uncertain operation, including after connection reconstruct
   });
   await abortAllDurableObjects();
   expect(
-    await env.MCP_CONNECTIONS.getByName(id).call(owner, { ...input, operation: 'two' }),
+    await userConnection(env as Env, owner, id).call(owner, { ...input, operation: 'two' }),
   ).toMatchObject({ ok: false, code: 'remote_outcome_unknown' });
   expect(remote.counts().calls).toBe(1);
 });
+it.each(['dispatching', 'unknown', 'responded'] as const)(
+  'uses the outstanding index with settled history while retaining the %s unsafe guard',
+  async (status) => {
+    const remote = mockServer();
+    const { owner, id, stub } = await makeConnection();
+    const view = JSON.parse((await stub.connectRemote(owner)).connection) as ConnectionView;
+    const input = {
+      name: 'read_document',
+      hash: view.tools[0].hash,
+      grant: view.grant,
+      authorization: 'once' as const,
+      expiresAt: Date.now() + 60_000,
+      operation: 'outstanding',
+      arguments: '{"query":"docs"}',
+    };
+    expect(await stub.call(owner, input)).toMatchObject({ ok: true });
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql;
+      sql.exec(
+        "WITH RECURSIVE history(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<1000) INSERT INTO mcp_dispatch(id,status,replay) SELECT 'settled-'||n,'acknowledged','unsafe' FROM history",
+      );
+      sql.exec('UPDATE mcp_dispatch SET status=? WHERE id=?', status, input.operation);
+      const plan = sql
+        .exec<{ detail: string }>(
+          "EXPLAIN QUERY PLAN SELECT * FROM mcp_dispatch WHERE replay='unsafe' AND status IN ('dispatching','unknown','responded') LIMIT 1",
+        )
+        .toArray();
+      expect(plan.map((row) => row.detail).join('\n')).toContain('mcp_dispatch_outstanding');
+    });
+    await abortAllDurableObjects();
+    const restored = userConnection(env as Env, owner, id);
+    expect(await restored.call(owner, { ...input, operation: 'next' })).toMatchObject({
+      ok: false,
+      code: status === 'responded' ? 'mcp_connection_busy' : 'remote_outcome_unknown',
+    });
+    expect(remote.counts().calls).toBe(1);
+    if (status === 'responded') {
+      await restored.acknowledge(owner, input.operation);
+      expect(await restored.call(owner, { ...input, operation: 'next' })).toMatchObject({
+        ok: true,
+      });
+      expect(remote.counts().calls).toBe(2);
+      await restored.acknowledge(owner, 'next');
+    }
+  },
+);
 it.each(['approved', 'rejected', 'stop'] as const)(
-  'persists a real model-issued Pi tool approval and handles %s',
+  'persists a native Pi approval and handles %s without an Agent host',
   async (decision) => {
     const remote = mockServer();
     const { owner, stub } = await makeConnection();
     await stub.connectRemote(owner);
     const bindings = await newConversationBindings(env as Env, owner);
-    const conversation = crypto.randomUUID();
-    await env.DB.prepare(
-      'INSERT INTO conversations(id,owner,title,created_at,updated_at) VALUES(?,?,?,?,?)',
-    )
-      .bind(conversation, owner, 'MCP approval', Date.now(), Date.now())
-      .run();
-    await env.DB.prepare('INSERT INTO conversation_mcp_bindings(conversation,bindings) VALUES(?,?)')
-      .bind(conversation, JSON.stringify(bindings))
-      .run();
-    let agent = env.CONVERSATIONS.getByName(conversation);
-    await agent.submitRun({ runId: crypto.randomUUID(), text: 'custom_mcp_probe' });
-    let parent = 0;
-    for (let i = 0; i < 100; i++) {
-      parent = await runInDurableObject(agent, async (instance) => {
-        const root = await instance.root();
-        const doc = await (instance as any).harness
-          .pi()
-          .then((pi: any) => pi.snapshot(McpRequests, root.id, BG));
-        return Number(
-          (Object.values(doc?.requests ?? {}).find((r: any) => r.status === 'pending') as any)
-            ?.parentId ?? 0,
-        );
+    const chatId = crypto.randomUUID();
+    const storage = new ReopenableMemoryStorage();
+    let pi: Harness;
+    const contribution = await userMcpContribution(env as Env, {
+      identity: chatId,
+      conversationId: chatId,
+      ownerId: owner,
+      mcpBindings: bindings,
+      pi: async () => pi,
+      command: async () => undefined,
+    });
+    const registry = createRegistry();
+    registry.install(contribution.extension!);
+    pi = await Harness.open(storage, { models: fixtureModels(), registry }, BG);
+    try {
+      const root = await pi.root(BG, {
+        agent: { model: { provider: 'fixture', modelId: 'fixture' } },
       });
-      if (parent) break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect(parent).toBeGreaterThan(0);
-    const pendingSnapshot = JSON.parse(await agent.snapshot());
-    const assistant = pendingSnapshot.entries.find((entry: any) =>
-      entry.model?.some(
-        (message: any) =>
-          message.role === 'assistant' &&
-          message.content.some(
-            (part: any) => part.type === 'toolCall' && part.name === bindings[0]!.name,
-          ),
-      ),
-    );
-    const call = assistant.model
-      .flatMap((message: any) => (message.role === 'assistant' ? message.content : []))
-      .find((part: any) => part.type === 'toolCall' && part.name === bindings[0]!.name);
-    const projected = pendingSnapshot.extensionState.mcp.requests.find(
-      (request: any) => request.parentId === parent,
-    );
-    expect(projected).toMatchObject({
-      status: 'pending',
-      toolCallId: `${assistant.id}.${encodeURIComponent(call.id)}`,
-    });
-    expect(await agent.controlExtension('mcp', 'decide', '{}')).toMatchObject({
-      ok: false,
-      code: 'invalid_mcp_request',
-    });
-    expect(remote.counts().calls).toBe(0);
-    if (decision === 'stop') await agent.stopConversation();
-    else {
-      if (decision === 'approved') {
-        await abortAllDurableObjects();
-        agent = env.CONVERSATIONS.getByName(conversation);
-        expect(JSON.parse(await agent.snapshot()).extensionState.mcp.requests).toContainEqual(
-          projected,
+      await root.submit({ type: 'input', content: 'custom_mcp_probe' }, BG);
+      let parentId = 0;
+      await vi.waitFor(async () => {
+        const doc = await pi.snapshot(McpRequests, root.id, BG);
+        parentId =
+          Object.values(doc?.requests ?? {}).find((request) => request.status === 'pending')
+            ?.parentId ?? 0;
+        expect(parentId).toBeGreaterThan(0);
+      });
+      expect(remote.counts().calls).toBe(0);
+      if (decision === 'stop') await root.abort(BG, { background: true });
+      else {
+        if (decision === 'approved') {
+          await pi.close(BG);
+          await abortAllDurableObjects();
+          pi = await Harness.open(storage, { models: fixtureModels(), registry }, BG);
+        }
+        const current = (await pi.conversation(root.id, BG))!;
+        await contribution.controls!.decide.invoke(
+          { parentId, decision },
+          { conversation: current, context: BG },
         );
+        await current.waitForIdle(BG);
       }
-      expect(
-        await agent.controlExtension(
-          'mcp',
-          'decide',
-          JSON.stringify({ parentId: parent, decision }),
-        ),
-      ).toMatchObject({ ok: true });
+      expect(remote.counts().calls).toBe(decision === 'approved' ? 1 : 0);
+      const requests = (await pi.snapshot(McpRequests, root.id, BG))?.requests ?? {};
+      expect(Object.values(requests)).toContainEqual(
+        expect.objectContaining({
+          status:
+            decision === 'approved' ? 'completed' : decision === 'stop' ? 'stopped' : 'rejected',
+        }),
+      );
+    } finally {
+      await pi.close(BG);
     }
-    let settled = false;
-    for (let i = 0; i < 100; i++) {
-      const snapshot = JSON.parse(await agent.snapshot());
-      if (!snapshot.pending.length && !snapshot.stopping) {
-        settled = true;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    expect(settled).toBe(true);
-    expect(remote.counts().calls).toBe(decision === 'approved' ? 1 : 0);
   },
 );
 
@@ -459,3 +494,327 @@ it('distinguishes another chat awaiting durable acknowledgement from an unknown 
   expect(remote.counts().calls).toBe(2);
   await stub.acknowledge(owner, 'chat-two');
 });
+
+async function nativeAcknowledgementFixture(
+  acknowledge: (stub: ReturnType<typeof userConnection>, operation: string) => Promise<void>,
+  onResult?: () => Promise<void>,
+) {
+  const remote = mockServer();
+  const { owner, id, stub } = await makeConnection();
+  const view = JSON.parse((await stub.connectRemote(owner)).connection) as ConnectionView;
+  await stub.configure(owner, { revision: view.revision, permissions: { read_document: 'auto' } });
+  const bindings = await newConversationBindings(env as Env, owner);
+  let operation = '';
+  const live = () => userConnection(env as Env, owner, id);
+  const probeEnv = {
+    ...env,
+    MCP_CONNECTIONS: {
+      getByName: () => ({
+        metadata: (...args: Parameters<typeof stub.metadata>) => live().metadata(...args),
+        call: async (...args: Parameters<typeof stub.call>) => {
+          const receipt = await live().call(...args);
+          operation = args[1].operation;
+          await onResult?.();
+          return receipt;
+        },
+        cancel: (...args: Parameters<typeof stub.cancel>) => live().cancel(...args),
+        acknowledge: (_owner: string, operation: string) => acknowledge(live(), operation),
+      }),
+    },
+  } as unknown as Env;
+  const chatId = crypto.randomUUID();
+  const registry = async () => {
+    const value = createRegistry();
+    const contribution = await userMcpContribution(probeEnv, {
+      identity: chatId,
+      conversationId: chatId,
+      ownerId: owner,
+      mcpBindings: bindings,
+      pi: async () => {
+        throw new Error('unused host');
+      },
+      command: async () => undefined,
+    });
+    value.install(contribution.extension!);
+    return value;
+  };
+  return { remote, owner, id, stub, bindings, registry, probeEnv, operation: () => operation };
+}
+
+it.each(['before delivery', 'after delivery'] as const)(
+  'retries a user acknowledgement lost %s without replaying its remote call',
+  async (failure) => {
+    let attempts = 0;
+    let savedResult: unknown;
+    const fixture = await nativeAcknowledgementFixture(async (stub, operation) => {
+      attempts++;
+      if (attempts === 1) {
+        savedResult = (await pi.getTask(JSON.parse(operation)[2], BG))?.state;
+        if (failure === 'after delivery') await stub.acknowledge(fixture.owner, operation);
+        throw new Error('lost acknowledgement RPC');
+      }
+      await stub.acknowledge(fixture.owner, operation);
+    });
+    const pi = await Harness.open(
+      new MemoryStorage(),
+      {
+        models: fixtureModels(),
+        registry: await fixture.registry(),
+      },
+      BG,
+    );
+    try {
+      const root = await pi.root(BG, {
+        agent: { model: { provider: 'fixture', modelId: 'fixture' } },
+      });
+      await root.submit({ type: 'input', content: 'custom_mcp_probe' }, BG);
+      await root.waitForIdle(BG);
+      await vi.waitFor(
+        async () => {
+          expect(attempts).toBe(2);
+          expect(await pendingMcpAcknowledgements(pi, BG)).toBe(false);
+        },
+        { timeout: 5000 },
+      );
+      expect(savedResult).toMatchObject({
+        status: 'terminal',
+        outcome: {
+          status: 'completed',
+          result: { text: expect.stringContaining('fixture document') },
+        },
+      });
+      expect(JSON.stringify((await root.context(BG)).messages)).toContain('fixture document');
+      const tool = fixture.bindings[0];
+      expect(
+        await fixture.stub.call(fixture.owner, {
+          name: tool.tool.name,
+          hash: tool.tool.hash,
+          grant: tool.grant,
+          arguments: '{"query":"next"}',
+          authorization: 'auto',
+          expiresAt: Date.now() + 60_000,
+          operation: 'next-chat',
+        }),
+      ).toMatchObject({ ok: true });
+      await fixture.stub.acknowledge(fixture.owner, 'next-chat');
+      expect(fixture.remote.counts().calls).toBe(2);
+    } finally {
+      await pi.close(BG);
+    }
+  },
+);
+
+it.each(['native retry', 'deletion drain', 'disabled cold retry', 'in-flight Stop'] as const)(
+  'preserves one user acknowledgement through cold reconstruction, repeated Stop and %s',
+  async (recovery) => {
+    let available = false;
+    let attempts = 0;
+    let releaseAvailability!: () => void;
+    const delayed = new Promise<void>((resolve) => {
+      releaseAvailability = resolve;
+    });
+    const fixture = await nativeAcknowledgementFixture(async (stub, operation) => {
+      attempts++;
+      if (!available) {
+        if (recovery === 'in-flight Stop') await delayed;
+        else throw new Error('acknowledgement unavailable');
+      }
+      await stub.acknowledge(fixture.owner, operation);
+    });
+    const storage = new ReopenableMemoryStorage();
+    let pi = await Harness.open(
+      storage,
+      { models: fixtureModels(), registry: await fixture.registry() },
+      BG,
+    );
+    try {
+      const root = await pi.root(BG, {
+        agent: { model: { provider: 'fixture', modelId: 'fixture' } },
+      });
+      await root.submit({ type: 'input', content: 'custom_mcp_probe' }, BG);
+      await root.waitForIdle(BG);
+      await vi.waitFor(() => expect(attempts).toBe(1));
+      expect(await pendingMcpAcknowledgements(pi, BG)).toBe(true);
+      await pi.close(BG);
+      await abortAllDurableObjects();
+      const restoredRegistry =
+        recovery === 'disabled cold retry' ? createRegistry() : await fixture.registry();
+      if (recovery === 'disabled cold retry') {
+        const disabled = await userMcpContribution(
+          fixture.probeEnv,
+          {
+            identity: 'disabled',
+            conversationId: 'disabled',
+            ownerId: fixture.owner,
+            mcpBindings: fixture.bindings,
+            pi: async () => pi,
+            command: async () => undefined,
+          },
+          { mcp: { enabled: true, custom: false } },
+        );
+        expect(disabled.extension).toBeUndefined();
+        restoredRegistry.install({
+          name: 'host-mcp-acknowledgements',
+          tasks: mcpAcknowledgementTasks(fixture.probeEnv),
+        });
+      }
+      pi = await Harness.open(storage, { models: fixtureModels(), registry: restoredRegistry }, BG);
+      const restored = (await pi.conversation(root.id, BG))!;
+      for (let stop = 0; stop < 2; stop++) {
+        await restored.abort(BG, { background: true });
+        const pending = (await pi.inspect(BG)).tasks;
+        expect(pending).toHaveLength(1);
+        expect(pending[0].record.kind).toBe('app.mcp-acknowledgement');
+        expect(pending[0].record.input).toMatchObject({ operation: fixture.operation() });
+        expect(
+          Object.values((await pi.snapshot(McpRequests, root.id, BG))!.requests),
+        ).toMatchObject([{ status: 'completed' }]);
+        expect((await pi.getTask(JSON.parse(fixture.operation())[2], BG))?.state).toMatchObject({
+          status: 'terminal',
+          outcome: {
+            status: 'completed',
+            result: { text: expect.stringContaining('fixture document') },
+          },
+        });
+      }
+      if (recovery === 'deletion drain') {
+        await pi.close(BG);
+        await expect(drainMcpAcknowledgements(storage, fixture.probeEnv, BG)).rejects.toThrow(
+          'acknowledgement unavailable',
+        );
+        available = true;
+        await drainMcpAcknowledgements(storage, fixture.probeEnv, BG);
+        await drainMcpAcknowledgements(storage, fixture.probeEnv, BG);
+      } else {
+        available = true;
+        releaseAvailability();
+        await vi.waitFor(async () => expect(await pendingMcpAcknowledgements(pi, BG)).toBe(false), {
+          timeout: 5000,
+        });
+      }
+      expect(fixture.remote.counts().calls).toBe(1);
+      expect(
+        await runInDurableObject(
+          userConnection(env as Env, fixture.owner, fixture.id),
+          (_, state) => state.storage.sql.exec('SELECT status FROM mcp_dispatch').toArray(),
+        ),
+      ).toEqual([{ status: 'acknowledged' }]);
+    } finally {
+      releaseAvailability();
+      await pi.close(BG);
+    }
+  },
+);
+
+it('keeps a known user result completed when Stop races its native result commit', async () => {
+  let release!: () => void;
+  const delivered = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fixture = await nativeAcknowledgementFixture(
+    async (stub, operation) => stub.acknowledge(fixture.owner, operation),
+    () => delivered,
+  );
+  const pi = await Harness.open(
+    new MemoryStorage(),
+    {
+      models: fixtureModels(),
+      registry: await fixture.registry(),
+    },
+    BG,
+  );
+  try {
+    const root = await pi.root(BG, {
+      agent: { model: { provider: 'fixture', modelId: 'fixture' } },
+    });
+    await root.submit({ type: 'input', content: 'custom_mcp_probe' }, BG);
+    await vi.waitFor(() => expect(fixture.operation()).not.toBe(''));
+    const stopping = root.abort(BG, { background: true });
+    await vi.waitFor(async () =>
+      expect((await pi.getTask(JSON.parse(fixture.operation())[2], BG))?.abortRequested).toBe(true),
+    );
+    release();
+    await stopping;
+    await vi.waitFor(async () => expect(await pendingMcpAcknowledgements(pi, BG)).toBe(false));
+    expect(Object.values((await pi.snapshot(McpRequests, root.id, BG))!.requests)).toMatchObject([
+      { status: 'completed' },
+    ]);
+    expect((await pi.getTask(JSON.parse(fixture.operation())[2], BG))?.state).toMatchObject({
+      status: 'terminal',
+      outcome: {
+        status: 'completed',
+        result: { text: expect.stringContaining('fixture document') },
+      },
+    });
+    expect(fixture.remote.counts().calls).toBe(1);
+    expect(
+      await runInDurableObject(fixture.stub, (_, state) =>
+        state.storage.sql.exec('SELECT status FROM mcp_dispatch').toArray(),
+      ),
+    ).toEqual([{ status: 'acknowledged' }]);
+  } finally {
+    release();
+    await pi.close(BG);
+  }
+});
+
+it.each(['warm', 'cold', 'disconnected'] as const)(
+  'deletion reconciles a user response before its native result commit with %s connection metadata only',
+  async (mode) => {
+    let release!: () => void;
+    const delivered = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = await nativeAcknowledgementFixture(
+      async (stub, operation) => stub.acknowledge(fixture.owner, operation),
+      () => delivered,
+    );
+    const storage = new ReopenableMemoryStorage();
+    const pi = await Harness.open(
+      storage,
+      { models: fixtureModels(), registry: await fixture.registry() },
+      BG,
+    );
+    try {
+      const root = await pi.root(BG, {
+        agent: { model: { provider: 'fixture', modelId: 'fixture' } },
+      });
+      await root.submit({ type: 'input', content: 'custom_mcp_probe' }, BG);
+      await vi.waitFor(() => expect(fixture.operation()).not.toBe(''));
+      const closing = pi.close(BG);
+      release();
+      await closing;
+      expect(
+        (await storage.scanTasks({ kind: 'app.mcp-call' }, 10, undefined, BG)).items[0]?.state
+          .status,
+      ).not.toBe('terminal');
+      expect(
+        (await storage.scanTasks({ kind: 'app.mcp-acknowledgement' }, 10, undefined, BG)).items,
+      ).toEqual([]);
+      if (mode === 'disconnected')
+        await userConnection(env as Env, fixture.owner, fixture.id).disconnect(fixture.owner);
+      if (mode === 'cold') await abortAllDurableObjects();
+      const current = userConnection(env as Env, fixture.owner, fixture.id);
+      expect(
+        await runInDurableObject(current, (_, state) =>
+          state.storage.sql.exec('SELECT status FROM mcp_dispatch').toArray(),
+        ),
+      ).toEqual([{ status: 'responded' }]);
+      await drainMcpAcknowledgements(storage, fixture.probeEnv, BG);
+      await drainMcpAcknowledgements(storage, fixture.probeEnv, BG);
+      expect(
+        await runInDurableObject(current, (_, state) =>
+          state.storage.sql.exec('SELECT status,result FROM mcp_dispatch').toArray(),
+        ),
+      ).toEqual([{ status: 'acknowledged', result: null }]);
+      expect(
+        (await storage.scanTasks({ kind: 'app.mcp-call' }, 10, undefined, BG)).items[0]?.state
+          .status,
+      ).not.toBe('terminal');
+      expect(fixture.remote.counts().calls).toBe(1);
+    } finally {
+      release();
+      await pi.close(BG);
+    }
+  },
+);

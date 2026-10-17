@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { it, expect } from 'vitest';
 import { fixtureModels } from '../fixture-model';
 it('commits a bounded large compute result as complete JSON in native Pi history', async () => {
@@ -105,6 +105,7 @@ it('reads and saves a published resource whose valid component budgets exceed 1 
 it('generic resources require an enabled handler and explicit state validation', async () => {
   const target = env.CONVERSATIONS.getByName(crypto.randomUUID());
   await runInDurableObject(target, async (instance) => {
+    await instance.root();
     const base = await (instance as any).contributions();
     (instance as any).contributions = async () => [
       ...base,
@@ -131,6 +132,7 @@ it('generic resources require an enabled handler and explicit state validation',
 it('bounds resource data separately from initial and saved state', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   await runInDurableObject(stub, async (instance) => {
+    await instance.root();
     const base = await (instance as any).contributions();
     const escaped = {
       data: { text: '\u0001'.repeat(320 * 1024), payload: 'x'.repeat(900 * 1024) },
@@ -151,7 +153,7 @@ it('bounds resource data separately from initial and saved state', async () => {
         ...base,
         { id: 'large-resource', resources: { read: async () => value } },
       ];
-      expect(JSON.parse(await instance.loadResource('large-resource', 'ref'))).toEqual({
+      expect(JSON.parse(await instance.loadResource('large-resource', 'ref'))).toMatchObject({
         error: { status: 503, code: 'invalid_resource' },
       });
     }

@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
 
 test.beforeEach(async ({ page }) => {
@@ -31,7 +32,7 @@ test('a directory read failure cannot reject a successfully created chat', async
     });
   });
   await page.route('**/api/conversations/*/snapshot*', (route) =>
-    route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
+    route.fulfill({ json: snapshotFixture({ entries: [], pending: [], stopping: false }) }),
   );
   await page.route('**/api/conversations/*/runs', (route) =>
     route.fulfill({ status: 202, json: { accepted: true } }),
@@ -96,7 +97,7 @@ test('sidebar collapse retains the chat and draft; bottom account menu reports s
   await page.route('**/api/conversations/current/snapshot*', async (route) => {
     snapshots++;
     await initialRead;
-    return route.fulfill({ json: { entries: [], pending: [], stopping: false } });
+    return route.fulfill({ json: snapshotFixture({ entries: [], pending: [], stopping: false }) });
   });
   await page.route('**/api/auth/sign-out', (route) =>
     route.fulfill({ status: 500, json: { message: '暂时无法退出，请重试' } }),
@@ -221,7 +222,7 @@ test('personal directory creates and restores a chat with keyboard access on mob
     });
   });
   await page.route('**/api/conversations/*/snapshot*', (route) =>
-    route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
+    route.fulfill({ json: snapshotFixture({ entries: [], pending: [], stopping: false }) }),
   );
   await page.route('**/api/conversations/*/runs', (route) =>
     route.fulfill({ status: 202, json: { accepted: true } }),
@@ -265,7 +266,9 @@ test('directory updates automatically after sending and returning without droppi
   await page.route('**/api/conversations**', (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith('/snapshot'))
-      return route.fulfill({ json: { entries: [], pending: [], stopping: false } });
+      return route.fulfill({
+        json: snapshotFixture({ entries: [], pending: [], stopping: false }),
+      });
     if (url.pathname.endsWith('/runs')) {
       submissions++;
       title = route.request().postDataJSON().text;

@@ -1,6 +1,5 @@
-import { ModelCredentials } from '../../src/server/models/credentials';
-import { Agent } from 'agents';
-import { PiHarness } from 'agents/harness/pi';
+import { DurableObject } from 'cloudflare:workers';
+import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare';
 import {
   Harness,
   MemoryStorage,
@@ -32,9 +31,9 @@ const ref = (v: string): Binding => ({
   modelId: v === 'k1' ? 'small' : 'large',
   thinkingLevel: v === 'k1' ? 'high' : 'low',
 });
-export class BindingProbe extends Agent<any> {
+export class BindingProbe extends DurableObject<Env> {
   instanceId = crypto.randomUUID();
-  harness: PiHarness;
+  private opening?: Promise<Harness>;
   catalog: any;
   private probeSettings = {
     followUpMode: 'one-at-a-time' as 'one-at-a-time' | 'all',
@@ -52,131 +51,129 @@ export class BindingProbe extends Agent<any> {
     ctx.storage.sql.exec(
       'CREATE TABLE IF NOT EXISTS probe_log(seq INTEGER PRIMARY KEY AUTOINCREMENT,instance TEXT,event TEXT,data TEXT)',
     );
-    this.harness = new PiHarness({
-      defaults: { model: { provider: 'canary-k3', id: 'large' } },
-      harness: async ({ storage, context }) => {
-        const models = createModels({
-          authContext: {
-            env: async () => {
-              throw new Error('ambient auth forbidden');
-            },
-            fileExists: async () => false,
-          },
-        });
-        for (const version of ['k1', 'k2', 'k3']) {
-          const b = ref(version);
-          const stream = (model: any, context: any, options: any) =>
-            this.providerStream(version, model, context, options);
-          models.setProvider({
-            id: b.provider,
-            name: b.provider,
-            auth: {
-              apiKey: {
-                name: 'canary',
-                resolve: async () => {
-                  const binding = await ctx.storage.get<{
-                    owner: string;
-                    refs: Record<string, import('../../src/shared/model-settings').CredentialRef>;
-                  }>('d1-credentials');
-                  if (binding)
-                    return {
-                      auth: await new ModelCredentials(this.env, binding.owner).resolve(
-                        'fixture',
-                        binding.refs[version],
-                      ),
-                      source: version,
-                    };
-                  const disabled = (await ctx.storage.get<string[]>('disabled')) ?? [];
-                  if (disabled.includes(version))
-                    throw new Error('credential_version_missing:' + version);
-                  return { auth: { apiKey: 'CANARY-NONSECRET-' + version }, source: version };
-                },
-              },
-            },
-            getModels: () => [
-              {
-                provider: b.provider,
-                id: b.modelId,
-                name: b.modelId,
-                api: 'openai-responses',
-                baseUrl: 'https://fixture.invalid',
-                reasoning: true,
-                thinkingLevelMap: { low: 'low', high: 'high' },
-                input: ['text'],
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                contextWindow: version === 'k1' ? 32000 : 100000,
-                maxTokens: 4000,
-              },
-            ],
-            stream,
-            streamSimple: stream,
-          });
-        }
-        this.catalog = models;
-        const registry = createRegistry();
-        registry.install({
-          name: 'probe',
-          tools: [
-            {
-              name: 'pause_tool',
-              description: 'Probe public tool seam',
-              parameters: Type.Object({}),
-              replay: 'safe',
-              execute: async (_args, _api, context) => {
-                this.log('tool-enter', {});
-                if (!(await ctx.storage.get('release-tool'))) await this.waitGate('tool', context);
-                this.log('tool-done', {});
-                return { output: [{ type: 'text', text: 'tool complete' }] };
-              },
-            },
-          ],
-          sections: [
-            {
-              key: 'probe',
-              render: async (input, context) => {
-                this.log('prepare-agent', {
-                  model: input.agent.model,
-                  thinking: input.agent.thinkingLevel,
-                });
-                if (await ctx.storage.get('gate-prepare')) await this.waitGate('prepare', context);
-                return undefined;
-              },
-            },
-          ],
-          hooks: [
-            hook(GenerationTask, {
-              beforeRequest: async (_input, api, context) => {
-                this.log('request-ready', { taskId: api.taskId });
-                if (await ctx.storage.get('gate-request')) await this.waitGate('request', context);
-              },
-              onYield: (message) =>
-                message.content.some(
-                  (part) => part.type === 'text' && part.text === 'answer yield-A',
-                )
-                  ? { continue: 'yield-next' }
-                  : undefined,
-            }),
-            hook(CompactionTask, {
-              beforeCompact: async (input, api, context) => {
-                this.log('compact-selected', { taskId: api.taskId, reason: input.reason });
-                if (await ctx.storage.get('gate-compact')) await this.waitGate('compact', context);
-              },
-            }),
-          ],
-        });
-        return Harness.open(
-          storage,
-          {
-            models,
-            registry,
-            settings: this.probeSettings,
-            onReport: (error) => this.log('report', { message: String(error) }),
-          },
-          context,
-        );
+  }
+  private pi(): Promise<Harness> {
+    return (this.opening ??= this.open());
+  }
+  private async open(): Promise<Harness> {
+    const ctx = this.ctx,
+      context = BG;
+    const storage = await openDurableObjectSqliteStorage(ctx.storage, { prefix: 'pi_' });
+    this.probeSettings.retry.enabled = (await ctx.storage.get<boolean>('retry-enabled')) ?? false;
+    this.probeSettings.retry.baseDelayMs = (await ctx.storage.get<boolean>('long-retry'))
+      ? 1000
+      : 10;
+    this.probeSettings.followUpMode = (await ctx.storage.get<boolean>('all-followups'))
+      ? 'all'
+      : 'one-at-a-time';
+    const models = createModels({
+      authContext: {
+        env: async () => {
+          throw new Error('ambient auth forbidden');
+        },
+        fileExists: async () => false,
       },
     });
-    this.lifecycle.use(this.harness);
+    for (const version of ['k1', 'k2', 'k3']) {
+      const b = ref(version);
+      const stream = (model: any, context: any, options: any) =>
+        this.providerStream(version, model, context, options);
+      models.setProvider({
+        id: b.provider,
+        name: b.provider,
+        auth: {
+          apiKey: {
+            name: 'canary',
+            resolve: async () => {
+              const disabled = (await ctx.storage.get<string[]>('disabled')) ?? [];
+              if (disabled.includes(version))
+                throw new Error('credential_version_missing:' + version);
+              return { auth: { apiKey: 'CANARY-NONSECRET-' + version }, source: version };
+            },
+          },
+        },
+        getModels: () => [
+          {
+            provider: b.provider,
+            id: b.modelId,
+            name: b.modelId,
+            api: 'openai-responses',
+            baseUrl: 'https://fixture.invalid',
+            reasoning: true,
+            thinkingLevelMap: { low: 'low', high: 'high' },
+            input: ['text'],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: version === 'k1' ? 32000 : 100000,
+            maxTokens: 4000,
+          },
+        ],
+        stream,
+        streamSimple: stream,
+      });
+    }
+    this.catalog = models;
+    const registry = createRegistry();
+    registry.install({
+      name: 'probe',
+      tools: [
+        {
+          name: 'pause_tool',
+          description: 'Probe public tool seam',
+          parameters: Type.Object({}),
+          replay: 'safe',
+          execute: async (_args, _api, context) => {
+            this.log('tool-enter', {});
+            if (!(await ctx.storage.get('release-tool'))) await this.waitGate('tool', context);
+            this.log('tool-done', {});
+            return { output: [{ type: 'text', text: 'tool complete' }] };
+          },
+        },
+      ],
+      sections: [
+        {
+          key: 'probe',
+          render: async (input, context) => {
+            this.log('prepare-agent', {
+              model: input.agent.model,
+              thinking: input.agent.thinkingLevel,
+            });
+            if (await ctx.storage.get('gate-prepare')) await this.waitGate('prepare', context);
+            return undefined;
+          },
+        },
+      ],
+      hooks: [
+        hook(GenerationTask, {
+          beforeRequest: async (_input, api, context) => {
+            this.log('request-ready', { taskId: api.taskId });
+            if (await ctx.storage.get('gate-request')) await this.waitGate('request', context);
+          },
+          onYield: (message) =>
+            message.content.some((part) => part.type === 'text' && part.text === 'answer yield-A')
+              ? { continue: 'yield-next' }
+              : undefined,
+        }),
+        hook(CompactionTask, {
+          beforeCompact: async (input, api, context) => {
+            this.log('compact-selected', { taskId: api.taskId, reason: input.reason });
+            if (await ctx.storage.get('gate-compact')) await this.waitGate('compact', context);
+          },
+        }),
+      ],
+    });
+    const pi = await Harness.open(
+      storage,
+      {
+        models,
+        registry,
+        settings: this.probeSettings,
+        onReport: (error) => this.log('report', { message: String(error) }),
+      },
+      context,
+    );
+    await pi.root(BG, { agent: { model: { provider: 'canary-k3', modelId: 'large' } } });
+    pi.resume();
+    return pi;
   }
   log(event: string, data: any) {
     this.ctx.storage.sql.exec(
@@ -283,14 +280,8 @@ export class BindingProbe extends Agent<any> {
     else setTimeout(done, 15);
     return events;
   }
-  async useD1Credentials(
-    owner: string,
-    refs: Record<string, import('../../src/shared/model-settings').CredentialRef>,
-  ) {
-    await this.ctx.storage.put('d1-credentials', { owner, refs });
-  }
   async configure(b: Binding) {
-    const pi = await this.harness.pi();
+    const pi = await this.pi();
     const root = await pi.root(BG);
     await root.configure(
       { model: { provider: b.provider, modelId: b.modelId }, thinkingLevel: b.thinkingLevel },
@@ -308,14 +299,15 @@ export class BindingProbe extends Agent<any> {
     await this.ctx.storage.put(name, value);
   }
   async submit(id: string, text: string, version: string, _setModel = false) {
-    const root = await (await this.harness.pi()).root(BG);
+    const root = await (await this.pi()).root(BG);
     if (await root.commit((tx) => tx.submissionByRequest(root.id, id), BG))
       return { operationId: id, accepted: false };
     await this.configure(ref(version));
-    return this.harness.submit(text, { operationId: id, whenBusy: 'followUp' });
+    await root.submit({ type: 'input', content: text, requestId: id, whenBusy: 'followUp' }, BG);
+    return { operationId: id, accepted: true };
   }
   async submitDraft(draft: any) {
-    const root = await (await this.harness.pi()).root(BG);
+    const root = await (await this.pi()).root(BG);
     try {
       return { id: (await root.submit(draft, BG)).id };
     } catch (error) {
@@ -339,7 +331,7 @@ export class BindingProbe extends Agent<any> {
     }
   }
   async seed(size = 100000) {
-    const pi = await this.harness.pi();
+    const pi = await this.pi();
     const root = await pi.root(BG);
     await root.commit(async (tx) => {
       const user = {
@@ -385,16 +377,17 @@ export class BindingProbe extends Agent<any> {
   }
   async compact(version = 'k1') {
     await this.configure(ref(version));
-    return (await (await this.harness.pi()).root(BG)).compact('probe manual', BG);
+    return (await (await this.pi()).root(BG)).compact('probe manual', BG);
   }
   async stop() {
-    return this.harness.abort();
+    return (await (await this.pi()).root(BG)).abort(BG, { background: true });
   }
   async operation(id: string) {
-    return this.harness.wait(id);
+    const root = await (await this.pi()).root(BG);
+    return root.commit((tx) => tx.submissionByRequest(root.id, id), BG);
   }
   async nativePausedCompaction() {
-    await this.harness.pi();
+    await this.pi();
     const pi = await Harness.open(
       new MemoryStorage(),
       {
@@ -454,7 +447,7 @@ export class BindingProbe extends Agent<any> {
     return before;
   }
   async resume() {
-    (await this.harness.pi()).resume();
+    (await this.pi()).resume();
   }
   async persistedHasCanary() {
     const names = this.ctx.storage.sql
@@ -485,7 +478,7 @@ export class BindingProbe extends Agent<any> {
     await this.ctx.storage.put('disabled', [version]);
   }
   async observation() {
-    const pi = await this.harness.pi();
+    const pi = await this.pi();
     const inspect = await pi.inspect(BG);
     return {
       instanceId: this.instanceId,
@@ -493,7 +486,12 @@ export class BindingProbe extends Agent<any> {
         .exec('SELECT instance,event,data FROM probe_log ORDER BY seq')
         .toArray()
         .map((r) => ({ ...r, data: JSON.parse(String(r.data)) })),
-      pending: await this.harness.pending(),
+      pending: inspect.submissions
+        .filter((submission) => submission.type === 'input')
+        .map((submission) => ({
+          operationId: submission.requestId,
+          status: submission.status === 'placed' ? 'running' : 'queued',
+        })),
       tasks: inspect.tasks.map((t) => t.record),
       submissions: inspect.submissions,
     };

@@ -8,6 +8,7 @@ import {
   type SkillFile,
 } from '../../shared/skills';
 import { extensionEnabled } from '../../extensions/configuration';
+import { canonicalJson } from '../../shared/json';
 import { importSkill, parseInstructions, sha256, safeSkillPath } from './package';
 
 type Row = {
@@ -198,37 +199,53 @@ export async function newSkillBindings(
   if (selected.length > SKILL_LIMITS.selected) throw new AppError(400, 'skill_selection_limit');
   return selected.map(({ id, name, description, version }) => ({ id, name, description, version }));
 }
-export async function conversationSkills(env: Env, conversation: string) {
-  const row = await env.DB.prepare(
-    'SELECT c.owner,b.bindings FROM conversations c JOIN conversation_skill_bindings b ON b.conversation=c.id WHERE c.id=?',
-  )
-    .bind(conversation)
-    .first<{ owner: string; bindings: string }>();
-  return row
-    ? { owner: row.owner, bindings: JSON.parse(row.bindings) as SkillBinding[] }
-    : { owner: '', bindings: [] };
-}
 /** Only the immutable, owner-checked version selected by a conversation can become a source. */
 export async function skillSource(
   env: Env,
   owner: string,
   binding: SkillBinding,
 ): Promise<SkillSource> {
-  const row = await env.DB.prepare(
-    'SELECT v.prefix,v.preview FROM skill_versions v JOIN skills s ON s.id=v.skill_id WHERE s.owner=? AND s.id=? AND v.version=?',
-  )
-    .bind(owner, binding.id, binding.version)
-    .first<{ prefix: string; preview: string }>();
-  if (!row) throw new AppError(503, 'skill_version_unavailable');
-  const preview = JSON.parse(row.preview) as SkillPreview;
-  const read = async (file: SkillFile) => {
+  const manifest = async () => {
+    const row = await env.DB.prepare(
+      'SELECT v.prefix,v.preview FROM skill_versions v JOIN skills s ON s.id=v.skill_id WHERE s.owner=? AND s.id=? AND v.version=?',
+    )
+      .bind(owner, binding.id, binding.version)
+      .first<{ prefix: string; preview: string }>();
+    if (!row) throw new AppError(503, 'skill_version_unavailable');
+    const preview = JSON.parse(row.preview) as SkillPreview;
+    if (
+      preview.name !== binding.name ||
+      preview.version !== binding.version ||
+      !Array.isArray(preview.files) ||
+      preview.files.length > SKILL_LIMITS.files ||
+      (await sha256(canonicalJson(preview.files))) !== binding.version
+    )
+      throw new AppError(503, 'skill_resource_changed');
+    return { prefix: row.prefix, preview };
+  };
+  const read = async (prefix: string, file: SkillFile) => {
     if (!safeSkillPath(file.path)) throw new AppError(503, 'invalid_skill_path');
-    const object = await bucket(env).get(row.prefix + file.path);
+    if (
+      file.encoding !== 'text' ||
+      !Number.isSafeInteger(file.size) ||
+      file.size < 0 ||
+      file.size > SKILL_LIMITS.file
+    )
+      throw new AppError(503, 'skill_resource_unavailable');
+    const object = await bucket(env).get(prefix + file.path);
     if (!object || object.size !== file.size || object.size > SKILL_LIMITS.file)
       throw new AppError(503, 'skill_resource_unavailable');
     const data = new Uint8Array(await object.arrayBuffer());
+    if (data.length !== file.size) throw new AppError(503, 'skill_resource_unavailable');
     if ((await sha256(data)) !== file.sha256) throw new AppError(503, 'skill_resource_changed');
-    return new TextDecoder('utf-8', { fatal: true }).decode(data);
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(data);
+    } catch {
+      throw new AppError(503, 'skill_resource_unavailable');
+    }
+    if (text.includes('\0')) throw new AppError(503, 'skill_resource_unavailable');
+    return text;
   };
   const descriptor = {
     name: binding.name,
@@ -242,9 +259,10 @@ export async function skillSource(
     list: async () => [descriptor],
     load: async (name) => {
       if (name !== binding.name) return null;
+      const { prefix, preview } = await manifest();
       const root = preview.files.find((f) => f.path === 'SKILL.md');
       if (!root) throw new AppError(503, 'skill_version_unavailable');
-      const parsed = parseInstructions(await read(root));
+      const parsed = parseInstructions(await read(prefix, root));
       if (parsed.name !== binding.name) throw new AppError(503, 'skill_resource_changed');
       return {
         ...parsed,
@@ -253,9 +271,11 @@ export async function skillSource(
       };
     },
     readResource: async (name, path): Promise<SkillResource | null> => {
+      if (name !== binding.name || !safeSkillPath(path) || path === 'SKILL.md') return null;
+      const { prefix, preview } = await manifest();
       const file = preview.files.find((f) => f.path === path && path !== 'SKILL.md');
-      if (name !== binding.name || !file || file.encoding === 'base64') return null;
-      return { ...file, content: await read(file) };
+      if (!file || file.encoding === 'base64') return null;
+      return { ...file, content: await read(prefix, file) };
     },
   };
 }

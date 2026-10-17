@@ -3,6 +3,7 @@ import type { QueueDraft } from '../../shared/queue';
 import { ImageComposer, AddImage } from './image-attachments';
 import { useLocale } from '../app/locale';
 import { useState, useRef, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import type { Json } from '../../shared/json';
 import type { RunCommand } from '../../shared/contracts';
 import { TaskQueue } from './task-queue';
@@ -70,15 +71,19 @@ function ConversationChat({
     <div className="space-y-3">
       <TaskQueue
         items={snapshot?.queue ?? []}
+        recoveries={snapshot?.queueEdits ?? []}
         disabled={submitting || isStopping}
         hasDraft={!!text}
         editing={setEditingQueue}
         act={session.actOnQueue}
+        acknowledge={session.acknowledgeQueueEdit}
         edit={(draft: QueueDraft) => {
-          draftVersion.current++;
-          setText(draft.text);
-          setDraftSource(draft.source);
-          if (draft.config && catalog) setSelection(resolveModelSelection(catalog, draft.config));
+          flushSync(() => {
+            draftVersion.current++;
+            setText(draft.text);
+            setDraftSource(draft.source);
+            if (draft.config && catalog) setSelection(resolveModelSelection(catalog, draft.config));
+          });
         }}
       />
       {connection && (

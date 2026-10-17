@@ -1,39 +1,69 @@
 import { request } from '../../api';
-import { decodeSnapshot, type HistoryPage } from '../../../shared/conversation';
+import { decodeHistoryPage, type HistoryPage } from '../../../shared/conversation';
 import type { QueueAction, QueueActionResult } from '../../../shared/queue';
-import type { RunCommand } from '../../../shared/contracts';
-import type { Json } from '../../../shared/json';
+import type { CreateConversationRequest, RunCommand } from '../../../shared/contracts';
 import { loadSnapshot } from './snapshot';
 export type ConversationRemote = {
   snapshot: typeof loadSnapshot;
-  history: (id: string, cursor: string, signal?: AbortSignal) => Promise<HistoryPage>;
-  queue: (id: string, runId: string, action: QueueAction) => Promise<QueueActionResult>;
-  stop: (id: string) => Promise<unknown>;
-  create: (creation?: Record<string, Json>) => Promise<{ id: string }>;
-  submit: (id: string, command: RunCommand) => Promise<unknown>;
+  history: (
+    id: string,
+    cursor: string,
+    signal?: AbortSignal,
+    target?: number,
+  ) => Promise<HistoryPage>;
+  queue: (
+    id: string,
+    runId: string,
+    action: QueueAction,
+    target?: number,
+  ) => Promise<QueueActionResult>;
+  acknowledgeQueueEdit: (id: string, runId: string, target?: number) => Promise<unknown>;
+  stop: (id: string, target?: number) => Promise<unknown>;
+  create: (creation: CreateConversationRequest) => Promise<{ id: string }>;
+  submit: (id: string, command: RunCommand, target?: number) => Promise<unknown>;
+  observe: (id: string, runId: string, signal: AbortSignal, target?: number) => Promise<Response>;
 };
+const targetQuery = (target?: number) => (target === undefined ? '' : 'conversationId=' + target);
+const path = (id: string) => '/conversations/' + encodeURIComponent(id);
 export const conversationRemote: ConversationRemote = {
   snapshot: loadSnapshot,
-  async history(id, cursor, signal) {
-    const page = await request<HistoryPage>(
-      `/conversations/${id}/history?cursor=${encodeURIComponent(cursor)}`,
+  async history(id, cursor, signal, target) {
+    const page = await request<unknown>(
+      `${path(id)}/history?cursor=${encodeURIComponent(cursor)}${target === undefined ? '' : '&' + targetQuery(target)}`,
       { signal },
     );
-    const decoded = decodeSnapshot({ ...page, pending: [], stopping: false });
-    if (!decoded.history) throw new Error('Invalid history page');
-    return { ...page, history: decoded.history };
+    return decodeHistoryPage(page);
   },
-  queue: (id, runId, action) =>
-    request(`/conversations/${id}/runs/${runId}/queue`, {
+  queue: (id, runId, action, target) =>
+    request(
+      `${path(id)}/runs/${encodeURIComponent(runId)}/queue${target === undefined ? '' : '?' + targetQuery(target)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      },
+    ),
+  acknowledgeQueueEdit: (id, runId, target) =>
+    request(
+      `${path(id)}/runs/${encodeURIComponent(runId)}/queue/ack${target === undefined ? '' : '?' + targetQuery(target)}`,
+      { method: 'POST' },
+    ),
+  stop: (id, target) =>
+    request(`${path(id)}/stop${target === undefined ? '' : '?' + targetQuery(target)}`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
     }),
-  stop: (id) => request(`/conversations/${id}/stop`, { method: 'POST' }),
   create: (creation) =>
     request('/conversations', {
       method: 'POST',
-      ...(creation ? { body: JSON.stringify(creation) } : {}),
+      body: JSON.stringify(creation),
     }),
-  submit: (id, command) =>
-    request(`/conversations/${id}/runs`, { method: 'POST', body: JSON.stringify(command) }),
+  submit: (id, command, target) =>
+    request(`${path(id)}/runs${target === undefined ? '' : '?' + targetQuery(target)}`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    }),
+  observe: (id, runId, signal, target) =>
+    fetch(
+      `/api${path(id)}/runs/${encodeURIComponent(runId)}/events${target === undefined ? '' : '?' + targetQuery(target)}`,
+      { signal, headers: { Accept: 'text/event-stream' } },
+    ),
 };

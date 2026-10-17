@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { expect, test } from './fixtures';
 
 async function returnToPage(page: import('@playwright/test').Page) {
@@ -11,7 +12,12 @@ async function returnToPage(page: import('@playwright/test').Page) {
 }
 
 function answer(id: number, text: string) {
-  return { id, model: [{ role: 'assistant', content: [{ type: 'text', text }] }] };
+  return {
+    conversationId: 1,
+    kind: 'pi.assistant',
+    id,
+    model: [{ role: 'assistant', content: [{ type: 'text', text }] }],
+  };
 }
 
 test('missing credentials in a new chat never offer or request a snapshot reconnect', async ({
@@ -73,11 +79,11 @@ test('a failed terminal snapshot never reattaches cached running work', async ({
           json: { error: { code: 'snapshot_unavailable', message: 'Snapshot unavailable' } },
         });
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: available ? [answer(2, 'Recovered final answer')] : [],
           pending: available ? [] : [{ operationId: runId, status: 'running' }],
           stopping: false,
-        },
+        }),
       });
     }
     if (path.endsWith('/events')) {
@@ -120,7 +126,7 @@ test('idle read refresh adopts new history and attaches externally started work 
   page,
 }) => {
   let entries: ReturnType<typeof answer>[] = [];
-  let pending: { operationId: string; status: string }[] = [];
+  let pending: { operationId: string; status: 'running' | 'queued' }[] = [];
   let snapshots = 0,
     observations = 0,
     submissions = 0;
@@ -132,7 +138,7 @@ test('idle read refresh adopts new history and attaches externally started work 
       return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
     if (path.endsWith('/snapshot')) {
       snapshots++;
-      return route.fulfill({ json: { entries, pending, stopping: false } });
+      return route.fulfill({ json: snapshotFixture({ entries, pending, stopping: false }) });
     }
     if (path.endsWith('/events')) {
       observations++;
@@ -181,7 +187,11 @@ test('cached idle chat adopts fresh history when revisited without submitting or
       return route.fulfill({ json: { extensionIds: ['web', 'openui', 'example'] } });
     if (path.endsWith('/snapshot'))
       return route.fulfill({
-        json: { entries: path.includes('/a/') ? entries : [], pending: [], stopping: false },
+        json: snapshotFixture({
+          entries: path.includes('/a/') ? entries : [],
+          pending: [],
+          stopping: false,
+        }),
       });
     if (path.endsWith('/events')) observations++;
     if (path.endsWith('/runs')) submissions++;
@@ -212,11 +222,11 @@ test('focus refetches reads without replacing the active stream or draft', async
     if (path.endsWith('/snapshot')) {
       snapshots++;
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: [],
           pending: [{ operationId: '11111111-1111-4111-8111-111111111111', status: 'running' }],
           stopping: false,
-        },
+        }),
       });
     }
     if (path.endsWith('/events')) {

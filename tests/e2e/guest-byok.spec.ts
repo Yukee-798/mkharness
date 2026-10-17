@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from '@playwright/test';
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => localStorage.setItem('mkharness.locale', 'zh-CN'));
@@ -120,7 +121,7 @@ test('first submission retains conversation and run identity after an uncertain 
       : route.fulfill({ status: 202, json: { accepted: true } });
   });
   await page.route('**/api/conversations/*/snapshot*', (route) =>
-    route.fulfill({ json: { entries: [], pending: [], stopping: false } }),
+    route.fulfill({ json: snapshotFixture({ entries: [], pending: [], stopping: false }) }),
   );
   await page.getByLabel('消息', { exact: true }).fill('hello');
   await page.getByRole('button', { name: '发送', exact: true }).click();

@@ -1,10 +1,8 @@
-import { exampleSkillSource } from '../../src/extensions/skills/example';
 import { extensionEnabled, type ExtensionConfiguration } from '../../src/extensions/configuration';
 import { asyncExampleContribution } from '../../src/extensions/async-example/server';
 import type { RemoteConfig } from '../../src/extensions/async-example/runtime';
-import { ConversationAgent as Base } from '../../src/server/conversations/agent';
+import { ChatFixture as Base } from './chat-fixture';
 import { exampleExtension } from '../../src/extensions/example/server';
-import { staticSkills } from '../../src/server/skills/static';
 import { fixtureModels } from '../fixture-model';
 import { Type } from '@earendil-works/pi-ai';
 import {
@@ -33,7 +31,7 @@ const progressProbe = defineTool({
     return { output: [{ type: 'text', text: `round ${round}` }] };
   },
 });
-export class ConversationAgent extends Base {
+export class ChatSession extends Base {
   protected override async credentials() {
     return {
       select: async () => ({ source: 'server' as const, fingerprint: 'fixture-only' }),
@@ -81,6 +79,7 @@ export class ConversationAgent extends Base {
   }
   protected override extensionConfiguration(): ExtensionConfiguration {
     const config = { ...super.extensionConfiguration() };
+    config['skills-example'] = { enabled: true };
     const sql = this.ctx.storage.sql;
     if (sql.exec("SELECT name FROM sqlite_master WHERE name='test_extensions'").toArray().length)
       for (const row of sql.exec('SELECT id,enabled FROM test_extensions').toArray())
@@ -119,9 +118,7 @@ export class ConversationAgent extends Base {
     const extensions: Extension[] = [
       ...(await super.extensions()),
       exampleExtension(),
-      ...((await this.contributions()).some((c) => c.id === 'skills' && c.extension?.tools?.length)
-        ? []
-        : [await staticSkills([exampleSkillSource()])]),
+
       {
         name: 'fixture',
         sections: [

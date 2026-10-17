@@ -1,11 +1,11 @@
 import { exampleExtension } from '../../src/extensions/example/server';
-import { ConversationAgent } from '../../src/server/conversations/agent';
-import { executionModels } from '../../src/server/models/execution';
+import { ChatFixture as ChatSession } from './chat-fixture';
+import { ModelCredentials } from '../../src/server/models/credentials';
 import { applicationModels } from '../../src/server/models/catalog';
 import type { Models } from '@earendil-works/pi-ai/models';
 
 /** Test-only native protocol fixture; all task, tool, resource and SSE behavior remains production code. */
-export class OpenRouterProbe extends ConversationAgent {
+export class OpenRouterProbe extends ChatSession {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, {
       ...env,
@@ -16,11 +16,16 @@ export class OpenRouterProbe extends ConversationAgent {
       MODEL_API_KEY: 'free-canary',
     });
   }
+  protected override async credentials() {
+    return new ModelCredentials(this.env, (await this.actor()).ownerId);
+  }
   protected override async extensions() {
     return [...(await super.extensions()), exampleExtension()];
   }
   protected override models(): Models {
-    const models = executionModels(applicationModels(this.env));
+    const models = applicationModels(
+      this.env,
+    ) as import('@earendil-works/pi-ai/models').MutableModels;
     const provider = models.getProvider('openrouter')!;
     const fixture: typeof fetch = async (_url, init) => {
       const request = JSON.parse(String(init?.body));

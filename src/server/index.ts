@@ -1,5 +1,5 @@
 import { modelRoutes } from './models/routes';
-import { conversationRoutes } from './conversations/routes';
+import { conversationRoutes } from './chat/routes';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { auth, authMode } from './auth';
@@ -65,4 +65,4 @@ app.onError((error, c) => {
   );
 });
 export default app;
-export { ConversationAgent } from './conversations/agent';
+export { ChatSession } from './chat/session-object';

@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
 test('disabled generated UI never evaluates its module, CSS, Worker or Inspect and base tools remain available', async ({
   page,
@@ -19,9 +20,11 @@ test('disabled generated UI never evaluates its module, CSS, Worker or Inspect a
   );
   await page.route('**/api/conversations/**', (route) =>
     route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries: [
           {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 1,
             model: [
               {
@@ -38,6 +41,8 @@ test('disabled generated UI never evaluates its module, CSS, Worker or Inspect a
             ],
           },
           {
+            conversationId: 1,
+            kind: 'pi.tool-result',
             id: 2,
             model: [
               {
@@ -50,6 +55,8 @@ test('disabled generated UI never evaluates its module, CSS, Worker or Inspect a
             ],
           },
           {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 3,
             model: [
               {
@@ -61,7 +68,7 @@ test('disabled generated UI never evaluates its module, CSS, Worker or Inspect a
         ],
         pending: [],
         stopping: false,
-      },
+      }),
     }),
   );
   await page.goto('/tests/browser/chat.html');

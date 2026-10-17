@@ -1,31 +1,29 @@
-import {
-  ROOT_CONVERSATION_ID,
-  type Harness,
-  type CommitChange,
-  type EntryRecord,
-  type TaskRecord,
-  type SubmissionRecord,
-  type Cursor,
-  type Page,
-  type JsonObject,
+import type {
+  Harness,
+  ConversationId,
+  CommitChange,
+  EntryRecord,
+  TaskRecord,
+  SubmissionRecord,
+  JsonObject,
 } from '@earendil-works/pi-durable';
 import type { ServerContribution, ProjectionContext } from './contributions';
 import type { ExtensionState } from '../../shared/extension-state';
 import type { HistoryAnnotations } from '../../shared/conversation';
 import { jsonText, type Json as JsonValue } from '../../shared/json';
 
-/** Read-only fold. The host supplies commits through its existing observation subscription. */
+/** Page facts and declared documents only. The caller owns the commit subscription. */
 export function createExtensionProjection(
   pi: Harness,
+  target: ConversationId,
   contributions: readonly ServerContribution[],
-  requestIds: readonly string[],
   context: Parameters<Harness['inspect']>[0],
-  window?: {
+  source: {
     restore: (documents: NonNullable<ProjectionContext['documents']>) => Promise<ProjectionContext>;
   },
 ) {
   const projectors = contributions.filter(
-    (item) => item.projectState || item.projectHistory || item.projectConversation,
+    (item) => item.projectHistory || item.projectConversation,
   );
   const entries = new Map<number, EntryRecord>();
   const tasks = new Map<number, TaskRecord<JsonValue, JsonValue, JsonValue>>();
@@ -38,114 +36,73 @@ export function createExtensionProjection(
   const documents = new Map<string, Readonly<JsonObject> | null>();
   const documentVersions = new Map<string, number>();
   let cached: ExtensionState | undefined;
-  let published = '';
-  let historyRevision = 0;
-  let publishedHistoryRevision = 0;
+  let restoring: CommitChange[] | undefined;
+  const facts = (): ProjectionContext => ({
+    entries: [...entries.values()].sort((left, right) => Number(left.id) - Number(right.id)),
+    tasks: [...tasks.values()],
+    submissions: [...submissions.values()],
+    documents,
+  });
   const accept = (change: CommitChange) => {
-    if (change.type === 'entry' && change.value.conversationId === ROOT_CONVERSATION_ID)
+    if (
+      change.type === 'entry' &&
+      (change.value.conversationId === target || entries.has(Number(change.value.id)))
+    )
       entries.set(Number(change.value.id), change.value);
-    else if (change.type === 'task' && change.value.conversationId === ROOT_CONVERSATION_ID)
+    else if (
+      change.type === 'task' &&
+      (change.value.conversationId === target || tasks.has(Number(change.value.id)))
+    )
       tasks.set(Number(change.value.id), change.value);
-    else if (change.type === 'submission' && change.value.conversationId === ROOT_CONVERSATION_ID)
+    else if (
+      change.type === 'submission' &&
+      (change.value.conversationId === target || submissions.has(Number(change.value.id)))
+    )
       submissions.set(Number(change.value.id), change.value);
     else if (
       change.type === 'document' &&
-      change.conversationId === ROOT_CONVERSATION_ID &&
+      change.conversationId === target &&
       documentTokens.has(change.record.kind)
     ) {
       documents.set(change.record.kind, change.value);
       documentVersions.set(change.record.kind, (documentVersions.get(change.record.kind) ?? 0) + 1);
     } else return false;
     cached = undefined;
-    historyRevision++;
     return true;
   };
-  const restore = async (
-    includeHistory = false,
-  ): Promise<ProjectionContext & { page?: Page<EntryRecord, Cursor> }> => {
-    if (!projectors.length && !includeHistory) return { entries: [], tasks: [], submissions: [] };
-    // Snapshot only declared documents. A commit received during the read wins;
-    // reading an absent document must not create it with tx.doc().
-    for (const [kind, token] of documentTokens) {
-      const version = documentVersions.get(kind);
-      const value = await pi.snapshot(token, ROOT_CONVERSATION_ID, context);
-      if (documentVersions.get(kind) === version) documents.set(kind, value ?? null);
-    }
-    // One serialized read boundary: older bootstrap pages cannot replace a newer
-    // commit. The host subscribes before this read and folds subsequent publications.
-    // Native read-only commits have no Storage writes or commit publication.
-    if (window) {
-      const facts = await window.restore(documents);
+  const restore = async (): Promise<ProjectionContext> => {
+    restoring = [];
+    try {
+      for (const [kind, token] of documentTokens) {
+        const version = documentVersions.get(kind);
+        const value = await pi.snapshot(token, target, context);
+        if (documentVersions.get(kind) === version) documents.set(kind, value ?? null);
+      }
+      const baseline = await source.restore(documents);
       entries.clear();
       tasks.clear();
       submissions.clear();
-      for (const entry of facts.entries) entries.set(Number(entry.id), entry);
-      for (const task of facts.tasks) tasks.set(Number(task.id), task);
-      for (const item of facts.submissions) submissions.set(Number(item.id), item);
+      for (const entry of baseline.entries) entries.set(Number(entry.id), entry);
+      for (const task of baseline.tasks) tasks.set(Number(task.id), task);
+      for (const item of baseline.submissions) submissions.set(Number(item.id), item);
+      for (const change of restoring) accept(change);
       cached = undefined;
-      return facts;
+      return facts();
+    } finally {
+      restoring = undefined;
     }
-    return pi.commit(async (tx) => {
-      entries.clear();
-      tasks.clear();
-      submissions.clear();
-      let cursor: Cursor | undefined;
-      let firstPage: Page<EntryRecord, Cursor> | undefined;
-      do {
-        const page = await tx.scanEntries(
-          { conversationId: ROOT_CONVERSATION_ID, order: 'ascending' },
-          100,
-          cursor,
-        );
-        firstPage ??= page;
-        for (const entry of page.items) entries.set(Number(entry.id), entry);
-        cursor = page.next;
-      } while (cursor);
-      cursor = undefined;
-      do {
-        const page = await tx.scanTasks({ conversationId: ROOT_CONVERSATION_ID }, 100, cursor);
-        for (const task of page.items) tasks.set(Number(task.id), task);
-        cursor = page.next;
-      } while (cursor);
-      const records = projectors.length
-        ? await Promise.all(
-            requestIds.map((id) => tx.submissionByRequest(ROOT_CONVERSATION_ID, id)),
-          )
-        : [];
-      for (const submission of records)
-        if (submission) submissions.set(Number(submission.id), submission);
-      cached = undefined;
-      return {
-        entries: [...entries.values()],
-        tasks: [...tasks.values()],
-        submissions: [...submissions.values()],
-        page: firstPage,
-      };
-    }, context);
   };
   const value = (): ExtensionState => {
     if (cached) return cached;
-    const context = {
-      entries: [...entries.values()],
-      tasks: [...tasks.values()],
-      submissions: [...submissions.values()],
-      documents,
-    };
     const result: ExtensionState = {};
+    const current = facts();
     for (const contribution of projectors) {
+      if (!contribution.projectConversation) continue;
       try {
-        const project = window
-          ? (contribution.projectConversation ??
-            (contribution.projectHistory ? undefined : contribution.projectState))
-          : contribution.projectState;
-        if (!project) continue;
-        const value = project(context);
-        // Share the existing 1 MiB finite-JSON budget. A whole conversation's small
-        // metadata must not disappear at the per-tool 16 KiB progress threshold.
-        jsonText(value);
-        result[contribution.id] = value;
+        const projected = contribution.projectConversation(current);
+        jsonText(projected);
+        result[contribution.id] = projected;
       } catch {
-        // A broken/oversized optional projection cannot break basic chat or expose raw facts.
         result[contribution.id] = { unavailable: true };
       }
     }
@@ -153,23 +110,19 @@ export function createExtensionProjection(
   };
   return {
     restore,
+    facts,
     annotations(): HistoryAnnotations {
       const result: HistoryAnnotations = {};
-      const facts = {
-        entries: [...entries.values()],
-        tasks: [...tasks.values()],
-        submissions: [...submissions.values()],
-        documents,
-      };
+      const current = facts();
       for (const contribution of projectors) {
         if (!contribution.projectHistory) continue;
         try {
-          const projected = contribution.projectHistory(facts);
+          const projected = contribution.projectHistory(current);
           jsonText(projected);
-          for (const [id, value] of Object.entries(projected))
-            (result[id] ??= {})[contribution.id] = value;
+          for (const [id, annotation] of Object.entries(projected))
+            if (entries.has(Number(id))) (result[id] ??= {})[contribution.id] = annotation;
         } catch {
-          /* Optional history decoration cannot break chat. */
+          /* Optional decoration cannot break chat. */
         }
       }
       return result;
@@ -177,17 +130,13 @@ export function createExtensionProjection(
     accept(changes: readonly CommitChange[]) {
       if (!projectors.length) return false;
       let dirty = false;
-      for (const change of changes) dirty = accept(change) || dirty;
+      for (const change of changes)
+        if (accept(change)) {
+          restoring?.push(change);
+          dirty = true;
+        }
       return dirty;
     },
-    hasChanges: () =>
-      JSON.stringify(value()) !== published ||
-      (!!window && historyRevision !== publishedHistoryRevision),
-    project() {
-      const result = value();
-      published = JSON.stringify(result);
-      publishedHistoryRevision = historyRevision;
-      return result;
-    },
+    project: value,
   };
 }

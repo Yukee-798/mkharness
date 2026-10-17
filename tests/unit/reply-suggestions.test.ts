@@ -6,7 +6,9 @@ import {
 } from '../../src/extensions/reply/suggestions';
 import { replyContribution } from '../../src/extensions/reply/server';
 import type { ProjectionContext } from '../../src/server/extensions/contributions';
-import { checkRunLimits } from '../../src/server/limits';
+import { policyHarness, policyContext, seedPolicyExecution } from '../policy-fixture';
+import { reserveTool } from '../../src/server/chat/policy';
+import { ToolTask } from '@earendil-works/pi-durable';
 import { toolkit, activity } from '../../src/extensions/reply/browser';
 import { loadBrowserExtensions } from '../../src/browser/extensions/extensions';
 
@@ -118,7 +120,7 @@ it('installs suggestions as an optional native local tool without a writable res
   const contribution = replyContribution();
   expect(contribution.extension?.tools?.map((tool) => tool.name)).toEqual([SUGGESTIONS_TOOL]);
   expect(contribution.extension?.tools?.[0]).toMatchObject({ replay: 'safe', callers: ['model'] });
-  expect(contribution.projectState).toBe(projectSuggestions);
+  expect(contribution.projectHistory).toBeTypeOf('function');
   expect(contribution.resources).toBeUndefined();
 });
 
@@ -129,10 +131,42 @@ it('uses the host hidden-tool metadata and the ordinary tool budget', async () =
   expect(loaded.unavailable).toEqual([]);
   expect(activity[SUGGESTIONS_TOOL]).toBe('hidden');
   expect(toolkit[SUGGESTIONS_TOOL].render()).toBeNull();
-  expect(() =>
-    checkRunLimits(
-      [{ id: 1, kind: 'pi.user' }, answer(2, ['Continue']), result(3, 20, ['Continue'])] as any,
-      1,
-    ),
-  ).toThrow('Tool call limit reached (1)');
+  const pi = await policyHarness({
+    extensions: [replyContribution().extension!],
+    policy: { limits: { toolCalls: 1 } },
+  });
+  try {
+    const root = await pi.root(policyContext);
+    await seedPolicyExecution(pi, root);
+    const tasks = await root.commit(
+      async (tx) =>
+        Promise.all(
+          [0, 1].map((index) =>
+            tx.createTask(
+              ToolTask,
+              {
+                kind: 'nested',
+                parent: 1 as any,
+                parentCallId: 'fixture',
+                key: String(index),
+                call: {
+                  type: 'toolCall',
+                  id: String(index),
+                  name: SUGGESTIONS_TOOL,
+                  arguments: { prompts: ['Continue'] },
+                },
+              },
+              { ownership: { kind: 'conversation' } },
+            ),
+          ),
+        ),
+      policyContext,
+    );
+    await reserveTool(pi, root.id, tasks[0]!, SUGGESTIONS_TOOL, {}, policyContext);
+    await expect(
+      reserveTool(pi, root.id, tasks[1]!, SUGGESTIONS_TOOL, {}, policyContext),
+    ).rejects.toThrow('Tool call limit reached (1)');
+  } finally {
+    await pi.close(policyContext);
+  }
 });

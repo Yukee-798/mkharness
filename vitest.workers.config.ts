@@ -12,7 +12,7 @@ export default defineConfig({
         compatibilityFlags: ['nodejs_compat'],
         modulesRules: [{ type: 'CompiledWasm', include: ['**/*.wasm'], fallthrough: true }],
         durableObjects: {
-          CONVERSATIONS: { className: 'ConversationAgent', useSQLite: true },
+          CONVERSATIONS: { className: 'ChatSession', useSQLite: true },
           MCP_CONNECTIONS: { className: 'McpConnection', useSQLite: true },
           OPENROUTER_PROBES: { className: 'OpenRouterProbe', useSQLite: true },
           LIFECYCLE_PROBES: { className: 'LifecycleProbe', useSQLite: true },
@@ -31,6 +31,15 @@ export default defineConfig({
           GOOGLE_CLIENT_SECRET: 'fixture',
           MODEL_API_KEY: 'fixture',
           MCP_FIXTURE_TOKEN: 'mcp-fixture-secret',
+          MCP_TEST_SERVERS: JSON.stringify([
+            {
+              serverId: 'reference',
+              endpoint: 'https://mcp.example.test/mcp',
+              allowlist: ['lookup', 'status'],
+              safeTools: ['status'],
+              credential: 'MCP_FIXTURE_TOKEN',
+            },
+          ]),
           CREDENTIAL_ENCRYPTION_KEY: 'bW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0=',
         },
       },

@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect, type Page } from './fixtures';
 const data =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jlp0AAAAASUVORK5CYII=';
@@ -37,6 +38,8 @@ async function upload(
 function history(command: any) {
   return [
     {
+      conversationId: 1,
+      kind: 'app.input',
       id: 1,
       model: [
         {
@@ -53,7 +56,12 @@ function history(command: any) {
         },
       ],
     },
-    { id: 2, model: [{ role: 'assistant', content: [{ type: 'text', text: 'Image received' }] }] },
+    {
+      conversationId: 1,
+      kind: 'pi.assistant',
+      id: 2,
+      model: [{ role: 'assistant', content: [{ type: 'text', text: 'Image received' }] }],
+    },
   ];
 }
 test('native image picker previews/removes attachments and rejects non-image or oversized files', async ({
@@ -88,7 +96,11 @@ test('an image-only first message travels in one frozen command and remains visi
   });
   await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({
-      json: { entries: accepted ? history(command) : [], pending: [], stopping: false },
+      json: snapshotFixture({
+        entries: accepted ? history(command) : [],
+        pending: [],
+        stopping: false,
+      }),
     }),
   );
   try {
@@ -133,11 +145,11 @@ test('a failed image receipt retries exactly once with unchanged bytes and does 
   });
   await page.route('**/api/conversations/*/snapshot*', (route) =>
     route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries: commands.length > 1 ? history(commands[0]) : [],
         pending: [],
         stopping: false,
-      },
+      }),
     }),
   );
   await page.goto('/');

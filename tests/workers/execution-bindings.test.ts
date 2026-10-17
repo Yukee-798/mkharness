@@ -1,54 +1,69 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { it, expect, vi } from 'vitest';
-import { ExecutionBindings } from '../../src/server/conversations/execution-bindings';
-import { executionProviderId } from '../../src/server/models/execution';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
+import { expect, it } from 'vitest';
+import { AgentDoc } from '@earendil-works/pi-durable';
+import { BG } from '../../src/server/chat/context';
+import {
+  Admissions,
+  PendingAdmissions,
+  ExecutionBinding,
+  admissionKey,
+  bindingKey,
+} from '../../src/server/chat/documents';
 
-it('backfills old receipts once and restores compact execution bindings without rereading payloads', async () => {
-  const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
-  await runInDurableObject(stub, async (instance, state) => {
-    await instance.root();
-    const execution = {
-      provider: 'fixture',
-      modelId: 'fixture',
-      thinkingLevel: 'off' as const,
-      credentialRef: { source: 'server' as const, fingerprint: 'fixture' },
+it('atomically freezes configuration with prepared admission, then shrinks the receipt after cold recovery', async () => {
+  let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
+  const command = { runId: crypto.randomUUID(), text: 'frozen across acceptance gap' };
+  let key = '';
+  await runInDurableObject(stub, async (instance) => {
+    const root = await instance.root(),
+      probe = instance as any;
+    key = admissionKey(root.id, command.runId);
+    probe.place = async () => {
+      throw new Error('test acceptance gap');
     };
-    const payload = JSON.stringify({
-      request: { runId: crypto.randomUUID(), text: 'large original input '.repeat(1000) },
-      execution,
-    });
-    state.storage.sql.exec('DELETE FROM app_meta WHERE key=?', 'execution-index-v1');
-    for (let i = 0; i < 250; i++)
-      state.storage.sql.exec(
-        'INSERT INTO app_requests(id,payload,accepted) VALUES(?,?,1)',
-        'old-' + i,
-        payload,
-      );
-    const refs = [{ provider: await executionProviderId(execution), modelId: execution.modelId }];
-    const first = new ExecutionBindings(state.storage);
-    expect(await first.restore(refs)).toMatchObject([{ stored: { execution }, accepted: 1 }]);
-    expect(state.storage.sql.exec('SELECT count(*) AS n FROM app_request_execution').one().n).toBe(
-      250,
+  });
+  expect(await stub.submitRun(command)).toMatchObject({ error: { status: 503 } });
+  await runInDurableObject(stub, async (instance, state) => {
+    const pi = await instance.harness.pi(),
+      receipt = await pi.snapshot(Admissions, key, BG);
+    expect(receipt).toMatchObject({ state: 'prepared', requestId: command.runId });
+    expect((await pi.snapshot(PendingAdmissions, BG))?.keys).toEqual([key]);
+    const model = (await pi.snapshot(AgentDoc, (await instance.root()).id, BG))!.model!;
+    const binding = await pi.snapshot(
+      ExecutionBinding,
+      bindingKey(model.provider, model.modelId),
+      BG,
     );
-    const sql = vi.spyOn(state.storage.sql, 'exec');
-    try {
-      const cold = new ExecutionBindings(state.storage);
-      expect(await cold.restore(refs)).toMatchObject([{ stored: { execution }, accepted: 1 }]);
-      expect(
-        sql.mock.calls.some(([query]) => /SELECT.*payload.*FROM app_requests/i.test(query)),
-      ).toBe(true);
-      const payloadReads = sql.mock.calls.flatMap(([query], index) =>
-        /SELECT.*payload.*FROM app_requests/i.test(query) ? [sql.mock.results[index]] : [],
-      );
-      expect(
-        payloadReads.every((result) => result.type === 'return' && result.value.rowsRead <= 1),
-      ).toBe(true);
-      expect(
-        state.storage.sql.exec('SELECT payload FROM app_requests WHERE id=?', 'old-0').one()
-          .payload,
-      ).toBe(payload);
-    } finally {
-      sql.mockRestore();
-    }
+    expect(JSON.parse(binding!.execution)).toEqual(JSON.parse(receipt!.pendingInput!).execution);
+    expect((await pi.inspect(BG)).submissions).toEqual([]);
+    expect(
+      state.storage.sql
+        .exec(
+          "SELECT name FROM sqlite_master WHERE name IN ('app_requests','app_request_execution','app_meta')",
+        )
+        .toArray(),
+    ).toEqual([]);
+  });
+  await abortAllDurableObjects();
+  stub = env.CONVERSATIONS.get(stub.id);
+  await stub.snapshot();
+  await expect.poll(async () => (await stub.submission(command.runId))?.status).toBe('done');
+  await runInDurableObject(stub, async (instance) => {
+    const pi = await instance.harness.pi(),
+      receipt = await pi.snapshot(Admissions, key, BG);
+    expect((await pi.snapshot(PendingAdmissions, BG))?.keys).toEqual([]);
+    const before = (await instance.root()).id;
+    const a = await instance.submission(command.runId);
+    expect(receipt).toEqual({
+      hash: expect.any(String),
+      state: 'admitted',
+      conversationId: Number(before),
+      requestId: command.runId,
+      submissionId: Number(a!.id),
+    });
+    await instance.submitRun(command);
+    expect((await instance.submission(command.runId))?.id).toBe(a?.id);
+    expect((await instance.root()).id).toBe(before);
   });
 });

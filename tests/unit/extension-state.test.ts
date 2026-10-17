@@ -1,22 +1,25 @@
 import { expect, it, vi } from 'vitest';
 import { createExtensionProjection } from '../../src/server/extensions/state';
-import { ROOT_CONVERSATION_ID, defineDoc } from '@earendil-works/pi-durable';
+import { defineDoc, type ConversationId } from '@earendil-works/pi-durable';
+import { BG } from '../../src/server/chat/context';
+const target = 42 as ConversationId;
+const empty = () => ({ entries: [], tasks: [], submissions: [] });
 
-it('removing public projections removes their reads and listeners too', async () => {
+it('removing public projections removes their document reads and listeners', async () => {
   const pi = { commit: vi.fn(), snapshot: vi.fn(), subscribeCommits: vi.fn() };
-  const projection = createExtensionProjection(pi as any, [], [], {} as any);
+  const projection = createExtensionProjection(pi as any, target, [], BG, {
+    restore: async () => empty(),
+  });
   await projection.restore();
   expect(projection.project()).toEqual({});
   expect(
-    projection.accept([
-      { type: 'entry', value: { id: 2, conversationId: ROOT_CONVERSATION_ID } },
-    ] as any),
+    projection.accept([{ type: 'entry', value: { id: 2, conversationId: target } }] as any),
   ).toBe(false);
   expect(pi.commit).not.toHaveBeenCalled();
   expect(pi.snapshot).not.toHaveBeenCalled();
   expect(pi.subscribeCommits).not.toHaveBeenCalled();
 });
-it('declared native document projections retain newer commits across bootstrap and exclude private fields', async () => {
+it('declared documents retain newer commits during bootstrap and stay scoped to the explicit target', async () => {
   const token = defineDoc({
     kind: 'example.progress',
     version: 1,
@@ -33,97 +36,95 @@ it('declared native document projections retain newer commits across bootstrap a
           resolve = done;
         }),
     ),
-    commit: async (read: (tx: unknown) => Promise<unknown>) =>
-      read({
-        scanEntries: async () => ({ items: [] }),
-        scanTasks: async () => ({ items: [] }),
-      }),
   };
   const projection = createExtensionProjection(
     pi as any,
+    target,
     [
       {
         id: 'example',
         stateDocuments: [token],
-        projectState: ({ documents }) => ({
+        projectConversation: ({ documents }) => ({
           status: documents?.get(token.definition.kind)?.status ?? null,
         }),
       },
     ],
-    [],
-    {} as any,
+    BG,
+    { restore: async () => empty() },
   );
-  const restore = projection.restore();
+  const restored = projection.restore();
   expect(
     projection.accept([
       {
         type: 'document',
-        conversationId: ROOT_CONVERSATION_ID,
+        conversationId: target,
         record: { kind: token.definition.kind },
         value: { status: 'new', private: 'secret' },
       },
     ] as any),
   ).toBe(true);
   resolve({ status: 'old', private: 'credential' });
-  await restore;
+  await restored;
+  expect(pi.snapshot).toHaveBeenCalledWith(token, target, BG);
   expect(projection.project()).toEqual({ example: { status: 'new' } });
   expect(
     projection.accept([
       {
         type: 'document',
-        conversationId: ROOT_CONVERSATION_ID,
-        record: { kind: 'undeclared' },
+        conversationId: 1,
+        record: { kind: token.definition.kind },
         value: { status: 'foreign' },
       },
     ] as any),
   ).toBe(false);
 });
-it('folds atomic native changes without publishing private or unchanged metadata', () => {
-  const projectState = vi.fn(({ tasks }) => ({
-    finished: tasks
-      .filter((task: any) => task.state.status === 'terminal')
-      .map((task: any) => Number(task.id)),
-  }));
+it('folds only page facts, permits inherited page annotations and keeps commits newer than the locator read', async () => {
+  let finish!: (value: any) => void;
   const projection = createExtensionProjection(
     {} as any,
-    [{ id: 'generic', projectState }],
-    [],
-    {} as any,
+    target,
+    [
+      {
+        id: 'page',
+        projectHistory: ({ entries }) =>
+          Object.fromEntries(entries.map((entry) => [String(entry.id), { label: entry.kind }])),
+        projectConversation: ({ tasks }) => ({
+          completed: tasks
+            .filter((task) => task.state.status === 'terminal')
+            .map((task) => Number(task.id)),
+        }),
+      },
+    ],
+    BG,
+    {
+      restore: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    },
   );
-  expect(projection.project()).toEqual({ generic: { finished: [] } });
+  const restoring = projection.restore();
+  projection.accept([
+    { type: 'entry', value: { id: 55, conversationId: target, kind: 'newer' } },
+  ] as any);
+  finish({
+    entries: [{ id: 30, conversationId: 1, kind: 'inherited' }],
+    tasks: [],
+    submissions: [],
+  });
+  await restoring;
+  expect(projection.annotations()).toEqual({
+    '30': { page: { label: 'inherited' } },
+    '55': { page: { label: 'newer' } },
+  });
   expect(
     projection.accept([
-      { type: 'task', value: { id: 8, conversationId: 999, state: { status: 'terminal' } } },
+      { type: 'entry', value: { id: 99, conversationId: 1, kind: 'hidden-after-fork' } },
     ] as any),
   ).toBe(false);
-  expect(projection.hasChanges()).toBe(false);
-  expect(projectState).toHaveBeenCalledTimes(1);
+  expect(projection.annotations()).not.toHaveProperty('99');
   projection.accept([
-    {
-      type: 'task',
-      value: {
-        id: 8,
-        conversationId: ROOT_CONVERSATION_ID,
-        state: { status: 'running' },
-        details: 'Private',
-      },
-    },
+    { type: 'task', value: { id: 60, conversationId: target, state: { status: 'terminal' } } },
   ] as any);
-  expect(projection.hasChanges()).toBe(false);
-  expect(projectState).toHaveBeenCalledTimes(2);
-  projection.accept([
-    {
-      type: 'task',
-      value: {
-        id: 8,
-        conversationId: ROOT_CONVERSATION_ID,
-        state: { status: 'terminal' },
-        details: 'Private',
-      },
-    },
-  ] as any);
-  expect(projection.hasChanges()).toBe(true);
-  expect(projection.project()).toEqual({ generic: { finished: [8] } });
-  expect(projection.hasChanges()).toBe(false);
-  expect(projectState).toHaveBeenCalledTimes(3);
+  expect(projection.project()).toEqual({ page: { completed: [60] } });
 });

@@ -38,9 +38,7 @@ it('rejects duplicate names, failed sources and escaped paths; scripts remain te
     ]),
   ).rejects.toThrow('skill_source_unavailable');
   const extension = await staticSkills([source()]);
-  const original = extension.tools!.find((t) => t.name === 'read_skill_resource')!;
-  const wrap = extension.wraps!.find((w) => 'tool' in w && w.tool === original.name)!;
-  const read = 'tool' in wrap ? wrap.wrap(original) : original;
+  const read = extension.tools!.find((t) => t.name === 'read_skill_resource')!;
   expect(await invoke(read, { name: 'guide', path: '../script.js' })).toMatchObject({
     isError: true,
   });

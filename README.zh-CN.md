@@ -10,7 +10,7 @@ MkHarness 是一个开源 Agent 应用模板，提供流式聊天、持久化执
 
 [快速开始](#快速开始) · [核心能力](#核心能力) · [扩展](#扩展-mkharness) · [部署](#部署到-cloudflare) · [常见问题](#常见问题) · [MIT 许可证](LICENSE)
 
-[体验在线示例](https://template.mkharness.com)：使用 Google 登录后，无需填写 API Key 即可使用 `openrouter/free`。免费额度由示例站共享，模型效果与可用性可能波动，耗尽或限流时会停止并提示，不会切换至付费模型。个人配置可覆盖默认配置。
+原生 Pi 替换使用独立的新空环境。公开域名切换与真实供应商验收仍待完成，之前的在线示例不代表当前运行时已经通过验收。
 
 ## 快速开始
 
@@ -22,7 +22,6 @@ cd mkharness
 pnpm install --frozen-lockfile
 cp .dev.vars.example .dev.vars
 pnpm setup
-pnpm db:migrate
 pnpm dev
 ```
 
@@ -38,14 +37,14 @@ pnpm dev
 
 > 在界面填写的 Key 会发送给当前部署，并在服务端加密保存，用于后台执行与恢复。请在自己的部署或可信部署填写。保存 Key 不会测试连接，首次模型请求才会实际使用它。
 
-`pnpm setup` 生成缺失的本地认证与加密密钥。重启时保留 `.dev.vars`，该文件已被 Git 忽略。本地数据存储在 Cloudflare 本地 SQLite 中。统一使用 `localhost`，不要与 `127.0.0.1` 混用。应用界面默认英文，支持在设置中切换中文；两份 README 的配置说明保持一致。
+`pnpm setup` 生成缺失的本地认证与加密密钥，并把 `migrations/0001_initial.sql` 应用于新的本地 D1。重启时保留 `.dev.vars`，该文件已被 Git 忽略。数据保存在隔离的 `.wrangler/native-state`。Setup 仅接受空库或当前基线，拒绝旧 schema，不导入账号、聊天、凭据、MCP 连接或 Skills。`node scripts/setup.mjs --check` 只检查本地状态，不修改密钥或应用迁移。统一使用 `localhost`，不要与 `127.0.0.1` 混用。
 
 ## 核心能力
 
 - **图片附件。** 复用 assistant-ui 预览与移除 PNG、JPEG、WebP、GIF；支持图片加文字或纯图片提交，需选择支持图片的模型。每条消息最多 4 张、合计 512 KiB，随 Pi 历史保留，用于重试和恢复。
 - **可编辑的持久化队列。** 待执行消息在刷新后恢复。重新编辑会撤回尚未开始的消息并回填文字与图片；引导在 Pi 原生边界加入当前任务；移除只撤回选中的排队消息。已开始的任务不能通过队列操作撤回，Pi 始终是唯一队列权威。
 - **可用的聊天应用。** 流式回复、思考过程、工具活动、模型与思考强度选择、聊天历史，以及回复和工具耗时。使用 assistant-ui、shadcn/ui 与 Tailwind CSS。
-- **持久化 Agent 执行。** 每个聊天由独立 Durable Object 承载 PiHarness。支持提交排队、历史持久化和执行中断后重建；关闭浏览器只断开观察，Stop 是独立操作。删除在持久化受理并移除聊天目录后返回 `202`；原生生命周期 alarm 等待 runtime 关闭后清空存储，中断后继续清理。
+- **持久化 Agent 执行。** 每个聊天由 `ChatSession` Durable Object 承载一个原生 Pi Durable 1.3.0 Harness，使用官方 SQLite Adapter。Pi 负责提交、Inbox、历史和任务恢复。关闭浏览器只断开观察，Stop 是独立操作。删除持久化 tombstone 和清理 alarm 后返回 `202`、隐藏聊天，等待运行时关闭再擦除内容；D1 保留最小创建/删除回执，阻止迟到调用复活聊天。
 - **前后端扩展。** 服务端接入 Pi 原生工具、提示词与 hooks；浏览器注册 assistant-ui Toolkit、工具标题装饰和回复 Footer。
 - **交互式生成 UI。** 可选 OpenUI 扩展支持表单、表格、图表、输入保存，以及有资源限制的 QuickJS 计算。
 - **远程集成。** 用户可添加远程 MCP 并通过原生 SDK 完成 OAuth，也支持部署级 HTTPS MCP 工具、静态 Skills，以及包含 submit/query/cancel 和恢复引用保存的异步服务示例。
@@ -55,7 +54,7 @@ pnpm dev
 
 ## 扩展 MkHarness
 
-目录职责见[源码架构](ARCHITECTURE.md)；本轮清理、问题修复与剩余架构风险见[工程审查](ENGINEERING_REVIEW.md)。
+当前目录职责与运行时契约见[源码架构](ARCHITECTURE.md)。[历史工程评审](ENGINEERING_REVIEW.md)记录替换前的快照，不作为当前架构或验收指南。
 
 扩展是经你审核、随应用部署发布的受信任代码。服务端能力与浏览器展示各有独立的静态装配入口，工具可以接入专属 renderer，无需在核心聊天逻辑增加工具名分支。
 
@@ -64,7 +63,7 @@ pnpm dev
 | Agent 工具、提示词片段、hooks        | [`src/extensions/server.ts`](src/extensions/server.ts) — Pi 原生 Extension                                |
 | 工具 renderer、标题装饰、回复 Footer | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkit 与浏览器贡献              |
 | 生成 UI、资源、输入状态、继续动作    | [`src/extensions/openui/`](src/extensions/openui/) — 完整的可选扩展                                       |
-| 静态 Skills                          | [`src/server/skills/static.ts`](src/server/skills/static.ts)                                              |
+| 原生 Skills 数据桥接                 | [`src/server/skills/native.ts`](src/server/skills/native.ts)                                              |
 | 部署级 MCP 工具                      | [`src/server/mcp/deployment.ts`](src/server/mcp/deployment.ts) — `MCP_SERVERS` 配置                       |
 | 异步服务                             | [`src/extensions/async-example/`](src/extensions/async-example/) — 按实际服务契约接入 submit/query/cancel |
 
@@ -90,7 +89,7 @@ root = Stack([
 
 异步服务示例以 `async-example` contribution 接入服务端与浏览器注册表。配置 `ASYNC_SERVICE_URL` 后安装其原生工具和任务；未配置服务时，扩展仍可展示和保护已有任务的未知结果。服务协议、重试与复查授权、原生任务恢复和进度卡片都位于该扩展目录。要完全停用示例，在统一配置中将 `async-example.enabled` 设为 `false`，基础聊天、历史、Stop 和 MCP 保持独立。
 
-宿主提供三个执行接入点：模型请求前的 `beforeModel`、队列空闲且新请求入站时的 `beforeSubmit`、恢复时遇到不兼容任务的 `taskUnavailable`。原生文档通过 `stateDocuments` 和 `projectState` 投影到公开状态，浏览器通过 `composerFooter` 展示会话级控件，执行仍由 Pi Durable 管理。已有任务和文档的持久化标识保持不变；已接受的旧动作仅由示例内部兼容解析。新的重试、复查统一使用 `extension_action`，指定 `extensionId: "async-example"` 与经过校验的 `{ taskId }`。MCP 保留独立保护逻辑，对旧共享文档中的示例字段只做不透明保留，不导入示例代码。
+宿主提供两个执行接入点：模型请求前的 `beforeModel`，以及队列空闲且新请求入站时的 `beforeSubmit`。`stateDocuments` 声明原生文档，`projectConversation` 投影会话状态，`projectHistory` 提供逐消息 annotations，`composerFooter` 展示会话控件。重试/复查使用 `extension_action`、`extensionId: "async-example"` 与经过校验的 `{ taskId }`。示例独立管理自己的供应商意图和调和策略；MCP 通过连接 DO 保存独立回执，不读取示例文档。
 
 通用 JSON 校验、大小限制和规范化比较位于 `src/shared/json.ts`，不导入计算引擎。QuickJS、计算预算、浏览器 Worker、WASM 接入和构建集成都属于 `src/extensions/openui/`。构建时关闭 OpenUI 会排除该扩展的浏览器与服务端入口及计算资源；核心聊天、MCP、请求处理和 JSON 工具不导入 QuickJS。模板的依赖清单仍保留相关包，供启用 OpenUI 时构建使用。服务地址、API Key 和 MCP 连接定义仍放在服务端绑定中，它们负责连接参数，不负责扩展启停。关闭 MCP 会停止建立连接及注册工具，宿主仍保留已有未知结果的保护记录。
 
@@ -102,13 +101,13 @@ root = Stack([
 
 配置界面复用 `@assistant-ui/react-mcp` 原语，通过展示适配器操作现有后端；确认卡片复用 assistant-ui 官方 registry 组件。连接、OAuth 凭据和工具执行仍由服务端管理，浏览器不启用默认 MCP Manager、不持久化连接凭据，也不注册前端工具。确认决定通过扩展 control 接口更新已有 Pi 任务。
 
-`mcp.enabled` 管理所有 MCP 接入，`mcp.custom` 单独管理用户自定义连接。现有部署需先应用 D1 增量迁移 `0007_mcp_connections.sql`，并配置 `MCP_CONNECTIONS` SQLite Durable Object 绑定。Bearer、OAuth 客户端 secret 和令牌使用 `CREDENTIAL_ENCRYPTION_KEY` 在连接 DO 内加密保存；该密钥应保持稳定，凭据不会进入聊天绑定或公开状态。
+`mcp.enabled` 管理所有 MCP 接入，`mcp.custom` 单独管理用户自定义连接。新 D1 基线已包含连接目录，Wrangler `exports` 声明 `McpConnection` 为 SQLite DO，由 `MCP_CONNECTIONS` 绑定。新环境需重新连接，不导入 OAuth grant 或令牌。Bearer、OAuth 客户端 secret 和令牌使用 `CREDENTIAL_ENCRYPTION_KEY` 在连接 DO 内加密保存，密钥应保持稳定；凭据不进入聊天绑定或公开状态。
 
 模块分工：
 
-- `src/server/mcp/connections/`：账号归属、连接目录、加密存储、原生 SDK 适配、HTTP 路由和端点策略。
+- `src/server/mcp/connections/`：用户与部署连接 scope、加密状态、SDK 传输、派发回执、HTTP 路由和端点策略。
 - `src/extensions/mcp/`：通过 Pi 原生工具、任务和文档实现确认与中断恢复，通过现有扩展插槽呈现界面。确认决定走通用扩展 control 接口，不会启动第二次模型请求。
-- `src/server/mcp/deployment.ts`：保留部署级 `MCP_SERVERS`，与用户连接凭据独立。
+- `src/server/mcp/deployment.ts`：部署级 `MCP_SERVERS`、冻结工具定义和调用独立连接 DO 的原生工具/任务。
 
 首版支持公开 HTTPS Streamable HTTP、受限 JSON 工具 schema、文本和结构化 JSON 结果。不支持的 schema 会展示但无法启用。不会执行本地 stdio 命令或抓取远程 schema 引用，暂未将 MCP Apps、sampling、resources 和 prompts 作为产品能力开放。MCP 和 OAuth 请求均限制私网/保留地址、重定向、超时和响应大小，并做 DNS 预检；DNS 预检属于纵深防御，需要严格抵御 DNS 重绑定的部署还应配置网络出口隔离。
 
@@ -118,76 +117,89 @@ root = Stack([
 
 新聊天默认选择账号已启用技能，可在设置 → 技能中管理启停。服务端创建聊天时绑定不可变内容版本；更新、停用或从库中删除仅影响新聊天，已有聊天保留绑定版本与已加载说明。删除是移出技能库，不会擦除历史版本。最多保存 32 个在库技能、每个聊天最多选择 8 个；上传最多 1 MiB、解压后最多 2 MiB、单文件最多 128 KiB、每包最多 64 个文件。
 
-运行时复用 `agents/harness/pi` 的 `skills(sources)`，通过 `SkillSource` 读取已经校验归属的固定版本。原生 `activate_skill` 与 `read_skill_resource` 将正文和资源作为普通工具结果提交到 Pi 历史。目录先进入提示词，正文在激活时进入模型上下文；SDK 目前仍会在初始化时读取正文，因此只装载当前聊天选择的版本，参考文件按需读取。技能调用与版本保留在工具记录中，输入框不常驻展示技能或连接摘要。MCP 调用继续使用现有权限与确认机制，不增加 CLI 宿主、第二套执行循环、自动脚本运行器或 OpenUI/QuickJS 耦合。
+`src/server/skills/native.ts` 中的 `nativeSkills` 直接注册 Pi 原生 `activate_skill` 和 `read_skill_resource`，使用 1.3.0 的 `output` 结果契约。冻结目录元数据先进入提示词，激活时延迟加载正文，读取资源时按需获取私有 R2 对象；工具结果进入普通 Pi 历史。来源校验账号归属、不可变版本、路径、大小和哈希。技能在设置中管理，不授予工具权限，也不执行脚本。
 
-`extensions.config.ts` 中的 `skills.enabled` 控制启停。现有部署启用前需应用 `0008_skills.sql`，并为 `SKILL_FILES` 配置**私有 R2 存储桶**。D1 保存账号归属、修订、版本元数据与聊天绑定，R2 保存不可变文件，读取时验证内容哈希。请创建目标 Wrangler 环境配置中的桶，例如样例生产配置使用 `pnpm exec wrangler r2 bucket create mkharness-template-skills`；这是 D1 迁移之外的新资源。旧的 `skills-example` 仍可单独启用；同时启用时，两类来源共用一个原生 Skills 扩展。
+`extensions.config.ts` 中的 `skills.enabled` 控制启停。新 D1 基线包含技能元数据，`SKILL_FILES` 绑定私有 R2 桶。D1 保存归属、修订、版本和聊天绑定，R2 保存不可变文件。请创建目标环境的桶，例如生产环境使用 `pnpm exec wrangler r2 bucket create mkharness-native-skills`，保持公开访问关闭。这是独立于 D1 的资源；新环境通过正常入口重新导入/发布 Skills。`skills-example` 仍可单独启用，两类来源共享原生 Skills 扩展。
 
 - `src/server/skills/`：受限导入校验、D1/R2 目录、固定版本来源和鉴权管理路由。Frontmatter 使用与 SDK 相同的 YAML 库，避免其公共解析入口连带加载可选脚本运行器依赖。
 - `src/extensions/skills/`：原生 Pi 接入、结果投影、浏览器选择与展示。用户上传的包是数据，不会成为可执行扩展模块。
 
 ## 部署到 Cloudflare
 
-应用运行在 **Workers + D1 + SQLite-backed Durable Objects** 上。首次部署需要完成以下资源与密钥配置。
+应用使用 **Workers + D1 + SQLite-backed Durable Objects + 私有 R2**。原生运行时需要新的 Worker、D1、`ChatSession` / `McpConnection` namespace 和 Skills 桶。账号、聊天、模型 Key、MCP grant 和 Skills 全部重新配置，当前基线不能用于升级旧库。
 
 ### 1. 创建资源
 
-安装依赖后执行：
-
 ```sh
 pnpm exec wrangler login
-pnpm exec wrangler d1 create mkharness
+pnpm exec wrangler d1 create mkharness-native
+pnpm exec wrangler r2 bucket create mkharness-native-skills
 ```
 
-修改 [`wrangler.jsonc`](wrangler.jsonc) 的**顶层配置**：
+构建前修改 [`wrangler.jsonc`](wrangler.jsonc) 的 **`env.production`**：
 
-| 配置                                            | 填写内容                                                         |
-| ----------------------------------------------- | ---------------------------------------------------------------- |
-| `name`                                          | `mkharness`，或自己的 Worker 名称                                |
-| `d1_databases[0].database_name` / `database_id` | `d1 create` 返回的名称和 ID，替换全零本地占位 ID                 |
-| `vars.APP_URL`                                  | 实际公开 origin，例如 `https://mkharness.<你的子域>.workers.dev` |
-| `vars.AUTH_MODE`                                | `guest`，无需登录页面即可使用                                    |
-| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0`，只使用个人 API Key                                          |
+| 配置                                            | 填写内容                                       |
+| ----------------------------------------------- | ---------------------------------------------- |
+| `name`                                          | `mkharness-native` 或其他尚未使用的 Worker 名  |
+| `d1_databases[0].database_name` / `database_id` | 刚创建的新 D1 名称和 ID                        |
+| `r2_buckets[0].bucket_name`                     | 新的私有桶名称                                 |
+| `vars.APP_URL`                                  | 新部署的精确 origin，替换 `example.com` 占位值 |
+| `vars.AUTH_MODE`                                | Google 登录使用 `account`，访客使用 `guest`    |
+| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0`，仅使用个人 Key                            |
 
-保留 `DB` 和 `CONVERSATIONS` binding、`ConversationAgent` 类名及迁移定义。仓库的 `env.test` 是开发参考资源；使用该环境时替换为自己的资源。
+保留 `DB`、`SKILL_FILES`、`CONVERSATIONS` → `ChatSession`、`MCP_CONNECTIONS` → `McpConnection`。使用 declarative `exports` 声明 SQLite DO，不添加旧 migration tag 或转移旧 namespace。仓库有意省略 D1 ID；Wrangler 可在部署时自动创建 D1，上面的显式创建流程则可在首次部署前应用基线。不要使用旧数据库 ID。
+
+| 环境         | Worker                  | D1                       | 私有 R2                         |
+| ------------ | ----------------------- | ------------------------ | ------------------------------- |
+| 顶层本地开发 | `mkharness-native`      | `mkharness-native-local` | `mkharness-native-skills-local` |
+| `production` | `mkharness-native`      | `mkharness-native`       | `mkharness-native-skills`       |
+| `test`       | `mkharness-native-test` | `mkharness-native-test`  | `mkharness-native-test-skills`  |
+
+独立远程验收使用 `test`，为其创建独立资源并配置精确 `APP_URL`。配置未接管之前的公开域名，R2 保持私有。
 
 ### 2. 设置 Secrets 并部署
 
-编辑配置后先构建，让 Wrangler 使用对应的生成部署配置：
-
 ```sh
-pnpm build
-pnpm exec wrangler secret put BETTER_AUTH_SECRET
-pnpm exec wrangler secret put CREDENTIAL_ENCRYPTION_KEY
-pnpm exec wrangler d1 migrations apply DB --remote
-pnpm deploy
+pnpm build:production
+pnpm exec wrangler deploy --dry-run --env production
+pnpm exec wrangler secret put BETTER_AUTH_SECRET --env production
+pnpm exec wrangler secret put CREDENTIAL_ENCRYPTION_KEY --env production
+pnpm exec wrangler d1 migrations apply DB --remote --env production
+pnpm deploy:production
 ```
 
-执行两次 `openssl rand -base64 32`，生成**两个独立密钥**，在对应的 Secret 提示中输入。加密密钥必须编码恰好 32 字节随机值。设置首个 Secret 时若 Wrangler 提示创建 Worker，可同意创建。
+执行两次 `openssl rand -base64 32` 生成两个独立密钥，分别输入 Secret 提示；加密密钥须编码恰好 32 字节随机值。设置首个 Secret 时若提示创建 Worker，可同意创建。
 
-跨部署保留这两项密钥，更换加密密钥会导致已有凭据无法解密。已有安装也需要保留 Worker 名称、数据库 ID 与 Durable Object 身份。[环境在构建时选择](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/)，修改配置或切换环境后重新构建。
+默认 `AUTH_MODE=account` 还需在该环境配置 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`，并注册 `https://YOUR_DOMAIN/api/auth/callback/google`，origin 与 `APP_URL` 一致。以后部署保留这组新密钥，更换加密密钥会使该环境已有凭据无法解密。[环境在构建时选择](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/)，修改配置后重新构建。
+
+先通过独立网址验收真实登录、模型、MCP、Skills、OpenUI、恢复和离线 alarm。切公开域名前停止旧环境新受理，排空或显式停止旧任务；切路由不会取消旧 alarm。新环境验收前保留旧资源。Dry-run 只验证构建与配置，不创建或验收远程资源。
 
 ### 3. 打开应用
 
-访问部署网址，通过侧栏菜单配置个人 API Key。访客模式不需要 Google 凭据，也不需要部署默认模型 Key。
+访问部署网址，在侧栏设置中配置个人 Key。访客模式无需 Google 凭据或部署默认模型 Key；Google 登录使用新部署配置的客户端。登录后重新连接 MCP、导入 Skills。
 
-需要 Google 登录时，设为 `AUTH_MODE=account`，通过 Secrets 配置 `GOOGLE_CLIENT_ID` 和 `GOOGLE_CLIENT_SECRET`，并注册 `https://YOUR_DOMAIN/api/auth/callback/google` 回调；来源须与 `APP_URL` 一致。
-
-Cloudflare 与模型调用分别计费，请核对账号的 [Durable Object 限制](https://developers.cloudflare.com/durable-objects/platform/limits/)。资源需要手动创建，模板不提供自动化一键部署或费用硬上限。
+Cloudflare 与模型分别计费，请核对账号的 [Durable Object 限制](https://developers.cloudflare.com/durable-objects/platform/limits/)。模板不提供费用硬上限。
 
 ## 架构
 
 ```mermaid
 flowchart LR
   UI[浏览器：TanStack + assistant-ui] -->|HTTP 提交 / SSE 观察| API[Workers：Hono + Better Auth]
-  API --> DB[(D1：身份、目录、加密凭据)]
-  API --> DO[聊天 Durable Object：PiHarness]
-  DO --> History[(DO SQLite：执行历史)]
-  DO --> Tools[Pi Extensions / Skills / MCP / 远程服务]
+  API --> DB[(D1：身份、创建回执、冻结绑定、加密凭据)]
+  API --> DO[ChatSession DO：原生 Pi Harness 1.3.0]
+  DO --> History[(官方 SQLite Adapter：历史、Inbox、宿主文档)]
+  DO --> MCP[McpConnection DO：传输、OAuth、派发回执]
+  DO --> Skills[(私有 R2：不可变 Skill 文件)]
+  DO --> Tools[受信任的 Pi 原生 Extension]
 ```
 
 **Pi 负责执行历史与结果，Query 负责读取缓存，assistant-ui 负责聊天展示。** 提交、观察与 Stop 独立。远程副作用需要供应商提供幂等或调和能力，持久化执行本身不保证操作只执行一次。
 
-如需在自己的部署提供同样的免费默认配置，设置 `MODEL_PROVIDER=openrouter`、`MODEL_ID=openrouter/free`、`MODEL_THINKING_LEVEL=off`、`ALLOW_SERVER_MODEL_KEY=1`，将 OpenRouter Key 保存为 Worker 的 `MODEL_API_KEY` Secret。部署 Key 只允许 `MODEL_ID` / `MODEL_IDS` 明确配置的模型；个人 Key 可使用其他已注册模型。未配置付费回退。Agent 每轮推理及压缩都会消耗一次供应商请求，一次聊天可能使用多次免费请求。[OpenRouter 免费路由说明](https://openrouter.ai/docs/guides/routing/routers/free-router)。
+一个 ChatId 对应一个 DO 和 Pi Session，Pi 返回的数字 conversation ID 区分主会话、fork 和 task-owned children。Worker 从 D1 构造 owner/generation actor，DO 初始化时再次核对。创建使用稳定 requestId 和规范 hash，目录与三类冻结绑定原子写入。配置和 prepared admission 回执处于同一 Pi commit；恢复先按 requestId 查原生提交，不重复入队。
+
+快照始终包含有界历史页、queue 和真实 native conversation ID。旧页 cursor 绑定 ChatId、native conversation 与固定 upper 边界，浏览器拒绝未知协议。加载旧页不重连活动 stream，annotations 按 entry ID 和 revision 合并。详细说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+如需为自己的部署配置可选的 OpenRouter 免费默认模型，设置 `MODEL_PROVIDER=openrouter`、`MODEL_ID=openrouter/free`、`MODEL_THINKING_LEVEL=off`、`ALLOW_SERVER_MODEL_KEY=1`，将 OpenRouter Key 保存为 Worker 的 `MODEL_API_KEY` Secret。部署 Key 只允许 `MODEL_ID` / `MODEL_IDS` 明确配置的模型；个人 Key 可使用其他已注册模型。未配置付费回退。Agent 每轮推理及压缩都会消耗一次供应商请求，一次聊天可能使用多次免费请求。[OpenRouter 免费路由说明](https://openrouter.ai/docs/guides/routing/routers/free-router)。
 
 ## 常见问题
 
@@ -218,14 +230,14 @@ Key 在 D1 中使用 AES-256-GCM 加密保存，不写入聊天历史。可选�
 <details>
 <summary><strong>模板不包含哪些能力？</strong></summary>
 
-未内置附件、R2 素材、云端电脑/沙箱、支付和订阅。图片与视频生成需要接入服务扩展。接口可能随模板迭代调整。
+未内置通用文件附件、公开素材托管、云端电脑/沙箱、支付和订阅。已包含图片附件和私有 R2 Skills 存储。图片与视频生成需要接入服务扩展。接口可能随模板迭代调整。
 
 </details>
 
 <details>
 <summary><strong>是否对依赖打了补丁？</strong></summary>
 
-Pi Durable 使用未打补丁的原生逐步骤配置。`agents` 仅保留两个独立修复：Skills 结果桥接和失败 Session 缓存释放。原因及移除条件见[补丁说明](patches/README.md)。
+`@earendil-works/pi-durable` 与 `@earendil-works/pi-ai` 精确锁定 1.3.0，使用未修改的发布包，无依赖补丁。运行时和 Skills 直接使用 Pi 公共接口，Agents SDK 保留用于 MCP/OAuth 传输及 Skill 来源数据类型。
 
 </details>
 
@@ -238,7 +250,7 @@ pnpm test:e2e
 pnpm test:hmr
 ```
 
-E2E 使用隔离的 `.wrangler/e2e-build` 产物运行 Cloudflare Vite 生产预览。组件夹具单独打包，不进入正常部署产物；HMR 测试独立验证开发服务器。
+E2E 使用隔离的 `.wrangler/native-e2e-build` 产物和 `.wrangler/native-e2e-state` 存储运行 Cloudflare Vite 生产预览。组件夹具单独打包，不进入正常部署产物；HMR 测试独立验证开发服务器。
 
 测试使用受控模型 I/O。请在自己的环境验收真实供应商请求、刷新/重连、Stop 和跨部署恢复；这些测试不代表真实云端验收。
 

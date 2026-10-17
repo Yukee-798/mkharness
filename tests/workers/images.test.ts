@@ -1,4 +1,5 @@
-import { env, abortAllDurableObjects, runInDurableObject } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it } from 'vitest';
 import { AppError } from '../../src/shared/contracts';
 const image = {
@@ -16,12 +17,12 @@ it('passes real multimodal input to Pi/provider and recovers a lost receipt with
   };
   await runInDurableObject(stub, async (instance) => {
     const target = instance as any;
-    const enqueue = target.enqueue.bind(target);
-    target.enqueue = async () => {
+    const place = target.place.bind(target);
+    target.place = async () => {
       throw new AppError(503, 'receipt_gap');
     };
     expect(await instance.submitRun(command)).toMatchObject({ error: { code: 'receipt_gap' } });
-    target.enqueue = enqueue;
+    target.place = place;
   });
   await abortAllDurableObjects();
   stub = env.CONVERSATIONS.get(stub.id);
@@ -30,7 +31,7 @@ it('passes real multimodal input to Pi/provider and recovers a lost receipt with
   const events = await (await stub.observeRun(command.runId)).text();
   expect(events).toContain('RUN_FINISHED');
   const snapshot = JSON.parse(await stub.snapshot());
-  const users = snapshot.entries.filter((entry: any) => entry.kind === 'pi.user');
+  const users = snapshot.entries.filter((entry: any) => entry.kind === 'app.input');
   expect(users).toHaveLength(1);
   expect(users[0].model[0].content).toContainEqual({
     type: 'image',
@@ -73,7 +74,7 @@ it('reports an incompatible later step configuration for a queued image rather t
   // Wait for the first generation to be prepared; its fixture holds the queue.
   await expect
     .poll(async () =>
-      JSON.parse(await stub.snapshot()).entries.some((entry: any) => entry.kind === 'pi.user'),
+      JSON.parse(await stub.snapshot()).entries.some((entry: any) => entry.kind === 'app.input'),
     )
     .toBe(true);
   const queued = crypto.randomUUID();
@@ -98,7 +99,7 @@ it('reports an incompatible later step configuration for a queued image rather t
   expect(JSON.stringify(snapshot.entries)).toContain('所选模型不支持图片');
   const user = snapshot.entries.find(
     (entry: any) =>
-      entry.kind === 'pi.user' && JSON.stringify(entry.model).includes('queued image'),
+      entry.kind === 'app.input' && JSON.stringify(entry.model).includes('queued image'),
   );
   expect(user.model[0].content).toContainEqual({
     type: 'image',

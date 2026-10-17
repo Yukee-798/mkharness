@@ -1,1 +1,0 @@
-ALTER TABLE conversations ADD COLUMN title_custom INTEGER NOT NULL DEFAULT 0;

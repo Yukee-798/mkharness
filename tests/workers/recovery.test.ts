@@ -1,6 +1,8 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { it, expect } from 'vitest';
-import { BG } from '../../src/server/conversations/context';
+import { ConversationControl } from '../../src/server/chat/documents';
+import { BG } from '../../src/server/chat/context';
 const stub = () => env.CONVERSATIONS.getByName(crypto.randomUUID());
 async function idle(target: ReturnType<typeof stub>) {
   for (let i = 0; i < 250; i++) {
@@ -12,73 +14,33 @@ async function idle(target: ReturnType<typeof stub>) {
       await new Promise((r) => setTimeout(r, 20));
       continue;
     }
-    const recovery = await runInDurableObject(current, (instance) => instance.needsRecovery());
-    if (!s.pending.length && !s.stopping && !recovery) return s;
+    if (!s.pending.length && !s.stopping) return s;
     await new Promise((r) => setTimeout(r, 20));
   }
   throw new Error('Recovery did not settle');
 }
-it.each([false, true])(
-  'reconciles the request gap across SQLite-preserving eviction (Pi accepted=%s)',
-  async (accepted) => {
-    let target = stub();
-    const command = { runId: crypto.randomUUID(), text: 'gap' };
-    await runInDurableObject(target, async (instance, state) => {
-      state.storage.sql.exec(
-        'INSERT INTO app_requests(id,payload,accepted)VALUES(?,?,0)',
-        command.runId,
-        JSON.stringify({
-          request: command,
-          execution: {
-            provider: 'fixture',
-            modelId: 'fixture',
-            thinkingLevel: 'off',
-            credentialRef: { source: 'server', fingerprint: 'fixture-only' },
-          },
-        }),
-      );
-      if (accepted)
-        await instance.harness.submit(command.text, {
-          session: '1',
-          operationId: command.runId,
-          whenBusy: 'followUp',
-        });
-    });
-    await abortAllDurableObjects();
-    target = env.CONVERSATIONS.get(target.id);
-    const result = await idle(target);
-    expect(
-      result.entries.flatMap((e: any) => e.model ?? []).filter((m: any) => m.role === 'user'),
-    ).toHaveLength(1);
-    expect(await target.submitRun(command)).toMatchObject({ accepted: true });
-    expect(
-      await runInDurableObject(
-        target,
-        (_instance, state) =>
-          state.storage.sql
-            .exec('SELECT accepted FROM app_requests WHERE id=?', command.runId)
-            .one().accepted,
-      ),
-    ).toBe(1);
-  },
-);
-it('recovers a persisted Stop intent before reopening admission and withdraws queued work', async () => {
+it('recovers a native Stop intent before resuming queued work', async () => {
   let target = stub();
-  await target.submitRun({ runId: crypto.randomUUID(), text: 'slow stopping' });
-  await target.submitRun({ runId: crypto.randomUUID(), text: 'must withdraw' });
-  await runInDurableObject(target, (_instance, state) => {
-    state.storage.sql.exec(
-      'INSERT INTO app_meta(key,value)VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-      'stopping',
-      '1',
-    );
+  const first = { runId: crypto.randomUUID(), text: 'slow stopping' };
+  const queued = { runId: crypto.randomUUID(), text: 'must withdraw' };
+  await target.submitRun(first);
+  await target.submitRun(queued);
+  await runInDurableObject(target, async (instance) => {
+    const root = await instance.root();
+    await root.commit(async (tx) => {
+      (await tx.doc(ConversationControl, root.id)).stopping = true;
+    }, BG);
   });
   await abortAllDurableObjects();
   target = env.CONVERSATIONS.get(target.id);
   const result = await idle(target);
-  expect(result.stopping).toBe(false);
   expect(result.pending).toEqual([]);
-  expect(JSON.stringify(result.entries)).not.toContain('must withdraw');
+  expect(result.stopping).toBe(false);
+  expect(JSON.stringify(result.entries)).not.toContain(queued.text);
+  expect(await target.submission(queued.runId)).toMatchObject({
+    status: 'unanswered',
+    reason: 'aborted',
+  });
 });
 it('safe-replays a publish interrupted before tool-result commit without duplicate panels', async () => {
   let target = stub();

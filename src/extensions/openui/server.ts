@@ -7,7 +7,7 @@ import { finiteJson } from '../../shared/json';
 import { validateUI } from './tools';
 import { actionParams } from './contracts';
 export function openuiContribution(
-  entries: () => Promise<readonly EntryRecord[]>,
+  entries: (nativeConversationId: number) => Promise<readonly EntryRecord[]>,
 ): ServerContribution {
   const tools = panelTools(entries),
     instructions = uiInstructions(entries);

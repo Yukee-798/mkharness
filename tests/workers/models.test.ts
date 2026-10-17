@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { it, expect } from 'vitest';
 import {
   applicationModels,
@@ -7,7 +7,16 @@ import {
   validateModelSelection,
   configuredModelCatalog,
 } from '../../src/server/models/catalog';
-import { runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import {
+  Admissions,
+  ExecutionBinding,
+  PendingAdmissions,
+  admissionKey,
+  bindingKey,
+} from '../../src/server/chat/documents';
+import { BG } from '../../src/server/chat/context';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { configuredExecution } from './chat-fixture';
 it('enables low reasoning by default and respects an explicit off setting', async () => {
   expect(applicationThinkingLevel({})).toBe('low');
   expect(applicationThinkingLevel({ MODEL_THINKING_LEVEL: 'off' })).toBe('off');
@@ -120,8 +129,15 @@ it('keeps a prepared request and uses current config for a busy queue across SQL
       config: { provider: 'fixture', modelId: 'fixture', thinkingLevel: 'off' as const },
     },
   ];
-  for (const command of commands)
+  const bindings: Awaited<ReturnType<typeof configuredExecution>>[] = [];
+  for (const command of commands) {
     expect(await stub.submitRun(command)).toMatchObject({ accepted: true });
+    bindings.push(
+      await runInDurableObject(stub, async (instance) =>
+        configuredExecution(await instance.harness.pi(), (await instance.root()).id),
+      ),
+    );
+  }
   expect(await stub.submitRun(commands[1])).toMatchObject({ accepted: true });
   expect(
     await stub.submitRun({
@@ -154,18 +170,34 @@ it('keeps a prepared request and uses current config for a busy queue across SQL
     snapshot.entries.flatMap((e: any) => e.model ?? []).filter((m: any) => m.role === 'user'),
   ).toHaveLength(3);
   expect(
-    await runInDurableObject(stub, (_instance, state) =>
-      state.storage.sql
-        .exec('SELECT payload FROM app_requests ORDER BY rowid')
-        .toArray()
-        .map((r) => {
-          const payload = JSON.parse(String(r.payload));
-          return payload.execution;
+    await runInDurableObject(stub, async (instance) => {
+      const root = await instance.root(),
+        pi = await instance.harness.pi();
+      return Promise.all(
+        commands.map(async (command, i) => {
+          const receipt = (await pi.snapshot(
+            Admissions,
+            admissionKey(root.id, command.runId),
+            BG,
+          ))!;
+          expect(receipt.state).toBe('admitted');
+          const ref = bindings[i].ref;
+          const frozen = await pi.snapshot(
+            ExecutionBinding,
+            bindingKey(ref.provider, ref.modelId),
+            BG,
+          );
+          const execution = JSON.parse(frozen!.execution);
+          expect(execution).toEqual(bindings[i].execution);
+          const { thinkingLevel: _thinking, ...binding } = execution;
+          return binding;
         }),
-    ),
+      );
+    }),
   ).toEqual(
     commands.map((c) => ({
-      ...c.config,
+      provider: c.config.provider,
+      modelId: c.config.modelId,
       credentialRef: { source: 'server', fingerprint: 'fixture-only' },
     })),
   );
@@ -183,10 +215,10 @@ it('rejects unsupported choices before inserting a request', async () => {
   expect(
     await runInDurableObject(
       stub,
-      (_instance, state) =>
-        state.storage.sql.exec('SELECT COUNT(*) AS count FROM app_requests').one().count,
+      async (instance) =>
+        (await (await instance.harness.pi()).snapshot(PendingAdmissions, BG))?.keys ?? [],
     ),
-  ).toBe(0);
+  ).toEqual([]);
 });
 
 it('uses native OpenRouter free routing and prefers explicit personal configuration without losing the free choice', async () => {

@@ -43,13 +43,7 @@ export const commandSchema = commandFields.refine(
 export type RunCommand = z.infer<typeof commandSchema>;
 export const storedRequestSchema = z
   .object({
-    // Accepted historical receipts may contain an older extension-owned source shape.
-    // Public admission remains strict; only the owning extension interprets these receipts.
-    request: commandFields
-      .extend({
-        source: z.object({ action: z.string() }).catchall(finitePayload).optional(),
-      })
-      .refine((command) => !!command.text || !!command.images?.length, '消息不能为空'),
+    request: commandSchema,
     execution: z
       .object({
         provider: z.string().min(1).max(200),
@@ -69,6 +63,14 @@ export const storedRequestSchema = z
 export type StoredCommand = z.infer<typeof storedRequestSchema>['request'];
 export type StoredRequest = z.infer<typeof storedRequestSchema>;
 export const conversationTitleSchema = z.string().trim().min(1).max(120);
+export const createConversationSchema = z
+  .object({
+    requestId: z.uuid(),
+    mcpConnectionIds: z.array(z.uuid()).max(10).optional(),
+    skillIds: z.array(z.uuid()).max(8).optional(),
+  })
+  .strict();
+export type CreateConversationRequest = z.infer<typeof createConversationSchema>;
 export type RawState = { [key: string]: Json };
 export class AppError extends Error {
   constructor(

@@ -3,12 +3,6 @@ import type { RunCommand, StoredCommand } from '../../shared/contracts';
 
 export const ASYNC_EXAMPLE_ID = 'async-example';
 export const remoteActionPayload = z.object({ taskId: z.number().int().positive() }).strict();
-const legacySource = z
-  .object({
-    action: z.enum(['retry_remote', 'recheck_remote']),
-    taskId: z.number().int().positive(),
-  })
-  .strict();
 
 export function remoteActionSource(
   name: 'retry' | 'recheck',
@@ -17,7 +11,7 @@ export function remoteActionSource(
   return { action: 'extension_action', extensionId: ASYNC_EXAMPLE_ID, name, payload: { taskId } };
 }
 
-/** Legacy support is limited to already accepted receipts, never public admission. */
+/** Decode only the current validated extension action contract. */
 export function remoteSource(source: StoredCommand['source']) {
   if (source?.action === 'extension_action' && source.extensionId === ASYNC_EXAMPLE_ID) {
     const payload = remoteActionPayload.safeParse(source.payload);
@@ -28,6 +22,5 @@ export function remoteSource(source: StoredCommand['source']) {
       };
     return;
   }
-  const legacy = legacySource.safeParse(source);
-  return legacy.success ? legacy.data : undefined;
+  return undefined;
 }

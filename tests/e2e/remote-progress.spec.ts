@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
 test('unknown outcomes restore without submission; explicit actions send only the original task reference', async ({
   page,
@@ -16,7 +17,7 @@ test('unknown outcomes restore without submission; explicit actions send only th
       });
     if (path.endsWith('/snapshot'))
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: [],
           pending: [],
           stopping: false,
@@ -31,7 +32,7 @@ test('unknown outcomes restore without submission; explicit actions send only th
               },
             ],
           },
-        },
+        }),
       });
     if (path.endsWith('/runs')) {
       commands.push(route.request().postDataJSON());

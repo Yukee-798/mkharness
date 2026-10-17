@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { resource } from './fixtures';
 import { test, expect } from './fixtures';
 
@@ -9,6 +10,8 @@ for (const replaced of [false, true])
     const ui = '$cost="10"\nroot=Stack([Input("cost","Cost","text",null,$cost)])';
     const entries: any[] = [
       {
+        conversationId: 1,
+        kind: 'pi.assistant',
         id: 1,
         model: [
           {
@@ -20,6 +23,8 @@ for (const replaced of [false, true])
         ],
       },
       {
+        conversationId: 1,
+        kind: 'pi.assistant',
         id: 2,
         model: [
           {
@@ -29,6 +34,8 @@ for (const replaced of [false, true])
         ],
       },
       {
+        conversationId: 1,
+        kind: 'pi.tool-result',
         id: 3,
         model: [
           {
@@ -61,14 +68,14 @@ for (const replaced of [false, true])
         snapshots++;
         if (snapshots > 1) await refreshed;
         return route.fulfill({
-          json: {
+          json: snapshotFixture({
             entries,
             pending:
               snapshots === 1 || (replaced && snapshots === 2)
                 ? [{ operationId: runId, status: 'running' }]
                 : [],
             stopping: false,
-          },
+          }),
         });
       }
       if (path.endsWith('/events')) {
@@ -77,6 +84,8 @@ for (const replaced of [false, true])
         if (observations === 1) {
           await completion;
           entries.push({
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 4,
             model: [{ role: 'assistant', content: [{ type: 'text', text: 'Finished answer.' }] }],
           });

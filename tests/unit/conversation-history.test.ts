@@ -2,12 +2,31 @@ import { it, expect } from 'vitest';
 import { ConversationHistory } from '../../src/browser/chat/session/history-store';
 import type { Snapshot } from '../../src/browser/chat/session/snapshot';
 const entry = (id: number) =>
-  ({ id, model: [{ role: 'user', content: 'message ' + id, timestamp: id }] }) as any;
+  ({
+    id,
+    kind: 'pi.user',
+    conversationId: 1,
+    model: [{ role: 'user', content: 'message ' + id, timestamp: id }],
+  }) as any;
 const snapshot = (ids: number[], revision = 1): Snapshot => ({
+  conversationId: 1,
+  queue: [],
+  queueEdits: [],
   entries: ids.map(entry),
   pending: [],
   stopping: false,
   history: { upperEntryId: Math.max(...ids), revision, olderCursor: 'older', annotations: {} },
+});
+
+it('does not carry loaded entries or annotations into another native conversation', () => {
+  const history = new ConversationHistory();
+  const first = snapshot([1, 2]);
+  first.history.annotations = { '1': { reply: { value: 'private branch' } } };
+  history.adopt(first);
+  const next = { ...snapshot([3]), conversationId: 2 };
+  const adopted = history.adopt(next);
+  expect(adopted.entries.map((entry) => entry.id)).toEqual([3]);
+  expect(adopted.history.annotations).toEqual({});
 });
 
 it('keeps a fresh cursor when the newest window no longer overlaps loaded history', () => {
@@ -52,4 +71,13 @@ it('retains loaded history across new window snapshots and ignores older annotat
     new Map(),
   );
   expect(merged.map((message) => message.id)).toEqual(['98', '99', '100', '101', '102']);
+});
+
+it('keeps current draft-transfer discovery while paging and replaces it on a fresh snapshot', () => {
+  const history = new ConversationHistory();
+  const receipt = { runId: 'withdrawn-run', expiresAt: Date.now() + 60_000 };
+  const current = history.adopt({ ...snapshot([100]), queueEdits: [receipt] });
+  const older = history.prepend({ entries: [entry(99)], history: snapshot([99]).history }, current);
+  expect(older.queueEdits).toEqual([receipt]);
+  expect(history.adopt(snapshot([100, 101])).queueEdits).toEqual([]);
 });

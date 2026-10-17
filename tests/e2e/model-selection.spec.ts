@@ -1,5 +1,7 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
-const catalog = {
+import type { ModelCatalog } from '../../src/shared/model-selection';
+const catalog: ModelCatalog = {
   models: [
     {
       id: 'flash',
@@ -33,7 +35,13 @@ test('model and effort apply on new HTTP submissions and restore selection witho
     }
     if (url.endsWith('/snapshot'))
       return route.fulfill({
-        json: { entries: [], pending: [], stopping: false, modelCatalog: catalog, selection },
+        json: snapshotFixture({
+          entries: [],
+          pending: [],
+          stopping: false,
+          modelCatalog: catalog,
+          selection,
+        }),
       });
     return route.fulfill({ status: 404 });
   });
@@ -80,7 +88,9 @@ test('keyboard selection, model capability changes and a mobile popover stay usa
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.route('**/api/conversations/**', (route) =>
-    route.fulfill({ json: { entries: [], pending: [], stopping: false, modelCatalog: catalog } }),
+    route.fulfill({
+      json: snapshotFixture({ entries: [], pending: [], stopping: false, modelCatalog: catalog }),
+    }),
   );
   await page.goto('/tests/browser/chat.html');
   const trigger = page.getByRole('combobox', { name: '模型与思考强度' });
@@ -112,7 +122,7 @@ test.describe('English reasoning layout', () => {
   for (const width of [320, 375, 1280]) {
     test(`five effort choices fit below the label at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 812 });
-      const modelCatalog = {
+      const modelCatalog: ModelCatalog = {
         models: [
           {
             id: 'free',
@@ -125,7 +135,7 @@ test.describe('English reasoning layout', () => {
       };
       await page.route('**/api/conversations/**', (route) =>
         route.fulfill({
-          json: { entries: [], pending: [], stopping: false, modelCatalog },
+          json: snapshotFixture({ entries: [], pending: [], stopping: false, modelCatalog }),
         }),
       );
       await page.goto('/tests/browser/chat.html');

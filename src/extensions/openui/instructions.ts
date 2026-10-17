@@ -1,15 +1,19 @@
 import { hook, ToolTask, type EntryRecord, type Extension } from '@earendil-works/pi-durable';
 function currentWork(entries: readonly EntryRecord[]) {
-  return entries.slice(entries.findLastIndex((e) => e.kind === 'pi.user'));
+  return entries.slice(
+    entries.findLastIndex((e) => e.kind === 'app.input' || e.kind === 'pi.user'),
+  );
 }
-export function uiInstructions(entries: () => Promise<readonly EntryRecord[]>): Extension {
+export function uiInstructions(
+  entries: (nativeConversationId: number) => Promise<readonly EntryRecord[]>,
+): Extension {
   return {
     name: 'ui-instructions',
     hooks: [
       hook(ToolTask, {
-        beforeTool: async (call) => {
+        beforeTool: async (call, api) => {
           if (!['prepare_program', 'present_openui'].includes(call.name)) return;
-          const failures = currentWork(await entries())
+          const failures = currentWork(await entries(Number(api.conversationId)))
             .flatMap((e) => e.model ?? [])
             .filter(
               (m) =>

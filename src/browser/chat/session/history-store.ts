@@ -18,15 +18,15 @@ export class ConversationHistory {
     return { ...this.annotations };
   }
   adopt(next: Snapshot): Snapshot {
-    const previous = this.current;
-    if (!next.history) {
-      this.current = next;
-      return next;
+    let previous = this.current;
+    if (previous && previous.conversationId !== next.conversationId) {
+      this.annotations = {};
+      this.versions.clear();
+      this.current = undefined;
+      previous = undefined;
     }
     const min = Number(next.entries[0]?.id ?? Infinity);
-    const prefix = previous?.history
-      ? previous.entries.filter((entry) => Number(entry.id) < min)
-      : [];
+    const prefix = previous ? previous.entries.filter((entry) => Number(entry.id) < min) : [];
     const previousIds = new Set(previous?.entries.map((entry) => Number(entry.id)));
     const overlaps = next.entries.some((entry) => previousIds.has(Number(entry.id)));
     const entries = [...prefix, ...next.entries];
@@ -51,7 +51,8 @@ export class ConversationHistory {
       toolProgress: { ...page.toolProgress, ...current.toolProgress },
       history: {
         ...page.history,
-        upperEntryId: current.history?.upperEntryId ?? page.history.upperEntryId,
+        upperEntryId: current.history.upperEntryId,
+        revision: Math.max(current.history.revision, page.history.revision),
         annotations: this.accept(page.history),
       },
     };

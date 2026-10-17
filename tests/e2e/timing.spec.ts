@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { createServer } from 'node:http';
 import { test, expect } from './fixtures';
 import { toMessages } from '../../src/shared/stream';
@@ -9,8 +10,10 @@ test('decorates an existing tool and one reply footer through stream, commit and
   const toolMessage = `draft:${runId}:1`,
     answerMessage = `draft:${runId}:2`;
   const entries: any[] = [
-    { id: 1, model: [{ role: 'user', content: '读取网页' }] },
+    { conversationId: 1, kind: 'app.input', id: 1, model: [{ role: 'user', content: '读取网页' }] },
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 2,
       model: [
         {
@@ -27,6 +30,8 @@ test('decorates an existing tool and one reply footer through stream, commit and
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 3,
       model: [
         {
@@ -37,7 +42,12 @@ test('decorates an existing tool and one reply footer through stream, commit and
         },
       ],
     },
-    { id: 4, model: [{ role: 'assistant', content: [{ type: 'text', text: '这是最终回复。' }] }] },
+    {
+      conversationId: 1,
+      kind: 'pi.assistant',
+      id: 4,
+      model: [{ role: 'assistant', content: [{ type: 'text', text: '这是最终回复。' }] }],
+    },
   ];
   const timing = {
     tools: { '2.call': { startedAt: 1000, endedAt: 1842 } },
@@ -113,12 +123,22 @@ test('decorates an existing tool and one reply footer through stream, commit and
         return route.continue({ url: `http://127.0.0.1:${port}/events` });
       }
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: finished ? entries : [],
           pending: finished ? [] : [{ operationId: runId, status: 'running' }],
           stopping: false,
-          extensionState: { timing: finished ? timing : { tools: {}, replies: {} } },
-        },
+          extensionState: { timing: { tools: {}, replies: {} } },
+          history: {
+            upperEntryId: finished ? 4 : 0,
+            revision: finished ? 1 : 0,
+            annotations: finished
+              ? {
+                  '2': { timing: { tools: timing.tools, replies: {} } },
+                  '4': { timing: { tools: {}, replies: timing.replies } },
+                }
+              : {},
+          },
+        }),
       });
     });
     await page.goto('/tests/browser/chat.html');
@@ -169,12 +189,19 @@ test('removing timing leaves the original tool, native footer and idle runtime i
   await page.route('**/api/conversations/**', (route) => {
     if (new URL(route.request().url()).pathname.endsWith('/events')) attachments++;
     return route.fulfill({
-      json: {
+      json: snapshotFixture({
         pending: [],
         stopping: false,
         entries: [
-          { id: 1, model: [{ role: 'user', content: 'Read a page' }] },
           {
+            conversationId: 1,
+            kind: 'app.input',
+            id: 1,
+            model: [{ role: 'user', content: 'Read a page' }],
+          },
+          {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 2,
             model: [
               {
@@ -191,6 +218,8 @@ test('removing timing leaves the original tool, native footer and idle runtime i
             ],
           },
           {
+            conversationId: 1,
+            kind: 'pi.tool-result',
             id: 3,
             model: [
               {
@@ -202,11 +231,13 @@ test('removing timing leaves the original tool, native footer and idle runtime i
             ],
           },
           {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 4,
             model: [{ role: 'assistant', content: [{ type: 'text', text: 'Original reply' }] }],
           },
         ],
-      },
+      }),
     });
   });
   await page.goto('/tests/browser/chat.html');

@@ -1,8 +1,9 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { defineTask } from '@earendil-works/pi-durable';
 import { expect, it } from 'vitest';
 import { RemoteIntents } from '../../src/extensions/async-example/runtime';
-import { BG } from '../../src/server/conversations/context';
+import { BG } from '../../src/server/chat/context';
 it('native atomic commit rolls back child + reference together; split-commit ablation leaves an unreferenced child', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   try {

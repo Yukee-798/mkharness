@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { resource } from './fixtures';
 import { test, expect } from './fixtures';
 
@@ -8,6 +9,8 @@ for (const conflict of [false, true])
     const ui = '$cost="10"\nroot=Stack([Input("cost","Cost","text",null,$cost)])';
     const entries = [
       {
+        conversationId: 1,
+        kind: 'pi.assistant',
         id: 2,
         model: [
           {
@@ -17,6 +20,8 @@ for (const conflict of [false, true])
         ],
       },
       {
+        conversationId: 1,
+        kind: 'pi.tool-result',
         id: 3,
         model: [
           {
@@ -50,7 +55,7 @@ for (const conflict of [false, true])
         });
       if (path.endsWith('/snapshot')) {
         snapshots++;
-        return route.fulfill({ json: { entries, pending: [], stopping: false } });
+        return route.fulfill({ json: snapshotFixture({ entries, pending: [], stopping: false }) });
       }
       if (path.endsWith('/runs')) return route.fulfill({ status: 202, json: { accepted: true } });
       return route.fulfill({ status: 404 });
@@ -120,9 +125,11 @@ test('a historical invalid slider is contained without crashing the chat', async
     route.fulfill({
       json: route.request().url().includes('/extensions/openui/resources/')
         ? resource({ panelRef: '2.call', ui, program: null, revision: 0 })
-        : {
+        : snapshotFixture({
             entries: [
               {
+                conversationId: 1,
+                kind: 'pi.assistant',
                 id: 2,
                 model: [
                   {
@@ -134,6 +141,8 @@ test('a historical invalid slider is contained without crashing the chat', async
                 ],
               },
               {
+                conversationId: 1,
+                kind: 'pi.tool-result',
                 id: 3,
                 model: [
                   {
@@ -147,7 +156,7 @@ test('a historical invalid slider is contained without crashing the chat', async
             ],
             pending: [],
             stopping: false,
-          },
+          }),
     }),
   );
   await page.goto('/tests/browser/chat.html');
@@ -164,6 +173,8 @@ test('a native slider flush during runtime replacement preserves its committed b
     revision = 0;
   const entries = [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 2,
       model: [
         {
@@ -173,6 +184,8 @@ test('a native slider flush during runtime replacement preserves its committed b
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 3,
       model: [
         {
@@ -197,7 +210,7 @@ test('a native slider flush during runtime replacement preserves its committed b
         json: resource({ panelRef: '2.call', ui, program: null, state, revision }),
       });
     if (path.endsWith('/snapshot'))
-      return route.fulfill({ json: { entries, pending: [], stopping: false } });
+      return route.fulfill({ json: snapshotFixture({ entries, pending: [], stopping: false }) });
     return route.fulfill({ status: 202, json: { accepted: true } });
   });
   await page.goto('/tests/browser/chat.html');

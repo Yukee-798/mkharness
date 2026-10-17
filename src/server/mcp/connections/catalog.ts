@@ -7,6 +7,7 @@ import {
 import type { ConnectionBinding, ConnectionView } from '../../../shared/mcp-connections';
 import { jsonText } from '../../../shared/json';
 import { digest } from './digest';
+import { connectionKey } from '../configuration';
 
 export function customMcpEnabled(config: ExtensionConfiguration = extensionConfiguration) {
   return extensionEnabled('mcp', config) && config.mcp?.custom !== false;
@@ -16,6 +17,11 @@ export function connectionView(raw: string): ConnectionView {
   if (!('id' in value)) throw new AppError(value.error.status, value.error.code);
   return value;
 }
+export function userConnection(env: Env, owner: string, id: string) {
+  return env.MCP_CONNECTIONS.getByName(
+    connectionKey({ kind: 'user', ownerId: owner, connectionId: id }),
+  );
+}
 export async function ownedConnection(env: Env, owner: string, id: string) {
   const row = await env.DB.prepare(
     'SELECT id FROM mcp_connections WHERE id=? AND owner=? AND deleted_at IS NULL',
@@ -23,7 +29,7 @@ export async function ownedConnection(env: Env, owner: string, id: string) {
     .bind(id, owner)
     .first();
   if (!row) throw new AppError(404, 'mcp_connection_not_found');
-  return env.MCP_CONNECTIONS.getByName(id);
+  return userConnection(env, owner, id);
 }
 export async function connectionViews(env: Env, owner: string): Promise<ConnectionView[]> {
   const { results } = await env.DB.prepare(
@@ -33,7 +39,7 @@ export async function connectionViews(env: Env, owner: string): Promise<Connecti
     .all<{ id: string }>();
   return Promise.all(
     results.map(async (row) =>
-      connectionView(await env.MCP_CONNECTIONS.getByName(row.id).metadata(owner)),
+      connectionView(await userConnection(env, owner, row.id).metadata(owner)),
     ),
   );
 }
@@ -65,14 +71,4 @@ export async function newConversationBindings(
     throw new AppError(400, 'mcp_session_tool_limit', 'Enable at most 64 MCP tools for a new chat');
   jsonText(bindings);
   return bindings;
-}
-export async function conversationBindings(env: Env, conversation: string) {
-  const row = await env.DB.prepare(
-    'SELECT c.owner,b.bindings FROM conversations c JOIN conversation_mcp_bindings b ON b.conversation=c.id WHERE c.id=?',
-  )
-    .bind(conversation)
-    .first<{ owner: string; bindings: string }>();
-  return row
-    ? { owner: row.owner, bindings: JSON.parse(row.bindings) as ConnectionBinding[] }
-    : { owner: '', bindings: [] };
 }

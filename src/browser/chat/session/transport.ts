@@ -11,6 +11,7 @@ import {
 import { Observable } from 'rxjs';
 import { aliasMessages, messageAliases } from '../../../shared/stream';
 import type { ObservationState } from '../../../shared/conversation';
+import { conversationRemote, type ConversationRemote } from './remote';
 export class StreamReplaced extends Error {}
 /** The only run path is GET attach. HTTP submission belongs to the composer. */
 export class AttachAgent extends AbstractAgent {
@@ -22,7 +23,8 @@ export class AttachAgent extends AbstractAgent {
       connected?: () => void;
       messageIds?: Map<string, string>;
       state?: (runId: string, state: ObservationState) => void;
-      window?: () => boolean;
+      target?: () => number | undefined;
+      observe?: ConversationRemote['observe'];
       mergeMessages?: (messages: Message[]) => Message[];
     },
   ) {
@@ -50,9 +52,11 @@ export class AttachAgent extends AbstractAgent {
       input.threadId = this.options.conversationId;
       const source = transformHttpEventStream(
         runHttpRequest(() =>
-          fetch(
-            `/api/conversations/${encodeURIComponent(this.options.conversationId)}/runs/${encodeURIComponent(runId)}/events${this.options.window?.() ? '?view=window' : ''}`,
-            { signal: controller.signal, headers: { Accept: 'text/event-stream' } },
+          (this.options.observe ?? conversationRemote.observe)(
+            this.options.conversationId,
+            runId,
+            controller.signal,
+            this.options.target?.(),
           ),
         ),
       ).subscribe({

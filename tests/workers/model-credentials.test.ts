@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from './env';
 import { expect, it } from 'vitest';
 import { ModelCredentials } from '../../src/server/models/credentials';
 const master = btoa('x'.repeat(32));

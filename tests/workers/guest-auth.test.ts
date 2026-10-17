@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from './env';
 import { expect, it } from 'vitest';
 import app from '../../src/server/index';
 
@@ -51,7 +51,8 @@ it('creates separate native anonymous owners and denies cross-owner access', asy
     origin + '/api/conversations',
     {
       method: 'POST',
-      headers: { origin, cookie: a.cookie },
+      headers: { origin, cookie: a.cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: crypto.randomUUID() }),
     },
     guestEnv(),
   );

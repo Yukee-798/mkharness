@@ -1,27 +1,30 @@
-import { hook, ToolTask, type EntryRecord, type Extension } from '@earendil-works/pi-durable';
-import { publicModelProvider } from './models/execution';
+import {
+  hook,
+  ToolTask,
+  CompactionTask,
+  type EntryRecord,
+  type Extension,
+  type Harness,
+} from '@earendil-works/pi-durable';
 import { AppError } from '../shared/contracts';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
+import type { Models } from '@earendil-works/pi-ai/models';
+import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
+import { publicModelProvider } from './models/execution';
+import { bindNativeExecutionTask, reserveModel, reserveTool } from './chat/policy';
 export function toolBudget(env: Record<string, unknown>) {
   const limit = Number(env.TOOL_CALL_LIMIT ?? 40);
   if (!Number.isSafeInteger(limit) || limit < 1) throw new AppError(503, 'tool_budget_invalid');
   return limit;
 }
-function currentWork(entries: readonly EntryRecord[]) {
-  return entries.slice(entries.findLastIndex((e) => e.kind === 'pi.user'));
-}
-export function checkRunLimits(entries: readonly EntryRecord[], toolLimit = 40) {
-  const current = currentWork(entries);
-  const rounds = current.filter((e) => e.kind === 'pi.assistant').length;
-  const calls = current.flatMap((e) => e.model ?? []).filter((m) => m.role === 'toolResult').length;
-  if (rounds >= 20)
-    throw new Error('Model round limit reached (20). Submit a new request to continue.');
-  if (calls >= toolLimit)
-    throw new Error(`Tool call limit reached (${toolLimit}). Submit a new request to continue.`);
-}
-export function runLimits(
-  entries: () => Promise<readonly EntryRecord[]>,
-  toolLimit = 40,
-): Extension {
+export type RunGuardContext = {
+  pi: Harness;
+  conversationId: number;
+  entries: readonly EntryRecord[];
+  context: Parameters<Harness['close']>[0];
+};
+/** Tools expose their native target directly; thrown tool guards block in Pi. */
+export function runLimits(harness: () => Promise<Harness>, toolLimit = 40): Extension {
   return {
     name: 'run-limits',
     sections: [
@@ -32,55 +35,52 @@ export function runLimits(
       },
     ],
     hooks: [
-      hook(ToolTask, {
-        beforeTool: async () => {
+      hook(CompactionTask, {
+        beforeCompact: async (_summary, api, context) => {
           try {
-            checkRunLimits(await entries(), toolLimit);
-          } catch (e) {
-            return { block: (e as Error).message };
+            await bindNativeExecutionTask(await harness(), api.conversationId, api.taskId, context);
+          } catch {
+            return { decline: true };
+          }
+        },
+      }),
+      hook(ToolTask, {
+        beforeTool: async (call, api, context) => {
+          try {
+            await reserveTool(
+              await harness(),
+              api.conversationId,
+              api.taskId,
+              call.name,
+              call.arguments,
+              context,
+            );
+          } catch (error) {
+            return { block: error instanceof Error ? error.message : 'Run limit reached' };
           }
         },
       }),
     ],
   };
 }
-/** A budget exhaustion is a terminal Pi model error, not an exception that Lifecycle retries. */
-export function withRunLimits(
-  models: import('@earendil-works/pi-ai/models').Models,
-  entries: () => Promise<readonly EntryRecord[]>,
-  guard?: (entries: readonly EntryRecord[]) => Promise<unknown>,
-  toolLimit = 40,
-) {
-  const result = Object.create(models) as import('@earendil-works/pi-ai/models').Models;
-  result.streamSimple = (model, context, options) => {
+/** Pi reports and skips throwing generation hooks. Enforce model policy at the
+ * provider boundary instead, with the explicit native ProviderDoc session ID.
+ * Its host mapping is committed with conversation creation, including forks and
+ * task-owned children. Missing mappings fail closed without a root fallback.
+ */
+export function guardModels(
+  models: Models,
+  lookup: (sessionId: string) => Promise<RunGuardContext>,
+): Models {
+  const guarded = Object.create(models) as Models;
+  const stream = (
+    invoke: () => AssistantMessageEventStream,
+    model: Parameters<Models['streamSimple']>[0],
+    sessionId?: string,
+    signal?: AbortSignal,
+  ) => {
     const out = new AssistantMessageEventStream();
-    void (async () => {
-      try {
-        const history = await entries();
-        checkRunLimits(history, toolLimit);
-        // Pi has already pinned the model before prepare/window checking.
-        // This wrapper may reject a request, never replace its execution configuration.
-        await guard?.(history);
-      } catch (error) {
-        const message: AssistantMessage = {
-          role: 'assistant',
-          content: [],
-          api: model.api,
-          provider: publicModelProvider(models, model.provider),
-          model: model.id,
-          usage: emptyUsage,
-          stopReason: 'error',
-          errorMessage: (error as Error).message,
-          timestamp: Date.now(),
-        };
-        out.push({ type: 'error', reason: 'error', error: message });
-        out.end(message);
-        return;
-      }
-      const source = models.streamSimple(model, context, options);
-      for await (const event of source) out.push(event);
-      out.end(await source.result());
-    })().catch(() => {
+    const refuse = (text: string) => {
       const message: AssistantMessage = {
         role: 'assistant',
         content: [],
@@ -89,18 +89,84 @@ export function withRunLimits(
         model: model.id,
         usage: emptyUsage,
         stopReason: 'error',
-        errorMessage: 'Model request failed',
+        errorMessage: text,
         timestamp: Date.now(),
       };
       out.push({ type: 'error', reason: 'error', error: message });
       out.end(message);
-    });
+    };
+    void (async () => {
+      try {
+        signal?.throwIfAborted();
+        if (!sessionId)
+          throw new AppError(503, 'model_target_missing', 'Model request target is missing');
+        const current = await abortableLookup(lookup(sessionId), signal);
+        await reserveModel(
+          current.pi,
+          current.conversationId as import('@earendil-works/pi-durable').ConversationId,
+          { provider: model.provider, modelId: model.id },
+          current.context,
+        );
+        signal?.throwIfAborted();
+      } catch (error) {
+        refuse(error instanceof Error ? error.message : 'Model request denied');
+        return;
+      }
+      try {
+        const source = invoke();
+        for await (const event of source) out.push(event);
+        out.end(await source.result());
+      } catch {
+        refuse('Model request failed');
+      }
+    })();
     return out;
   };
-  return result;
+  guarded.streamSimple = (model, context, options) =>
+    stream(
+      () => models.streamSimple(model, context, options),
+      model,
+      options?.sessionId,
+      options?.signal,
+    );
+  guarded.stream = (model, context, options) =>
+    stream(
+      () => models.stream(model, context, options),
+      model,
+      options?.sessionId,
+      options?.signal,
+    );
+  // Native deferred polling supplies no provider session target. The host does not enable deferred execution;
+  // fail closed here until it can resolve the persisted poll handle to the owning native conversation.
+  guarded.streamDeferred = (model, handle, options) =>
+    stream(() => models.streamDeferred(model, handle, options), model, undefined, options?.signal);
+  return guarded;
 }
-import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
-import type { AssistantMessage } from '@earendil-works/pi-ai';
+/** A policy lookup can wait for host initialization. Closing that host must
+ * still settle the native model invocation that its close joins. Both outcomes
+ * retain handlers after cancellation, including a late policy rejection.
+ */
+function abortableLookup<T>(lookup: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return lookup;
+  return new Promise((resolve, reject) => {
+    const aborted = () => {
+      signal.removeEventListener('abort', aborted);
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', aborted, { once: true });
+    lookup.then(
+      (value) => {
+        signal.removeEventListener('abort', aborted);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', aborted);
+        reject(error);
+      },
+    );
+    if (signal.aborted) aborted();
+  });
+}
 const emptyUsage = {
   input: 0,
   output: 0,
@@ -109,3 +175,24 @@ const emptyUsage = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
+
+/** Native safe tool recovery skips beforeTool; keep policy at the actual execution boundary as well. */
+export function guardTools(extension: Extension, harness: () => Promise<Harness>): Extension {
+  return {
+    ...extension,
+    tools: extension.tools?.map((tool) => ({
+      ...tool,
+      execute: async (args, api, context) => {
+        await reserveTool(
+          await harness(),
+          api.conversationId,
+          api.taskId,
+          tool.name,
+          args as Record<string, unknown>,
+          context,
+        );
+        return tool.execute(args, api, context);
+      },
+    })),
+  };
+}

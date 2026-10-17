@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect, type Locator } from './fixtures';
 
 async function expectShimmer(label: Locator) {
@@ -36,6 +37,8 @@ test('tool rows have consistent spacing within a group and between standalone Pi
     arguments: name === 'search_web' ? { query: '市场趋势' } : { url: 'https://example.com/data' },
   });
   const result = (entryId: number, id: string, isError = false) => ({
+    conversationId: 1,
+    kind: 'pi.tool-result',
     id: entryId,
     model: [
       {
@@ -49,6 +52,8 @@ test('tool rows have consistent spacing within a group and between standalone Pi
   });
   const entries = [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 1,
       model: [
         {
@@ -60,16 +65,28 @@ test('tool rows have consistent spacing within a group and between standalone Pi
     result(2, 'one'),
     result(3, 'two'),
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 4,
       model: [{ role: 'assistant', content: [call('three'), call('hidden', 'prepare_program')] }],
     },
     result(5, 'three'),
-    { id: 6, model: [{ role: 'assistant', content: [call('four', 'search_web')] }] },
+    {
+      conversationId: 1,
+      kind: 'pi.assistant',
+      id: 6,
+      model: [{ role: 'assistant', content: [call('four', 'search_web')] }],
+    },
     result(7, 'four', true),
-    { id: 8, model: [{ role: 'assistant', content: [{ type: 'text', text: '这是比较结果。' }] }] },
+    {
+      conversationId: 1,
+      kind: 'pi.assistant',
+      id: 8,
+      model: [{ role: 'assistant', content: [{ type: 'text', text: '这是比较结果。' }] }],
+    },
   ];
   await page.route('**/api/conversations/**', (route) =>
-    route.fulfill({ json: { entries, pending: [], stopping: false } }),
+    route.fulfill({ json: snapshotFixture({ entries, pending: [], stopping: false }) }),
   );
   await page.goto('/tests/browser/chat.html');
   const rows = page.locator('[data-slot="tool-call"] > button');
@@ -132,6 +149,8 @@ test('collapsed reasoning, tool groups and single tools share spacing across Pi 
     arguments: { url: 'https://example.com/data' },
   });
   const assistant = (id: number, content: unknown[]) => ({
+    conversationId: 1,
+    kind: 'pi.assistant',
     id,
     model: [{ role: 'assistant', content }],
   });
@@ -145,7 +164,7 @@ test('collapsed reasoning, tool groups and single tools share spacing across Pi 
     assistant(6, [{ type: 'text', text: '这是最终结论。' }]),
   ];
   await page.route('**/api/conversations/**', (route) =>
-    route.fulfill({ json: { entries, pending: [], stopping: false } }),
+    route.fulfill({ json: snapshotFixture({ entries, pending: [], stopping: false }) }),
   );
   await page.goto('/tests/browser/chat.html');
   await expect(
@@ -192,6 +211,8 @@ test('reasoning streams before the answer, finishes honestly and survives histor
     committed = false;
   const entries = [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 2,
       model: [
         {
@@ -230,14 +251,14 @@ test('reasoning streams before the answer, finishes honestly and survives histor
   const port = (server.address() as { port: number }).port;
   try {
     await page.route('**/api/conversations/**', (route) => {
-      if (route.request().url().endsWith('/events'))
+      if (new URL(route.request().url()).pathname.endsWith('/events'))
         return route.continue({ url: `http://127.0.0.1:${port}/events` });
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: committed ? entries : [],
           pending: committed ? [] : [{ operationId: runId, status: 'running' }],
           stopping: false,
-        },
+        }),
       });
     });
     await page.goto('/tests/browser/chat.html');
@@ -292,6 +313,8 @@ test('official tool call shows live shimmer and changes its status only after co
     committed = false;
   const entries = [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 1,
       model: [
         {
@@ -308,6 +331,8 @@ test('official tool call shows live shimmer and changes its status only after co
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 2,
       model: [
         {
@@ -348,14 +373,14 @@ test('official tool call shows live shimmer and changes its status only after co
   const port = (server.address() as { port: number }).port;
   try {
     await page.route('**/api/conversations/**', (route) => {
-      if (route.request().url().endsWith('/events'))
+      if (new URL(route.request().url()).pathname.endsWith('/events'))
         return route.continue({ url: `http://127.0.0.1:${port}/events` });
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: committed ? entries : [],
           pending: committed ? [] : [{ operationId: runId, status: 'running' }],
           stopping: false,
-        },
+        }),
       });
     });
     await page.goto('/tests/browser/chat.html');
@@ -386,7 +411,12 @@ test('disconnect recovery preserves the viewport and draft and never submits ano
   const { createServer } = await import('node:http');
   const runId = '11111111-1111-4111-8111-111111111111';
   const entries = [
-    { id: 1, model: [{ role: 'assistant', content: [{ type: 'text', text: '已保留的回复。' }] }] },
+    {
+      conversationId: 1,
+      kind: 'pi.assistant',
+      id: 1,
+      model: [{ role: 'assistant', content: [{ type: 'text', text: '已保留的回复。' }] }],
+    },
   ];
   let drop = () => {},
     finish = () => {},
@@ -412,16 +442,16 @@ test('disconnect recovery preserves the viewport and draft and never submits ano
   try {
     await page.route('**/api/conversations/**', async (route) => {
       if (route.request().method() === 'POST') posts++;
-      if (route.request().url().endsWith('/events'))
+      if (new URL(route.request().url()).pathname.endsWith('/events'))
         return route.continue({ url: `http://127.0.0.1:${port}/events` });
       snapshots++;
       if (snapshots === 2) await allowRestore;
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries,
           pending: committed ? [] : [{ operationId: runId, status: 'running' }],
           stopping: false,
-        },
+        }),
       });
     });
     await page.goto('/tests/browser/chat.html');
@@ -461,6 +491,8 @@ test('official grouped tools bound each payload and support internal keyboard sc
   const data = 'source-row '.repeat(1500) + 'end-of-payload';
   const entries = [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 1,
       model: [
         {
@@ -479,6 +511,8 @@ test('official grouped tools bound each payload and support internal keyboard sc
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 2,
       model: [
         {
@@ -490,6 +524,8 @@ test('official grouped tools bound each payload and support internal keyboard sc
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 3,
       model: [
         {
@@ -502,7 +538,7 @@ test('official grouped tools bound each payload and support internal keyboard sc
     },
   ];
   await page.route('**/api/conversations/**', (route) =>
-    route.fulfill({ json: { entries, pending: [], stopping: false } }),
+    route.fulfill({ json: snapshotFixture({ entries, pending: [], stopping: false }) }),
   );
   await page.goto('/tests/browser/chat.html');
   const group = page.getByRole('button', { name: '已调用 2 个工具', exact: true });

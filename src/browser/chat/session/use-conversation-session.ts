@@ -61,6 +61,16 @@ export function useConversationSession({
     [ackPending, setAckPending] = useState(false),
     [sending, setSending] = useState(false);
   const queueEpoch = useRef(0);
+  const acknowledgedEdits = useRef(new Set<string>());
+  const currentTransfers = useCallback(
+    (value: Snapshot): Snapshot => ({
+      ...value,
+      queueEdits: value.queueEdits.filter(
+        (edit) => !acknowledgedEdits.current.has(`${value.conversationId}:${edit.runId}`),
+      ),
+    }),
+    [],
+  );
   const retries = useRef(0);
   const [selection, setSelection] = useState<ModelSelection>();
   const [stopSending, setStopSending] = useState(false);
@@ -102,8 +112,8 @@ export function useConversationSession({
     )
       return;
     adoptedQuery.current = query.data;
-    setSnapshot(historyStore.adopt(query.data));
-  }, [id, revision, query.data, query.isSuccess, snapshot, historyStore]);
+    setSnapshot(historyStore.adopt(currentTransfers(query.data)));
+  }, [id, revision, query.data, query.isSuccess, snapshot, historyStore, currentTransfers]);
   useEffect(() => {
     if (!id || revision === 0) return;
     let active = true;
@@ -116,7 +126,9 @@ export function useConversationSession({
       adoptedQuery.current = s;
       setSnapshot((current) =>
         historyStore.adopt(
-          epoch === queueEpoch.current ? s : { ...s, queue: current?.queue ?? s.queue },
+          currentTransfers(
+            epoch === queueEpoch.current ? s : { ...s, queue: current?.queue ?? s.queue },
+          ),
         ),
       );
       setRestoration(revision);
@@ -127,7 +139,7 @@ export function useConversationSession({
     return () => {
       active = false;
     };
-  }, [id, revision, refetchSnapshot, historyStore]);
+  }, [id, revision, refetchSnapshot, historyStore, currentTransfers]);
   useEffect(() => {
     const e = query.error;
     if (!e) return;
@@ -181,8 +193,9 @@ export function useConversationSession({
                 ...s,
                 pending: data.pending,
                 queue: epoch === queueEpoch.current ? data.queue : s.queue,
+                queueEdits: currentTransfers(data).queueEdits,
               }
-            : data,
+            : currentTransfers(data),
         );
         setAckPending(false);
       }
@@ -227,9 +240,13 @@ export function useConversationSession({
     setHistoryLoading(true);
     setHistoryError(undefined);
     try {
-      const page = await remote.history(id, cursor, controller.signal);
+      const page = await remote.history(id, cursor, controller.signal, snapshot?.conversationId);
       if (controller.signal.aborted) return;
-      setSnapshot((current) => (current ? historyStore.prepend(page, current) : current));
+      setSnapshot((current) =>
+        current?.conversationId === snapshot?.conversationId
+          ? historyStore.prepend(page, current)
+          : current,
+      );
       setPrependVersion((value) => value + 1);
     } catch (error) {
       if (!controller.signal.aborted) setHistoryError(error as Error);
@@ -237,20 +254,39 @@ export function useConversationSession({
       if (olderFlight.current === controller) olderFlight.current = undefined;
       if (!controller.signal.aborted) setHistoryLoading(false);
     }
-  }, [id, snapshot?.history?.olderCursor, remote, historyStore]);
+  }, [id, snapshot?.history.olderCursor, snapshot?.conversationId, remote, historyStore]);
   const actOnQueue = async (runId: string, action: QueueAction) => {
     const epoch = queueEpoch.current;
     try {
-      const result = await remote.queue(id, runId, action);
+      const result = await remote.queue(id, runId, action, snapshot?.conversationId);
       if (epoch === queueEpoch.current)
         setSnapshot((current) => (current ? { ...current, queue: result.queue } : current));
       return result;
     } catch (error) {
       const { data, isSuccess } = await refetchSnapshot();
-      if (isSuccess && data && epoch === queueEpoch.current)
-        setSnapshot((current) => (current ? { ...current, queue: data.queue } : current));
+      if (isSuccess && data)
+        setSnapshot((current) =>
+          current
+            ? {
+                ...current,
+                queue: epoch === queueEpoch.current ? data.queue : current.queue,
+                queueEdits: currentTransfers(data).queueEdits,
+              }
+            : current,
+        );
       throw error;
     }
+  };
+  const acknowledgeQueueEdit = async (runId: string) => {
+    const target = snapshot?.conversationId;
+    const result = await remote.acknowledgeQueueEdit(id, runId, target);
+    if (target !== undefined) {
+      acknowledgedEdits.current.add(`${target}:${runId}`);
+      setSnapshot((current) =>
+        current?.conversationId === target ? currentTransfers(current) : current,
+      );
+    }
+    return result;
   };
   const retry = async () => {
     setError(undefined);
@@ -264,7 +300,7 @@ export function useConversationSession({
   const stop = async () => {
     setStopSending(true);
     try {
-      await remote.stop(id);
+      await remote.stop(id, snapshot?.conversationId);
       refresh();
     } catch (error) {
       setError(error as Error);
@@ -283,6 +319,7 @@ export function useConversationSession({
     connected,
     historyStore,
     prependVersion,
+    remote,
     queue: (value) => {
       queueEpoch.current++;
       setSnapshot((current) => (current ? { ...current, queue: value } : current));
@@ -320,6 +357,7 @@ export function useConversationSession({
     retrySubmission: retry,
     stop,
     actOnQueue,
+    acknowledgeQueueEdit,
     loadOlder,
     selectModel: setSelection,
     reportError: setError,

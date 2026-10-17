@@ -57,7 +57,6 @@ export function projectTiming({ entries, tasks, submissions }: ProjectionContext
 /** Observability-only extension: no model tools, prompt injection or extra persisted results. */
 export const timingContribution = (): ServerContribution => ({
   id: 'timing',
-  projectState: projectTiming,
   projectHistory(facts) {
     const state = projectTiming(facts);
     const result: Record<string, TimingState> = {};

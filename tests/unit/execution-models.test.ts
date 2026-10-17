@@ -1,18 +1,19 @@
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { fixtureModels } from '../fixture-model';
 import {
   bindExecution,
   executionModels,
   restoreExecutionModels,
+  executionProviderId,
 } from '../../src/server/models/execution';
 import {
   Harness,
   MemoryStorage,
   CompactionTask,
   createRegistry,
-  createSession,
+  defineTask,
+  UserEntry,
 } from '@earendil-works/pi-durable';
-import { withRunLimits } from '../../src/server/limits';
 import { AppError } from '../../src/shared/contracts';
 const execution = {
   provider: 'fixture',
@@ -20,138 +21,178 @@ const execution = {
   thinkingLevel: 'low' as const,
   credentialRef: { source: 'user' as const, id: crypto.randomUUID() },
 };
-it('restores a background compaction binding without resolving unrelated completed credentials', async () => {
-  const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
-  const credentials = async () => ({
-    select: async () => execution.credentialRef,
-    resolve: async () => ({ apiKey: 'original-key' }),
-  });
-  const old = {
-    ...execution,
-    modelId: 'removed',
-    credentialRef: { source: 'user' as const, id: crypto.randomUUID() },
-  };
-  const original = executionModels(fixtureModels());
-  const alias = await bindExecution(original, execution, credentials);
-  const storage = new MemoryStorage();
-  const pi = await Harness.open(storage, { models: original, registry: createRegistry() }, context);
-  const root = await pi.root(context, {
-    agent: { model: { provider: 'fixture', modelId: 'fixture' } },
-  });
-  await root.configure(
-    { model: { provider: alias, modelId: 'fixture' }, thinkingLevel: 'low' },
-    context,
-  );
-  await root.commit(
-    (tx) =>
-      tx.createTask(
-        CompactionTask,
-        {
-          reason: 'manual',
-        },
-        { background: true, ownership: { kind: 'conversation' } },
-      ),
-    context,
-  );
-  const rebuilt = executionModels(fixtureModels());
-  const records = [old, execution].map((execution) => ({
-    accepted: 1,
-    stored: { request: { runId: crypto.randomUUID(), text: 'already answered' }, execution },
+const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
+const credentials = async () => ({
+  select: async () => execution.credentialRef,
+  resolve: async () => ({ apiKey: 'original-key' }),
+});
+class ReopenableMemoryStorage extends MemoryStorage {
+  override async close() {}
+}
+
+it('restores every branch and task-owned child plus a pinned compaction, without resolving any secret at startup', async () => {
+  const records = Array.from({ length: 5 }, (_, index) => ({
+    execution: {
+      ...execution,
+      modelId: index === 3 ? 'fixture-pro' : 'fixture',
+      credentialRef: { source: 'user' as const, id: crypto.randomUUID() },
+    },
   }));
-  // Ablation: no binding restoration leaves the native compaction model unavailable.
-  expect(rebuilt.getModel(alias, 'fixture')).toBeUndefined();
-  await restoreExecutionModels(createSession(storage), rebuilt, records, credentials, context);
-  expect(rebuilt.getModel(alias, 'fixture')).toBeDefined();
-  expect(await rebuilt.getAuth(alias)).toMatchObject({ auth: { apiKey: 'original-key' } });
-  await pi.close(context);
-});
-it('restores a host acceptance gap without substituting a removed model or blocking startup', async () => {
-  const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
-  await expect(
-    restoreExecutionModels(
-      createSession(new MemoryStorage()),
-      executionModels(fixtureModels()),
-      [
-        {
-          accepted: 0,
-          stored: {
-            request: { runId: crypto.randomUUID(), text: 'not accepted' },
-            execution: { ...execution, modelId: 'removed' },
-          },
-        },
-      ],
-      async () => ({
-        select: async () => execution.credentialRef,
-        resolve: async () => ({ apiKey: 'key' }),
-      }),
+  const aliases = await Promise.all(records.map(({ execution }) => executionProviderId(execution)));
+  const pi = await Harness.open(
+    new MemoryStorage(),
+    { models: executionModels(fixtureModels()), registry: createRegistry() },
+    context,
+  );
+  try {
+    const root = await pi.root(context, {
+      agent: { model: { provider: aliases[0], modelId: 'fixture' } },
+    });
+    const at = await root.commit(
+      (tx) =>
+        tx.appendEntry(UserEntry, root.id, {
+          model: [{ role: 'user', content: 'inherited', timestamp: 1 }],
+        }),
       context,
-    ),
-  ).resolves.toBeUndefined();
+    );
+    await root.fork(
+      at.id,
+      {
+        ownership: { kind: 'ownerless' },
+        agent: { model: { provider: aliases[1], modelId: 'fixture' } },
+      },
+      context,
+    );
+    const parent = await root.commit(
+      (tx) =>
+        tx.createTask(
+          CompactionTask,
+          { reason: 'manual' },
+          { ownership: { kind: 'conversation' } },
+        ),
+      context,
+    );
+    const child = await pi.createConversation(
+      {
+        ownership: { kind: 'task', taskId: parent },
+        agent: { model: { provider: aliases[2], modelId: 'fixture' } },
+      },
+      context,
+    );
+    const pinned = defineTask({
+      ...CompactionTask.definition,
+      initial: () => ({
+        phase: 'summarize' as const,
+        attempt: 0,
+        model: { provider: aliases[3], modelId: 'fixture-pro' },
+        thinkingLevel: 'low' as const,
+        streamOptions: {},
+        maxTokens: 100,
+        tail: at.id,
+        firstKept: at.id,
+      }),
+    });
+    await child.commit(
+      (tx) =>
+        tx.createTask(
+          pinned,
+          { reason: 'manual' },
+          { ownership: { kind: 'conversation' }, background: true },
+        ),
+      context,
+    );
+    // Cross the native scan page boundary too. These base-model configurations
+    // require no credential binding and must not hide a later owned conversation.
+    for (let index = 0; index < 101; index++)
+      await pi.createConversation(
+        {
+          ownership: { kind: 'ownerless' },
+          agent: { model: { provider: 'fixture', modelId: 'fixture' } },
+        },
+        context,
+      );
+    const rebuilt = executionModels(fixtureModels());
+    const access = vi.fn(credentials);
+    const lookup = vi.fn(
+      async (_refs: readonly import('@earendil-works/pi-durable').ModelRef[]) => records,
+    );
+    await restoreExecutionModels(pi, rebuilt, lookup, access, context);
+    expect(lookup.mock.calls[0][0]).toEqual(
+      expect.arrayContaining(
+        aliases.slice(0, 4).map((provider, index) => ({
+          provider,
+          modelId: index === 3 ? 'fixture-pro' : 'fixture',
+        })),
+      ),
+    );
+    for (let index = 0; index < 4; index++)
+      expect(rebuilt.getModel(aliases[index], records[index].execution.modelId)).toBeDefined();
+    expect(rebuilt.getProvider(aliases[4])).toBeUndefined(); // Completed unrelated credential.
+    expect(access).not.toHaveBeenCalled();
+    expect(await rebuilt.getAuth(aliases[2])).toMatchObject({ auth: { apiKey: 'original-key' } });
+    expect(access).toHaveBeenCalledOnce();
+  } finally {
+    await pi.close(context);
+  }
 });
-it('lets native pending work fail on a removed model without preventing history recovery', async () => {
-  const context = { abortSignal: undefined, value: () => undefined, toString: () => '[test]' };
-  const credentials = async () => ({
-    select: async () => execution.credentialRef,
-    resolve: async () => ({ apiKey: 'original-key' }),
-  });
+it('includes prepared configuration in AgentDoc while a removed model remains unavailable without blocking history', async () => {
+  const removed = { ...execution, modelId: 'removed' };
+  const alias = await executionProviderId(removed);
+  const pi = await Harness.open(
+    new MemoryStorage(),
+    { models: executionModels(fixtureModels()), registry: createRegistry() },
+    context,
+  );
+  try {
+    await pi.root(context, { agent: { model: { provider: alias, modelId: removed.modelId } } });
+    const lookup = vi.fn(
+      async (_refs: readonly import('@earendil-works/pi-durable').ModelRef[]) => [
+        { execution: removed },
+      ],
+    );
+    const rebuilt = executionModels(fixtureModels());
+    await expect(
+      restoreExecutionModels(pi, rebuilt, lookup, credentials, context),
+    ).resolves.toBeUndefined();
+    expect(lookup.mock.calls[0][0]).toContainEqual({ provider: alias, modelId: removed.modelId });
+    expect(rebuilt.getModel(alias, removed.modelId)).toBeUndefined();
+  } finally {
+    await pi.close(context);
+  }
+});
+it('lets native pending work fail on a missing binding without preventing conversation recovery', async () => {
+  const storage = new ReopenableMemoryStorage();
   const original = executionModels(fixtureModels());
   const alias = await bindExecution(original, execution, credentials);
-  const storage = new MemoryStorage();
   const pi = await Harness.open(storage, { models: original, registry: createRegistry() }, context);
   const root = await pi.root(context, {
-    agent: { model: { provider: 'fixture', modelId: 'fixture-pro' } },
+    agent: { model: { provider: alias, modelId: 'fixture' } },
   });
-  await root.configure({ model: { provider: alias, modelId: 'fixture' } }, context);
   const taskId = await root.commit(
     (tx) =>
-      tx.createTask(
-        CompactionTask,
-        {
-          reason: 'manual',
-        },
-        { ownership: { kind: 'conversation' } },
-      ),
+      tx.createTask(CompactionTask, { reason: 'manual' }, { ownership: { kind: 'conversation' } }),
     context,
   );
-  const base = fixtureModels(),
-    provider = base.getProvider('fixture')!;
-  base.setProvider({
-    ...provider,
-    getModels: () => provider.getModels().filter((m) => m.id !== 'fixture'),
-  });
-  const rebuilt = executionModels(base);
-  await expect(
-    restoreExecutionModels(
-      createSession(storage),
-      rebuilt,
-      [
-        {
-          accepted: 1,
-          stored: {
-            request: { runId: crypto.randomUUID(), text: 'accepted before catalog change' },
-            execution,
-          },
-        },
-      ],
-      credentials,
-      context,
-    ),
-  ).resolves.toBeUndefined();
-  expect(rebuilt.getModel(alias, 'fixture')).toBeUndefined();
+  await pi.close(context);
+  const rebuilt = executionModels(fixtureModels());
   const restored = await Harness.open(
     storage,
     { models: rebuilt, registry: createRegistry() },
     context,
   );
-  restored.resume();
-  await expect
-    .poll(async () => (await restored.getTask(taskId, context))?.state)
-    .toMatchObject({
-      status: 'terminal',
-      outcome: { status: 'failed' },
-    });
-  expect(await restored.conversation(root.id, context)).toBeDefined();
-  await Promise.all([pi.close(context), restored.close(context)]);
+  try {
+    await expect(
+      restoreExecutionModels(restored, rebuilt, async () => [], credentials, context),
+    ).resolves.toBeUndefined();
+    expect(rebuilt.getModel(alias, 'fixture')).toBeUndefined();
+    restored.resume();
+    await expect
+      .poll(async () => (await restored.getTask(taskId, context))?.state)
+      .toMatchObject({ status: 'terminal', outcome: { status: 'failed' } });
+    expect(await restored.conversation(root.id, context)).toBeDefined();
+  } finally {
+    await restored.close(context);
+  }
 });
 it('validates a second model even when its credential alias is already installed', async () => {
   const models = executionModels(fixtureModels());
@@ -180,21 +221,6 @@ it('keeps trusted credential failure reasons and hides internal provider identit
   expect(result.errorMessage).toBe('原请求的个人凭据已撤销或过期，请发起新请求');
   expect(result.provider).toBe('fixture');
   expect(JSON.stringify(result)).not.toContain('mkharness-bound');
-});
-it('normalizes budget refusals before commit rather than leaking a bound provider alias', async () => {
-  const models = executionModels(fixtureModels());
-  const id = await bindExecution(models, execution, async () => ({
-    select: async () => execution.credentialRef,
-    resolve: async () => ({ apiKey: 'key' }),
-  }));
-  const limited = withRunLimits(
-    models,
-    async () =>
-      [{ kind: 'pi.user' }, ...Array.from({ length: 20 }, () => ({ kind: 'pi.assistant' }))] as any,
-  );
-  const result = await limited.completeSimple(models.getModel(id, 'fixture')!, { messages: [] });
-  expect(result.errorMessage).toContain('Model round limit');
-  expect(result.provider).toBe('fixture');
 });
 it('does not persist supplier error bodies that echo the key', async () => {
   const base = fixtureModels(),

@@ -9,7 +9,7 @@ import type { ServerContribution, ContributionHost } from '../server/extensions/
 import { validateContributionIds } from '../server/extensions/contributions';
 type Context = {
   env: Env;
-  entries: () => Promise<readonly EntryRecord[]>;
+  entries: (nativeConversationId: number) => Promise<readonly EntryRecord[]>;
   host?: ContributionHost;
   configuration?: ExtensionConfiguration;
 };
@@ -58,7 +58,6 @@ export const definitions: readonly Definition[] = [
       return {
         id: 'web',
         extension: webTools((env as Env & { TAVILY_API_KEY?: string }).TAVILY_API_KEY),
-        projectState: projectSources,
         projectHistory: (facts) =>
           Object.fromEntries(
             Object.entries(projectSources(facts).replies).map(([id, sources]) => [

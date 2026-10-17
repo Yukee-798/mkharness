@@ -1,4 +1,5 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it } from 'vitest';
 import {
   Type,
@@ -128,7 +129,7 @@ it.each(['text', 'ui-first', 'suggestions-first'] as const)(
     expect(trace.rounds).toBe(1);
     expect(trace.systems.join('\n')).toContain('reply-followups');
     const answer = snapshot.entries.findLast((entry: any) => entry.kind === 'pi.assistant');
-    expect(snapshot.extensionState.reply.replies).toEqual({ [answer.id]: prompts });
+    expect(suggestions(snapshot)).toEqual({ [answer.id]: prompts });
     const results = snapshot.entries
       .flatMap((entry: any) => entry.model ?? [])
       .filter((message: any) => message.role === 'toolResult');
@@ -143,7 +144,7 @@ it.each(['text', 'ui-first', 'suggestions-first'] as const)(
     expect(trace.rounds).toBe(1);
     await abortAllDurableObjects();
     const restored = JSON.parse(await env.CONVERSATIONS.get(stub.id).snapshot());
-    expect(restored.extensionState.reply).toEqual(snapshot.extensionState.reply);
+    expect(suggestions(restored)).toEqual(suggestions(snapshot));
   },
 );
 
@@ -153,7 +154,7 @@ it.each(['ui-failure', 'work', 'empty', 'invalid'] as const)(
     const { trace, snapshot } = await probe(mode);
     expect(trace.rounds).toBe(2);
     if (mode === 'work') expect(trace.work).toBe(1);
-    expect(snapshot.extensionState.reply.replies).toEqual({});
+    expect(suggestions(snapshot)).toEqual({});
     const results = snapshot.entries
       .flatMap((entry: any) => entry.model ?? [])
       .filter((message: any) => message.role === 'toolResult');
@@ -172,5 +173,14 @@ it('removing the contribution removes its model instruction, tools and public pr
   const { trace, snapshot } = await probe('disabled');
   expect(trace.rounds).toBe(1);
   expect(trace.systems.join('\n')).not.toContain('reply-followups');
-  expect(snapshot.extensionState.reply).toBeUndefined();
+  expect(suggestions(snapshot)).toEqual({});
 });
+
+function suggestions(snapshot: any) {
+  return Object.assign(
+    {},
+    ...Object.values(snapshot.history.annotations).map(
+      (annotation: any) => annotation.reply?.replies ?? {},
+    ),
+  );
+}

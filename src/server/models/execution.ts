@@ -12,7 +12,6 @@ import { modelEndpointFetch } from './endpoint';
 import type { ModelCredentials } from './credentials';
 import {
   AgentDoc,
-  ROOT_CONVERSATION_ID,
   GenerationTask,
   CompactionTask,
   type Session,
@@ -20,6 +19,7 @@ import {
   type GenerationCheckpoint,
   type CompactionCheckpoint,
   type Cursor,
+  type ConversationId,
 } from '@earendil-works/pi-durable';
 export type CredentialAccess = Pick<ModelCredentials, 'select' | 'resolve'> &
   Partial<Pick<ModelCredentials, 'configuredModels'>>;
@@ -117,66 +117,61 @@ export async function executionProviderId(execution: StoredRequest['execution'])
   return 'mkharness-bound-' + Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Only native runnable work and unaccepted host requests require credentials on cold start. */
+/** Rebuild aliases for the current native configuration and live pinned requests only.
+ * The single Harness is paused while this runs; credentials are resolved lazily at
+ * the provider boundary, so completed history does not depend on an old secret.
+ */
 export async function restoreExecutionModels(
   session: Session,
   models: MutableModels,
-  requests:
-    | readonly {
-        stored: Pick<StoredRequest, 'execution'> & Partial<Omit<StoredRequest, 'execution'>>;
-        accepted: number;
-      }[]
-    | ((
-        refs: readonly ModelRef[],
-      ) => Promise<readonly { stored: Pick<StoredRequest, 'execution'>; accepted: number }[]>),
+  lookup: (
+    refs: readonly ModelRef[],
+  ) => Promise<readonly { execution: StoredRequest['execution'] }[]>,
   credentials: () => Promise<CredentialAccess>,
   context: Parameters<Session['close']>[0],
 ) {
-  const refs: ModelRef[] = [];
+  const refs = new Map<string, ModelRef>();
+  const refKey = (ref: ModelRef) => JSON.stringify([ref.provider, ref.modelId]);
   const add = (ref?: ModelRef) => {
-    if (ref) refs.push(ref);
+    if (ref) refs.set(refKey(ref), ref);
   };
-  // Factory is still paused: snapshots neither create documents nor schedule tasks.
-  add((await session.snapshot(AgentDoc, ROOT_CONVERSATION_ID, context))?.model);
-  await session.commit(async (tx) => {
-    for (const status of ['pending', 'running', 'waiting'] as const) {
-      let cursor: Cursor | undefined;
-      do {
-        const page = await tx.scanTasks(
-          { conversationId: ROOT_CONVERSATION_ID, status },
-          100,
-          cursor,
-        );
-        for (const task of page.items) {
-          if (
-            task.kind !== GenerationTask.definition.name &&
-            task.kind !== CompactionTask.definition.name
-          )
-            continue;
-          const checkpoint = task.state.checkpoint as
-            GenerationCheckpoint | CompactionCheckpoint | undefined;
-          if (checkpoint && 'model' in checkpoint) add(checkpoint.model);
-        }
-        cursor = page.next;
-      } while (cursor);
+  const conversationIds = await session.commit(async (tx) => {
+    const ids: ConversationId[] = [];
+    let conversationCursor: Cursor | undefined;
+    do {
+      const page = await tx.scanConversations({}, 100, conversationCursor);
+      ids.push(...page.items.map((conversation) => conversation.id));
+      conversationCursor = page.next;
+    } while (conversationCursor);
+    for (const kind of [GenerationTask.definition.name, CompactionTask.definition.name]) {
+      for (const status of ['pending', 'running', 'waiting'] as const) {
+        let cursor: Cursor | undefined;
+        do {
+          const page = await tx.scanTasks({ kind, status }, 100, cursor);
+          for (const task of page.items) {
+            const checkpoint = task.state.checkpoint as
+              GenerationCheckpoint | CompactionCheckpoint | undefined;
+            if (checkpoint && 'model' in checkpoint) add(checkpoint.model);
+          }
+          cursor = page.next;
+        } while (cursor);
+      }
     }
+    return ids;
   }, context);
-  const bindings = new Map<string, StoredRequest['execution']>();
-  for (const { stored, accepted } of typeof requests === 'function'
-    ? await requests(refs)
-    : requests) {
-    const execution = stored.execution;
-    if (accepted === 0) await bindStoredExecution(models, execution, credentials);
-    bindings.set(
+  for (const conversationId of conversationIds)
+    add((await session.snapshot(AgentDoc, conversationId, context))?.model);
+  const executions = new Map<string, StoredRequest['execution']>();
+  for (const { execution } of await lookup([...refs.values()]))
+    executions.set(
       JSON.stringify([await executionProviderId(execution), execution.modelId]),
       execution,
     );
-  }
-  for (const ref of refs) {
-    const execution = bindings.get(JSON.stringify([ref.provider, ref.modelId]));
+  for (const ref of refs.values()) {
+    const execution = executions.get(refKey(ref));
     if (execution) await bindStoredExecution(models, execution, credentials);
-    else if (ref.provider.startsWith('mkharness-bound-'))
-      throw new AppError(503, 'execution_binding_missing', '模型步骤的凭据绑定缺失');
+    // A missing alias stays unavailable. Pi settles only the affected native work
+    // as no_model; reading history, Stop and deleting the chat remain available.
   }
 }
 /** Stored work has already passed admission. Let Pi settle an unavailable model

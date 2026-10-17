@@ -1,4 +1,5 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it } from 'vitest';
 import { AppError } from '../../src/shared/contracts';
 import type { CredentialAccess } from '../../src/server/models/execution';
@@ -35,7 +36,7 @@ it.each([false, true])(
         };
       };
       // Preserve the native failed-run/queued-input gap until actual eviction.
-      if (reconstruct) probe.reconcile = async () => {};
+      if (reconstruct) (probe as any).rearm = async () => {};
     });
     const a = crypto.randomUUID(),
       b = crypto.randomUUID();

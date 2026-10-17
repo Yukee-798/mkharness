@@ -3,6 +3,7 @@ import { projectSources } from '../../src/extensions/web/sources';
 import { replyContribution } from '../../src/extensions/reply/server';
 import { extensionIds, exampleDefinition } from '../../src/extensions/server';
 import { USER_ACTION_CONTEXT } from '../../src/shared/contracts';
+import type { ReadContext } from '../../src/server/extensions/contributions';
 
 const result = (id: number, toolName: string, value: unknown, isError = false) => ({
   id,
@@ -80,15 +81,18 @@ it('bounds large source lists and ignores malformed and non-web tool outputs', (
 it('regeneration reads only the referenced chat input and freezes its original action context as data', async () => {
   const original = 'Analyze my selection' + USER_ACTION_CONTEXT + '\n{"state":{"amount":40}}';
   const normalize = replyContribution().actions!.regenerate!.normalize;
-  const context = {
-    entries: async () => [
-      { id: 1, kind: 'pi.user', model: [{ role: 'user', content: original }] },
-      { id: 2, model: [{ role: 'assistant', content: [] }] },
-      { id: 3, kind: 'pi.user', model: [{ role: 'user', content: 'Later input' }] },
-    ],
+  const context: ReadContext = {
+    nativeConversationId: 42,
+    entries: async () => {
+      throw new Error('active context is not historical action lookup');
+    },
     successfulTool: async () => undefined,
-    acceptedInput: async () => ({ text: original, context: { state: { amount: 40 } } }),
-  } as any;
+    acceptedInput: async () => {
+      throw new Error('input visibility alone does not authorize an answer');
+    },
+    acceptedInputForAnswer: async (id: number) =>
+      id === 2 ? { text: original, context: { state: { amount: 40 } } } : undefined,
+  };
   expect(await normalize({ entryId: '2' }, context)).toEqual({
     action: 'regenerate',
     originalRequest: { text: original, context: { state: { amount: 40 } } },
@@ -105,17 +109,21 @@ it('regeneration reads only the referenced chat input and freezes its original a
 });
 it('repeated regeneration inherits the first frozen input without nesting or new authority', async () => {
   const original = { text: 'First question', context: { selected: 'A' } };
-  const context = {
-    entries: async () => [
-      { id: 1, kind: 'pi.user' },
-      { id: 2, model: [{ role: 'assistant', content: [] }] },
-    ],
-    acceptedInput: async () => ({
+  const context: ReadContext = {
+    nativeConversationId: 42,
+    entries: async () => {
+      throw new Error('active context is not historical action lookup');
+    },
+    successfulTool: async () => undefined,
+    acceptedInput: async () => {
+      throw new Error('input visibility alone does not authorize an answer');
+    },
+    acceptedInputForAnswer: async () => ({
       text: 'Regenerate response',
-      source: { action: 'extension_action', extensionId: 'reply', name: 'regenerate' },
+      source: { action: 'extension_action', extensionId: 'reply', name: 'regenerate', payload: {} },
       context: { action: 'regenerate', originalRequest: original },
     }),
-  } as any;
+  };
   expect(
     await replyContribution().actions!.regenerate!.normalize(
       { entryId: '2', action: 'retry_remote' },

@@ -1,8 +1,10 @@
+import { ConversationControl } from '../../src/server/chat/documents';
 import { remoteActionSource } from '../../src/extensions/async-example/contracts';
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it, vi } from 'vitest';
 import { RemoteIntents, type RemoteIntent } from '../../src/extensions/async-example/runtime';
-import { BG } from '../../src/server/conversations/context';
+import { BG } from '../../src/server/chat/context';
 
 it('native owned child state survives eviction; known IDs are queried without another remote submission', async () => {
   let submits = 0,
@@ -593,13 +595,12 @@ it.each(['before-submit', 'completed-before-result', 'stop-marker'] as const)(
       if (fault === 'stop-marker') {
         await waitUntil(async () => !!Object.values(await operations(stub))[0]?.remoteId);
         await stub.submitRun({ runId: crypto.randomUUID(), text: 'queued must withdraw' });
-        await runInDurableObject(stub, (_, state) =>
-          state.storage.sql
-            .exec(
-              "INSERT INTO app_meta VALUES('stopping','1') ON CONFLICT(key) DO UPDATE SET value='1'",
-            )
-            .toArray(),
-        );
+        await runInDurableObject(stub, async (instance) => {
+          const root = await instance.root();
+          await root.commit(async (tx) => {
+            (await tx.doc(ConversationControl, root.id)).stopping = true;
+          }, BG);
+        });
       }
       await abortAllDurableObjects();
       stub = env.CONVERSATIONS.get(stub.id);

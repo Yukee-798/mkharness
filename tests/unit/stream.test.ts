@@ -298,6 +298,7 @@ it('keeps the current action context out of visible user history', () => {
   const entries = [
     {
       id: 9,
+      kind: 'pi.user',
       model: [
         {
           role: 'user',

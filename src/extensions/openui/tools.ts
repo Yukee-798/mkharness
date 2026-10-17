@@ -110,7 +110,9 @@ export async function validateUI(ui: string, hasProgram: boolean) {
   return parsed;
 }
 export function panelTools(
-  entries: () => Promise<readonly import('@earendil-works/pi-durable').EntryRecord[]>,
+  entries: (
+    nativeConversationId: number,
+  ) => Promise<readonly import('@earendil-works/pi-durable').EntryRecord[]>,
 ): Extension {
   const prepare = defineTool({
     name: 'prepare_program',
@@ -195,7 +197,14 @@ export function panelTools(
     replay: 'safe',
     execute: async (args, api, context) => {
       try {
-        if (args.programRef && !successfulTool(await entries(), args.programRef, 'prepare_program'))
+        if (
+          args.programRef &&
+          !successfulTool(
+            await entries(Number(api.conversationId)),
+            args.programRef,
+            'prepare_program',
+          )
+        )
           throw new Error('Program is missing or has not committed successfully');
         await validateUI(args.ui, !!args.programRef);
         const panelRef = await ref(api, context);

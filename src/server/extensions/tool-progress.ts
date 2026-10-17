@@ -1,13 +1,12 @@
 import {
-  ROOT_CONVERSATION_ID,
+  type ConversationId,
   type AgentEvent,
   type Harness,
   type EntryRecord,
-  type Cursor,
   type TaskRecord,
 } from '@earendil-works/pi-durable';
 import type { Json } from '../../shared/json';
-import { BG } from '../conversations/context';
+import { BG } from '../chat/context';
 import { AppError } from '../../shared/contracts';
 import { ToolProgressFold } from '../../shared/tool-progress';
 import type { ServerContribution } from './contributions';
@@ -33,25 +32,28 @@ export function restoreHistoryToolProgress(
 
 export async function restoreToolProgress(
   pi: Harness,
+  target: ConversationId,
   snapshot: Extract<AgentEvent, { type: 'snapshot' }>,
-  entries: readonly EntryRecord[] = snapshot.entries,
-  restoredTasks?: readonly TaskRecord<Json, Json, Json>[],
+  entries: readonly EntryRecord[],
+  restoredTasks: readonly TaskRecord<Json, Json, Json>[],
 ) {
   const fold = new ToolProgressFold();
-  // Context compaction trims the watch view, but browser progress covers the full history.
-  // Read history before opening the watch, then overlay its newer atomic snapshot.
+  // Overlay the native watch only within the loaded page's lower boundary.
   const history = new Map(entries.map((entry) => [Number(entry.id), entry]));
-  for (const entry of snapshot.entries) history.set(Number(entry.id), entry);
+  const lower = Number(entries[0]?.id ?? 0);
+  for (const entry of snapshot.entries)
+    if (Number(entry.id) >= lower) history.set(Number(entry.id), entry);
   let assistant: number | undefined;
   for (const slot of snapshot.tools)
     if (slot.taskId !== undefined) {
       const task =
-        restoredTasks?.find((task) => task.id === slot.taskId) ??
+        restoredTasks.find((task) => task.id === slot.taskId) ??
         (await pi.getTask(slot.taskId, BG));
       const input = task?.input as
         { kind?: string; assistant?: number; callId?: string } | undefined;
       if (
-        task?.kind !== 'pi.tool' ||
+        task?.conversationId !== target ||
+        task.kind !== 'pi.tool' ||
         input?.kind !== 'model' ||
         input.callId !== slot.callId ||
         !input.assistant ||
@@ -61,9 +63,9 @@ export async function restoreToolProgress(
       assistant = input.assistant;
     }
   if (snapshot.tools.length && assistant === undefined) {
-    const generations = restoredTasks ?? (await pi.inspect(BG)).tasks.map((task) => task.record);
+    const generations = restoredTasks;
     for (const task of generations) {
-      if (task.kind !== 'pi.generation') continue;
+      if (task.conversationId !== target || task.kind !== 'pi.generation') continue;
       const checkpoint = task.state.checkpoint as
         { phase?: string; assistant?: number } | undefined;
       if (checkpoint?.phase === 'tools') assistant = checkpoint.assistant;
@@ -90,29 +92,7 @@ export async function restoreToolProgress(
           fold.end(`${input.assistant}.${encodeURIComponent(input.callId)}`, false);
       }
   };
-  if (restoredTasks) {
-    failures(restoredTasks);
-    return fold;
-  }
-  let cursor: Cursor | undefined;
-  do {
-    const tasks = await pi.commit(
-      (tx) =>
-        tx.scanTasks(
-          {
-            conversationId: ROOT_CONVERSATION_ID,
-            kind: 'pi.tool',
-            status: 'terminal',
-            order: 'descending',
-          },
-          100,
-          cursor,
-        ),
-      BG,
-    );
-    failures(tasks.items);
-    cursor = tasks.next;
-  } while (cursor);
+  failures(restoredTasks);
   return fold;
 }
 export function toolProjector(contributions: readonly ServerContribution[]) {

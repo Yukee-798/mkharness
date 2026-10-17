@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from './env';
 import { expect, it } from 'vitest';
 import app from '../../src/server/index';
 const origin = 'http://localhost:5173';

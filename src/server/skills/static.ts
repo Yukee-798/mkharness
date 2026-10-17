@@ -1,21 +1,15 @@
-import { skills } from 'agents/harness/pi';
-import { type SkillSource, type SkillContent, type SkillResource } from 'agents/skills';
-import type { Extension, ToolRegistration } from '@earendil-works/pi-durable';
+import type { SkillSource, SkillContent, SkillResource } from 'agents/skills';
+import type { Extension } from '@earendil-works/pi-durable';
 import { AppError } from '../../shared/contracts';
-import { jsonText } from '../../shared/json';
-import { JSON_TOOL_OUTPUT_LIMITS } from '../extensions/tool-output';
+import { nativeSkills } from './native';
+import { safeSkillPath } from './package';
+import { SKILL_LIMITS } from '../../shared/skills';
 
-const pathAllowed = (path: string) =>
-  !!path &&
-  !path.startsWith('/') &&
-  !path.includes('\\') &&
-  !path.includes(String.fromCharCode(0)) &&
-  !path.split('/').some((p) => p === '..' || p === '.' || !p);
 function textBounded(text: string) {
-  if (new TextEncoder().encode(text).byteLength > 1024 * 1024)
+  if (new TextEncoder().encode(text).byteLength > SKILL_LIMITS.file || text.includes('\0'))
     throw new AppError(503, 'skill_resource_too_large');
 }
-/** Preflight trusted static sources, then delegate activation/catalog behavior to the native SDK. */
+/** Fixture-only preflight. Production sources go directly to the lazy native bridge. */
 export async function staticSkills(sources: SkillSource[]): Promise<Extension> {
   const names = new Set<string>(),
     ids = new Set<string>();
@@ -44,7 +38,7 @@ export async function staticSkills(sources: SkillSource[]): Promise<Extension> {
       textBounded(body.body);
       bodies.set(body.name, body);
       for (const entry of body.resources ?? []) {
-        if (!pathAllowed(entry.path)) throw new AppError(503, 'invalid_skill_path');
+        if (!safeSkillPath(entry.path)) throw new AppError(503, 'invalid_skill_path');
         const key = body.name + '/' + entry.path;
         if (resources.has(key)) throw new AppError(503, 'duplicate_skill_resource');
         let resource;
@@ -53,7 +47,7 @@ export async function staticSkills(sources: SkillSource[]): Promise<Extension> {
         } catch {
           throw new AppError(503, 'skill_resource_unavailable');
         }
-        if (!resource || resource.encoding === 'base64')
+        if (!resource || resource.encoding === 'base64' || resource.path !== entry.path)
           throw new AppError(503, 'skill_resource_missing');
         textBounded(resource.content);
         resources.set(key, resource);
@@ -67,27 +61,5 @@ export async function staticSkills(sources: SkillSource[]): Promise<Extension> {
       readResource: async (name, path) => resources.get(name + '/' + path) ?? null,
     });
   }
-  const extension = await skills(loaded);
-  return {
-    ...extension,
-    wraps: (extension.tools ?? []).map((tool) => ({
-      tool: tool.name,
-      wrap: (original: ToolRegistration): ToolRegistration => ({
-        ...original,
-        outputLimits: JSON_TOOL_OUTPUT_LIMITS,
-        execute: async (args, api, context) => {
-          const result = await original.execute(args, api, context);
-          try {
-            jsonText(result.output ?? []);
-          } catch {
-            return { isError: true, output: [{ type: 'text', text: 'skill_output_too_large' }] };
-          }
-          const missing = (result.output ?? []).some(
-            (c) => c.type === 'text' && /^Skill (resource )?not found:/.test(c.text),
-          );
-          return missing ? { ...result, isError: true } : result;
-        },
-      }),
-    })),
-  };
+  return nativeSkills(loaded);
 }

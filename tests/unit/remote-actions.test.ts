@@ -35,18 +35,20 @@ it('concurrent retries share one runId until the HTTP acceptance resolves', asyn
   await Promise.all([first, second]);
 });
 
-it('already accepted legacy action receipts remain interpretable only by the example', () => {
+it('rejects historical action shapes in both stored requests and the example decoder', () => {
   const legacy = { action: 'retry_remote', taskId: 12 };
-  const saved = storedRequestSchema.parse({
-    request: { runId: crypto.randomUUID(), text: 'retry', source: legacy },
-    execution: {
-      provider: 'fixture',
-      modelId: 'fixture',
-      thinkingLevel: 'off',
-      credentialRef: { source: 'server', fingerprint: 'fixture' },
-    },
-  });
-  expect(remoteSource(saved.request.source)).toEqual(legacy);
+  expect(
+    storedRequestSchema.safeParse({
+      request: { runId: crypto.randomUUID(), text: 'retry', source: legacy },
+      execution: {
+        provider: 'fixture',
+        modelId: 'fixture',
+        thinkingLevel: 'off',
+        credentialRef: { source: 'server', fingerprint: 'fixture' },
+      },
+    }).success,
+  ).toBe(false);
+  expect(remoteSource(legacy as any)).toBeUndefined();
   expect(
     remoteSource({
       action: 'extension_action',

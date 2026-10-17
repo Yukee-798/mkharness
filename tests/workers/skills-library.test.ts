@@ -1,4 +1,5 @@
-import { env, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env } from './env';
 import { expect, it } from 'vitest';
 import { makeSignature } from 'better-auth/crypto';
 import { zipSync, strToU8 } from 'fflate';
@@ -180,7 +181,11 @@ it('pins versions per chat, loads through native Pi tools, restores receipts and
       owner.headers,
       '/conversations',
       'POST',
-      JSON.stringify({ skillIds: [skill.id], mcpConnectionIds: [] }),
+      JSON.stringify({
+        requestId: crypto.randomUUID(),
+        skillIds: [skill.id],
+        mcpConnectionIds: [],
+      }),
     )
   ).json()) as { id: string };
   const bindings = await newSkillBindings(env as Env, owner.id);
@@ -223,7 +228,10 @@ it('pins versions per chat, loads through native Pi tools, restores receipts and
   expect(JSON.stringify(results)).not.toContain('PRIVATE_SKILL_V2');
   expect(JSON.stringify(results)).toContain('CHECKLIST_MARKER');
   expect(snapshot.extensionState.skills.available[0].version).toBe(skill.version);
-  expect(snapshot.extensionState.skills.loaded[0]).toMatchObject({
+  const loaded = Object.values(snapshot.history.annotations).flatMap(
+    (value: any) => value.skills?.loaded ?? [],
+  );
+  expect(loaded[0]).toMatchObject({
     name: 'delivery-guide',
     version: skill.version,
   });
@@ -233,5 +241,6 @@ it('pins versions per chat, loads through native Pi tools, restores receipts and
     await call(owner.headers, `/conversations/${id}/snapshot`)
   ).json()) as any;
   expect(restored.extensionState.skills).toEqual(snapshot.extensionState.skills);
+  expect(restored.history.annotations).toEqual(snapshot.history.annotations);
   expect(await newSkillBindings(env as Env, owner.id)).toEqual([]);
 });

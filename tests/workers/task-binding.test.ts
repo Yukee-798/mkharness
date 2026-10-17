@@ -1,4 +1,5 @@
-import { env, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env } from './env';
 import { expect, it } from 'vitest';
 
 const probes = (env as unknown as { BINDING_PROBES: DurableObjectNamespace }).BINDING_PROBES;

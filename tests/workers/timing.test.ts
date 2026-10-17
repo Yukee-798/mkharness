@@ -1,7 +1,17 @@
-import { env, abortAllDurableObjects, runInDurableObject } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { expect, it, vi } from 'vitest';
 import { createExtensionProjection } from '../../src/server/extensions/state';
-import { BG } from '../../src/server/conversations/context';
+import { BG } from '../../src/server/chat/context';
+
+function timingState(snapshot: any) {
+  const result = { tools: {}, replies: {} };
+  for (const annotation of Object.values(snapshot.history?.annotations ?? {}) as any[]) {
+    Object.assign(result.tools, annotation.timing?.tools);
+    Object.assign(result.replies, annotation.timing?.replies);
+  }
+  return result;
+}
 
 it('projects real Pi tool/run durations over SSE and restores the same facts after DO reconstruction', async () => {
   let stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
@@ -12,7 +22,7 @@ it('projects real Pi tool/run durations over SSE and restores the same facts aft
     .split('\n')
     .filter((line) => line.startsWith('data: '))
     .map((line) => JSON.parse(line.slice(6)));
-  const timing = JSON.parse(await stub.snapshot()).extensionState.timing;
+  const timing = timingState(JSON.parse(await stub.snapshot()));
   expect(Object.keys(timing.tools)).toHaveLength(2);
   for (const span of Object.values(timing.tools) as any[])
     expect(span.endedAt - span.startedAt).toBeGreaterThanOrEqual(500);
@@ -24,13 +34,13 @@ it('projects real Pi tool/run durations over SSE and restores the same facts aft
     events.some(
       (event) =>
         event.type === 'STATE_SNAPSHOT' &&
-        JSON.stringify(event.snapshot.extensionState?.timing) === JSON.stringify(timing),
+        JSON.stringify(timingState(event.snapshot)) === JSON.stringify(timing),
     ),
   ).toBe(true);
   expect(body).not.toContain('never public');
   await abortAllDurableObjects();
   stub = env.CONVERSATIONS.get(stub.id);
-  expect(JSON.parse(await stub.snapshot()).extensionState.timing).toEqual(timing);
+  expect(timingState(JSON.parse(await stub.snapshot()))).toEqual(timing);
 });
 
 it('failed native tool receipts retain duration without pretending to succeed', async () => {
@@ -41,7 +51,7 @@ it('failed native tool receipts retain duration without pretending to succeed', 
   const snapshot = JSON.parse(await stub.snapshot());
   const [callId] = Object.keys(snapshot.toolProgress);
   expect(snapshot.toolProgress[callId].status).toBe('failed');
-  expect(snapshot.extensionState.timing.tools[callId]).toMatchObject({
+  expect((timingState(snapshot).tools as any)[callId]).toMatchObject({
     startedAt: expect.any(Number),
     endedAt: expect.any(Number),
   });
@@ -62,7 +72,7 @@ it('a terminate-only generated reply gets its duration without an extra model ro
         ),
     ),
   );
-  expect(snapshot.extensionState.timing.replies[String(answer.id)]).toMatchObject({
+  expect((timingState(snapshot).replies as any)[String(answer.id)]).toMatchObject({
     runId,
     startedAt: expect.any(Number),
     endedAt: expect.any(Number),
@@ -77,30 +87,33 @@ it('a terminate-only generated reply gets its duration without an extra model ro
 it('optional projections are bounded and isolated, and removing them exposes no native facts', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   await runInDurableObject(stub, async (instance, state) => {
-    await instance.root();
+    const conversation = await instance.root();
     const pi = await instance.harness.pi();
     const subscriptions = vi.spyOn(pi, 'subscribeCommits');
     const before = state.storage.sql.exec('SELECT * FROM pi_durable_metadata').toArray();
     const projection = createExtensionProjection(
       pi,
+      conversation.id,
       [
         {
           id: 'throws',
-          projectState: () => {
+          projectConversation: () => {
             throw new Error('private');
           },
         },
-        { id: 'oversized', projectState: () => ({ text: 'x'.repeat(1048576) }) },
+        { id: 'oversized', projectConversation: () => ({ text: 'x'.repeat(1048576) }) },
       ],
-      [],
       BG,
+      { restore: async () => ({ entries: [], tasks: [], submissions: [] }) },
     );
     await projection.restore();
     expect(projection.project()).toEqual({
       throws: { unavailable: true },
       oversized: { unavailable: true },
     });
-    const absent = createExtensionProjection(pi, [], [], BG);
+    const absent = createExtensionProjection(pi, conversation.id, [], BG, {
+      restore: async () => ({ entries: [], tasks: [], submissions: [] }),
+    });
     await absent.restore();
     expect(absent.project()).toEqual({});
     expect(subscriptions).not.toHaveBeenCalled();

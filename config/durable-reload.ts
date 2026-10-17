@@ -6,7 +6,7 @@ import type { EnvironmentModuleNode, Plugin } from 'vite';
  * Client-only changes continue to use normal React HMR.
  */
 export function durableReload(
-  entry = fileURLToPath(new URL('../src/server/conversations/agent.ts', import.meta.url)),
+  entry = fileURLToPath(new URL('../src/server/chat/session-object.ts', import.meta.url)),
 ): Plugin {
   return {
     name: 'durable-runtime-reload',

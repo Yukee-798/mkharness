@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect, resource } from './fixtures';
 
 test('generation diagnostics stay internal while a terminal failure uses product language', async ({
@@ -5,6 +6,8 @@ test('generation diagnostics stay internal while a terminal failure uses product
 }) => {
   const entries = [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 1,
       model: [
         {
@@ -14,6 +17,8 @@ test('generation diagnostics stay internal while a terminal failure uses product
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 2,
       model: [
         {
@@ -26,6 +31,8 @@ test('generation diagnostics stay internal while a terminal failure uses product
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 3,
       model: [
         {
@@ -37,6 +44,8 @@ test('generation diagnostics stay internal while a terminal failure uses product
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 4,
       model: [
         {
@@ -50,10 +59,13 @@ test('generation diagnostics stay internal while a terminal failure uses product
     },
   ];
   await page.route('**/api/conversations/**', (route) =>
-    route.fulfill({ json: { entries, pending: [], stopping: false } }),
+    route.fulfill({ json: snapshotFixture({ entries, pending: [], stopping: false }) }),
   );
   await page.goto('/tests/browser/chat.html');
-  await expect(page.getByRole('alert')).toHaveText('内容暂时无法生成。可以调整需求再试一次。');
+  // The first full-suite browser also loads the optional OpenUI module before this product state.
+  await expect(page.getByRole('alert')).toHaveText('内容暂时无法生成。可以调整需求再试一次。', {
+    timeout: 10_000,
+  });
   await expect(
     page.getByText('Test case output differs from expected', { exact: true }),
   ).toHaveCount(0);
@@ -72,6 +84,8 @@ test('assistant markdown renders semantically and keyboard composition submits o
   const submitted: unknown[] = [];
   const entries = [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 1,
       model: [
         {
@@ -91,7 +105,7 @@ test('assistant markdown renders semantically and keyboard composition submits o
       submitted.push(route.request().postDataJSON());
       return route.fulfill({ status: 202, json: { accepted: true } });
     }
-    return route.fulfill({ json: { entries, pending: [], stopping: false } });
+    return route.fulfill({ json: snapshotFixture({ entries, pending: [], stopping: false }) });
   });
   await page.goto('/tests/browser/chat.html');
   await expect(page.getByRole('heading', { name: '对比结果', exact: true })).toBeVisible();
@@ -119,6 +133,8 @@ test('unresolved generated-content failure stays visible after the next user mes
   let next = false;
   const entries = () => [
     {
+      conversationId: 1,
+      kind: 'pi.assistant',
       id: 1,
       model: [
         {
@@ -130,6 +146,8 @@ test('unresolved generated-content failure stays visible after the next user mes
       ],
     },
     {
+      conversationId: 1,
+      kind: 'pi.tool-result',
       id: 2,
       model: [
         {
@@ -143,8 +161,15 @@ test('unresolved generated-content failure stays visible after the next user mes
     },
     ...(next
       ? [
-          { id: 3, model: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }] },
           {
+            conversationId: 1,
+            kind: 'app.input',
+            id: 3,
+            model: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+          },
+          {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 4,
             model: [{ role: 'assistant', content: [{ type: 'text', text: 'Next answer.' }] }],
           },
@@ -156,7 +181,9 @@ test('unresolved generated-content failure stays visible after the next user mes
       next = true;
       return route.fulfill({ status: 202, json: { accepted: true } });
     }
-    return route.fulfill({ json: { entries: entries(), pending: [], stopping: false } });
+    return route.fulfill({
+      json: snapshotFixture({ entries: entries(), pending: [], stopping: false }),
+    });
   });
   await page.goto('/tests/browser/chat.html');
   await expect(page.getByRole('alert')).toContainText('内容暂时无法生成');
@@ -171,9 +198,11 @@ test('a no-result native fault replaces the inert generated-content preview with
 }) => {
   await page.route('**/api/conversations/**', (route) =>
     route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries: [
           {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 1,
             model: [
               {
@@ -193,7 +222,7 @@ test('a no-result native fault replaces the inert generated-content preview with
         toolProgress: { '1.ui': { status: 'failed' } },
         pending: [],
         stopping: false,
-      },
+      }),
     }),
   );
   await page.goto('/tests/browser/chat.html');
@@ -209,9 +238,11 @@ test('a later publication repairs errors only within its own response', async ({
         json: resource({ panelRef: '3.ui', ui, program: null, revision: 0 }),
       });
     return route.fulfill({
-      json: {
+      json: snapshotFixture({
         entries: [
           {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 1,
             model: [
               {
@@ -228,6 +259,8 @@ test('a later publication repairs errors only within its own response', async ({
             ],
           },
           {
+            conversationId: 1,
+            kind: 'pi.tool-result',
             id: 2,
             model: [
               {
@@ -240,6 +273,8 @@ test('a later publication repairs errors only within its own response', async ({
             ],
           },
           {
+            conversationId: 1,
+            kind: 'pi.assistant',
             id: 3,
             model: [
               {
@@ -251,6 +286,8 @@ test('a later publication repairs errors only within its own response', async ({
             ],
           },
           {
+            conversationId: 1,
+            kind: 'pi.tool-result',
             id: 4,
             model: [
               {
@@ -265,7 +302,7 @@ test('a later publication repairs errors only within its own response', async ({
         ],
         pending: [],
         stopping: false,
-      },
+      }),
     });
   });
   await page.goto('/tests/browser/chat.html');

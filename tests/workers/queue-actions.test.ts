@@ -1,6 +1,7 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
+import { env, runInDurableObject } from './env';
 import { it, expect } from 'vitest';
-import { BG } from '../../src/server/conversations/context';
+import { BG } from '../../src/server/chat/context';
 import type { SubmissionRecord } from '@earendil-works/pi-durable';
 import { InboxDoc } from '@earendil-works/pi-durable';
 const command = (text: string) => ({ runId: crypto.randomUUID(), text });
@@ -82,29 +83,30 @@ it('steer changes only the native lane, joins the running answer at a tool bound
     b = command('steered direction'),
     c = command('later follower');
   await stub.submitRun(first);
-  await expect.poll(async () => JSON.parse(await stub.snapshot()).tools.length).toBeGreaterThan(0);
+  await expect
+    .poll(async () => Object.keys(JSON.parse(await stub.snapshot()).toolProgress ?? {}).length)
+    .toBeGreaterThan(0);
   await stub.submitRun(c);
   await stub.submitRun(b);
   const id = (await receipt(stub, b.runId)).id;
-  const saved = await runInDurableObject(
-    stub,
-    (_, state) =>
-      state.storage.sql.exec('SELECT payload FROM app_requests WHERE id=?', b.runId).one().payload,
-  );
+  const frozen = () =>
+    runInDurableObject(stub, async (instance) => {
+      const root = await instance.root(),
+        pi = await instance.harness.pi();
+      return JSON.stringify(
+        (await pi.snapshot(InboxDoc, root.id, BG))?.items.find(
+          (item) => Number(item.id) === Number(id),
+        )?.entry?.data,
+      );
+    });
+  const saved = await frozen();
   const observation = await stub.observeRun(first.runId);
   const stream = observation.text();
   const result = await act(stub, b.runId, 'steer');
   expect(result.queue[0].runId).toBe(b.runId);
   expect(result.queue.find((item: any) => item.runId === b.runId)).toMatchObject({ mode: 'steer' });
   expect((await receipt(stub, b.runId)).id).toBe(id);
-  expect(
-    await runInDurableObject(
-      stub,
-      (_, state) =>
-        state.storage.sql.exec('SELECT payload FROM app_requests WHERE id=?', b.runId).one()
-          .payload,
-    ),
-  ).toBe(saved);
+  expect(await frozen()).toBe(saved);
   const inbox = JSON.parse(
     await runInDurableObject(
       stub as ReturnType<typeof env.CONVERSATIONS.getByName>,
@@ -193,18 +195,14 @@ it.each(['edit', 'remove'])(
     await stub.submitRun(follower);
     await runInDurableObject(stub, async (instance): Promise<void> => {
       const probe = instance as any;
-      const original = probe.submission.bind(instance);
       const pi = await probe.harness.pi();
-      const followerRecord = await original(follower.runId);
+      const followerRecord = await probe.submission(follower.runId);
       const handle = await pi.submission(followerRecord.id, BG);
-      probe.submission = async (id: string) => {
-        const stale = await original(id);
-        if (id === follower.runId) {
-          expect(stale.status).toBe('queued');
-          release();
-          await handle.wait(BG);
-        }
-        return stale;
+      const original = pi.abortSubmission.bind(pi);
+      pi.abortSubmission = async (...args: Parameters<typeof original>) => {
+        release();
+        await handle.wait(BG);
+        return original(...args);
       };
       try {
         expect(JSON.parse(await probe.actOnQueuedInput(follower.runId, action))).toMatchObject({
@@ -212,7 +210,7 @@ it.each(['edit', 'remove'])(
         });
         expect(['placed', 'done']).toContain((await handle.status(BG)).status);
       } finally {
-        delete probe.submission;
+        pi.abortSubmission = original;
       }
     });
     expect(await settled(stub, follower.runId)).toMatchObject({ status: 'done' });
@@ -230,7 +228,7 @@ it('reconciles a native withdrawal committed before the host flag without accept
     expect(
       await (await probe.harness.pi()).abortSubmission(native.id, BG, (await instance.root()).id),
     ).toBe('aborted');
-    // Deliberately leave accepted=1: simulate isolate loss between the two stores.
+    // Leave the compact admission receipt untouched: the native withdrawal remains authoritative.
   });
   await abortAllDurableObjects();
   stub = env.CONVERSATIONS.get(stub.id);

@@ -10,7 +10,7 @@ Start locally without signing in, add your API key in the UI, and deploy the sam
 
 [Quick start](#quick-start) · [Features](#features) · [Extensions](#extend-mkharness) · [Deployment](#deploy-to-cloudflare) · [FAQ](#faq) · [MIT License](LICENSE)
 
-[Try the hosted example](https://template.mkharness.com): sign in with Google and use `openrouter/free` without entering an API key. Free capacity is shared and limited, and generation quality can vary; exhaustion stops the request with a message, never switches to a paid model. Personal settings override the default.
+The native Pi replacement uses a separate fresh environment. Its public-domain cutover and real-provider acceptance are still pending; the earlier hosted example does not validate this runtime.
 
 ## Quick start
 
@@ -22,7 +22,6 @@ cd mkharness
 pnpm install --frozen-lockfile
 cp .dev.vars.example .dev.vars
 pnpm setup
-pnpm db:migrate
 pnpm dev
 ```
 
@@ -38,14 +37,14 @@ Try asking a question, requesting an interactive plan, or reading a public web p
 
 > Keys entered through the UI are sent to your deployment and encrypted on the server for background execution and recovery. Use your own deployment or one you trust. Saving a key does not test the connection; the first model request uses it.
 
-`pnpm setup` generates missing local authentication and encryption secrets. Keep `.dev.vars` across restarts; Git ignores it. Local data lives in Cloudflare's local SQLite storage. Use `localhost` consistently rather than switching between it and `127.0.0.1`. The interface supports English and Chinese; both README languages describe the same setup.
+`pnpm setup` generates missing local authentication and encryption secrets and applies `migrations/0001_initial.sql` to the new local D1 database. Keep `.dev.vars` across restarts; Git ignores it. Native Pi development data lives in `.wrangler/native-state`, separate from earlier local installations. Setup accepts an empty database or this exact baseline and refuses older schemas; it never imports accounts, chats, credentials, MCP connections or Skills. Run `node scripts/setup.mjs --check` to check local readiness without changing secrets or applying migrations. Use `localhost` consistently rather than switching between it and `127.0.0.1`. The interface supports English and Chinese.
 
 ## Features
 
 - **A working chat app.** Streaming responses, reasoning and tool activity, model and thinking-level selection, conversation history, and reply/tool timing. Built with assistant-ui, shadcn/ui, and Tailwind CSS.
 - **Image attachments.** Preview and remove PNG, JPEG, WebP, or GIF images using assistant-ui; send images with text or on their own to an image-capable model. Up to 4 images totaling 512 KiB per message, retained in Pi history for retries and recovery.
 - **A durable, editable queue.** Pending messages survive refresh. Edit withdraws an unstarted message and restores its text and images to the composer; Steer joins the current work at a native Pi boundary; Remove withdraws one pending message. Already-started tasks cannot be withdrawn through queue controls. Pi remains the only queue authority.
-- **Durable Agent execution.** Each conversation runs in its own Durable Object with PiHarness. Submissions queue, history persists, and execution can reconstruct after interruption. Closing the browser detaches observation; Stop is a separate action. Deletion returns `202` after durable acceptance and removal from the conversation directory; a native lifecycle alarm joins runtime shutdown and erases stored content, including after an interruption.
+- **Durable Agent execution.** Each chat runs in a `ChatSession` Durable Object with one native Pi Durable 1.3.0 Harness and the official SQLite adapter. Pi owns submissions, Inbox, history and task recovery. Closing the browser detaches observation; Stop is a separate action. Deletion returns `202` after a durable tombstone and cleanup alarm, hides the chat, and erases its content after runtime shutdown. D1 retains a minimal create/deletion receipt so delayed calls cannot recreate it.
 - **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, and message footers in the browser.
 - **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
 - **Remote integrations.** User-added remote MCP connections with native SDK OAuth, deployment-configured MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.
@@ -55,7 +54,7 @@ Use this foundation for research assistants, data workflows, or creative Agents 
 
 ## Extend MkHarness
 
-See [source architecture](ARCHITECTURE.md) for module ownership and the [engineering review](ENGINEERING_REVIEW.md) for the current cleanup and remaining architecture risks.
+See [source architecture](ARCHITECTURE.md) for current ownership and runtime contracts. The [historical engineering review](ENGINEERING_REVIEW.md) records the implementation before the native replacement and is not a current architecture or acceptance report.
 
 Extensions are trusted code that you review and ship with your application. Server capabilities and browser presentation have separate static registration points, so a tool can have a custom renderer without adding tool-specific branches to core chat logic.
 
@@ -64,7 +63,7 @@ Extensions are trusted code that you review and ship with your application. Serv
 | Agent tools, prompt sections, hooks                        | [`src/extensions/server.ts`](src/extensions/server.ts) — native Pi Extensions                                           |
 | Tool renderers, title decorations, reply/composer footers  | [`src/extensions/browser.ts`](src/extensions/browser.ts) — assistant-ui Toolkits and browser contributions              |
 | Generated UI, resources, input state, continuation actions | [`src/extensions/openui/`](src/extensions/openui/) — a complete optional extension                                      |
-| Static Skills                                              | [`src/server/skills/static.ts`](src/server/skills/static.ts)                                                            |
+| Native Skills data bridge                                  | [`src/server/skills/native.ts`](src/server/skills/native.ts)                                                            |
 | Deployment MCP tools                                       | [`src/server/mcp/deployment.ts`](src/server/mcp/deployment.ts) — `MCP_SERVERS` configuration                            |
 | An async service                                           | [`src/extensions/async-example/`](src/extensions/async-example/) — adapt to your service's submit/query/cancel contract |
 
@@ -90,7 +89,7 @@ See the [server contracts](src/server/extensions/contributions.ts), [browser con
 
 The async-service sample is assembled as the `async-example` contribution in the same server and browser registration lists. Set `ASYNC_SERVICE_URL` to install its native tools and tasks; the contribution can still display and guard previously saved outcomes when the service is unconfigured. Its directory owns the provider contract, retry/recheck authorization, native task recovery and progress cards. To omit the sample entirely, set `'async-example'.enabled` to `false`; basic chat, history, Stop and MCP remain independent.
 
-The host offers three execution boundaries (`beforeModel`, idle `beforeSubmit`, and `taskUnavailable`), declared native document projections (`stateDocuments` + `projectState`), and a browser `composerFooter` slot. Execution stays in Pi Durable. Native task/document names are retained for existing work; already accepted legacy action receipts are decoded only inside the sample. New retry/recheck requests use `extension_action` with `extensionId: "async-example"` and a validated `{ taskId }` payload. MCP retains its own guard and an opaque view of the legacy shared document, without importing sample code.
+The host offers two execution boundaries (`beforeModel` and idle `beforeSubmit`), declared native document projections (`stateDocuments` + `projectConversation`), per-entry `projectHistory` annotations, and a browser `composerFooter` slot. Execution stays in Pi Durable. Retry/recheck requests use `extension_action` with `extensionId: "async-example"` and a validated `{ taskId }` payload. The sample owns its provider-specific intent document and reconciliation policy. MCP owns separate connection receipts and does not read the sample's documents.
 
 Generic finite-JSON validation, size checks and canonical equality live in `src/shared/json.ts`, which has no compute-engine imports. QuickJS, its budgets, browser Worker, WASM bindings and build integration belong to `src/extensions/openui/`. A disabled OpenUI build excludes the extension's browser/server entries and their computation assets; core chat, MCP, requests and JSON utilities never import QuickJS. Dependencies remain listed in the template's package manifest for builds that enable OpenUI. Service endpoints, API keys and MCP connection definitions remain server bindings; they configure a connection rather than enable an extension. Disabling MCP prevents connections and tool registration, while persisted unknown-outcome protection remains in the host.
 
@@ -102,13 +101,13 @@ Newly discovered tools default to **Ask every time**. Each tool can be disabled 
 
 The configuration UI reuses `@assistant-ui/react-mcp` primitives with a server-backed presentation adapter. Approval cards reuse the assistant-ui registry component. Connections, OAuth credentials and tool execution remain on the server; the browser does not install the default MCP manager, persist connection credentials or register frontend tools. Approval decisions update the existing Pi task through the extension control endpoint.
 
-`mcp.enabled` controls all MCP integration; `mcp.custom` controls user-managed connections separately. Apply D1 migrations (`0007_mcp_connections.sql` is additive) and provision the `MCP_CONNECTIONS` SQLite Durable Object binding before enabling the feature on an existing deployment. `CREDENTIAL_ENCRYPTION_KEY` encrypts Bearer credentials, OAuth client secrets and tokens in each connection's DO. Keep that key stable; credentials never enter conversation bindings or public projections.
+`mcp.enabled` controls all MCP integration; `mcp.custom` controls user-managed connections separately. The fresh-install D1 baseline includes the connection catalog. `MCP_CONNECTIONS` binds the `McpConnection` SQLite Durable Object declared in Wrangler's `exports`. Create connections again in the new environment; OAuth grants and tokens are not imported. `CREDENTIAL_ENCRYPTION_KEY` encrypts Bearer credentials, OAuth client secrets and tokens in each connection's DO. Keep that key stable; credentials never enter conversation bindings or public projections.
 
 The module boundaries are:
 
-- `src/server/mcp/connections/`: user ownership/catalog, encrypted connection state, native SDK adapter, HTTP routes and endpoint policy.
+- `src/server/mcp/connections/`: user and deployment connection scopes, encrypted connection state, native SDK transport, durable dispatch receipts, HTTP routes and endpoint policy.
 - `src/extensions/mcp/`: native Pi tools/tasks/documents for confirmation and interruption recovery, plus browser presentation through the existing extension slot. Confirmation decisions use the generic extension control endpoint and never start a second model run.
-- `src/server/mcp/deployment.ts`: existing deployment-managed `MCP_SERVERS`; independent of user connection credentials.
+- `src/server/mcp/deployment.ts`: deployment-managed `MCP_SERVERS`, frozen tool definitions and native tools/tasks that call the independent connection DO.
 
 The first version supports public HTTPS Streamable HTTP endpoints, bounded JSON tool schemas, and text/structured-JSON results. Unsupported schemas are visible but cannot be enabled. It does not execute local stdio commands, fetch remote schema references, or implement MCP Apps, sampling, resources or prompts as user-facing capabilities. Private/reserved destinations and HTTP redirects are rejected for both MCP and OAuth requests, with DNS preflight, timeouts and response limits. DNS preflight is defense in depth; deployments needing strict DNS-rebinding protection must also enforce a network egress boundary.
 
@@ -118,16 +117,16 @@ Open **Settings → Skills → Import skill** and upload a Markdown `SKILL.md` o
 
 Enabled skills are selected by default for a new chat; manage them in Settings → Skills. The server pins immutable content versions when creating the chat. Uploading a new version, disabling or removing a library entry affects future chats; older chats retain their bound versions and previously loaded instructions. Removal is a library operation, not erasure of historical versions. At most 32 library entries and 8 selected skills are accepted; uploads are limited to 1 MiB compressed, 2 MiB expanded, 128 KiB per file, and 64 files per package.
 
-The runtime reuses `skills(sources)` from `agents/harness/pi`, with `SkillSource` adapters for pinned, owner-checked objects. The native `activate_skill` and `read_skill_resource` tools commit instructions/resources into ordinary Pi history. The directory enters the prompt first; instructions enter the model context on activation. The SDK currently reads instruction bodies during initialization, so only selected versions are installed and reference files are fetched on demand. Skill activity and versions are shown in tool records; the composer has no persistent skill or connection summary. Skills share existing MCP permissions and confirmation controls. No CLI host, second execution loop, automatic script runner or OpenUI/QuickJS coupling is added.
+The host's `nativeSkills` bridge in `src/server/skills/native.ts` registers native Pi `activate_skill` and `read_skill_resource` tools with the 1.3.0 `output` result contract. Frozen directory metadata enters the prompt first; activation lazily loads instructions, and resource reads fetch the selected private R2 object on demand. Tool results enter ordinary Pi history. Source adapters check ownership, immutable versions, paths, sizes and content hashes. Skill activity and versions are shown in tool records; manage Skills in Settings. Skills grant no tool permissions and execute no scripts.
 
-`skills.enabled` in `extensions.config.ts` controls the feature. Apply `0008_skills.sql` and configure a **private** R2 bucket as `SKILL_FILES` before enabling it on an existing deployment. D1 stores ownership, revisions, version metadata and conversation bindings; R2 stores immutable files, checked against their content hashes on reads. Provision the bucket name configured for the intended Wrangler environment, for example `pnpm exec wrangler r2 bucket create mkharness-template-skills` for the sample production configuration. This is an additional resource, separate from the D1 migration. The legacy `skills-example` remains optional; if enabled together, both source kinds share one native Skills extension.
+`skills.enabled` in `extensions.config.ts` controls the feature. The fresh-install D1 baseline includes Skills metadata; configure a **private** R2 bucket as `SKILL_FILES`. D1 stores ownership, revisions, version metadata and conversation bindings; R2 stores immutable files, checked against their content hashes on reads. Provision the bucket configured for the intended Wrangler environment, for example `pnpm exec wrangler r2 bucket create mkharness-native-skills` for production. Keep public bucket access disabled. This is an additional resource, separate from the D1 baseline. Import or publish Skills again through the product in the new environment. The `skills-example` remains optional; if enabled together, both source kinds share one native Skills extension.
 
 - `src/server/skills/`: bounded import validation, D1/R2 catalog, versioned sources and authenticated management routes. Frontmatter uses the YAML library also used by the SDK; importing the SDK's broad parser entry would require its optional script-runtime dependencies.
 - `src/extensions/skills/`: native Pi integration, result projection and browser selection/presentation. User packages remain data, not executable extension modules.
 
 ## Deploy to Cloudflare
 
-The application runs on **Workers + D1 + SQLite-backed Durable Objects**. First deployment requires the following resource and secret setup.
+The application runs on **Workers + D1 + SQLite-backed Durable Objects + private R2**. The native Pi runtime requires a new empty environment: a new Worker, D1 database, `ChatSession` and `McpConnection` namespaces, and private Skills bucket. Accounts, chats, model keys, MCP grants and Skills must be configured again. The baseline is not an upgrade for an existing deployment.
 
 ### 1. Create resources
 
@@ -135,59 +134,78 @@ After installing dependencies:
 
 ```sh
 pnpm exec wrangler login
-pnpm exec wrangler d1 create mkharness
+pnpm exec wrangler d1 create mkharness-native
+pnpm exec wrangler r2 bucket create mkharness-native-skills
 ```
 
-Edit the **top-level configuration** in [`wrangler.jsonc`](wrangler.jsonc):
+Edit **`env.production`** in [`wrangler.jsonc`](wrangler.jsonc) before building:
 
-| Setting                                         | Value                                                                           |
-| ----------------------------------------------- | ------------------------------------------------------------------------------- |
-| `name`                                          | `mkharness`, or your own Worker name                                            |
-| `d1_databases[0].database_name` / `database_id` | The name and ID returned by `d1 create`; replace the all-zero local placeholder |
-| `vars.APP_URL`                                  | Your exact public origin, e.g. `https://mkharness.<your-subdomain>.workers.dev` |
-| `vars.AUTH_MODE`                                | `guest` for access without a sign-in screen                                     |
-| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0` for personal API keys only                                                  |
+| Setting                                         | Value                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `name`                                          | `mkharness-native`, or another unused Worker name                        |
+| `d1_databases[0].database_name` / `database_id` | Name and ID returned by the new `d1 create`                              |
+| `r2_buckets[0].bucket_name`                     | The new private bucket name                                              |
+| `vars.APP_URL`                                  | The new deployment's exact origin; replace the `example.com` placeholder |
+| `vars.AUTH_MODE`                                | `account` with Google OAuth, or `guest` without a sign-in screen         |
+| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0` for personal API keys only                                           |
 
-Keep the `DB` and `CONVERSATIONS` bindings, `ConversationAgent` class, and migration definitions. The repository's `env.test` contains development reference resources; substitute your own if using that environment.
+Keep `DB`, `SKILL_FILES`, `CONVERSATIONS` → `ChatSession`, and `MCP_CONNECTIONS` → `McpConnection`. Wrangler's declarative `exports` declares both DO classes with SQLite storage. Do not add historical DO migration tags or transfer old namespaces. Database IDs are intentionally omitted in the repository; Wrangler supports automatic D1 provisioning on deployment, but the explicit creation above lets you apply the baseline before first deployment. Never reuse an old database ID.
+
+| Configuration               | Worker                  | D1                       | Private R2                      |
+| --------------------------- | ----------------------- | ------------------------ | ------------------------------- |
+| Top-level local development | `mkharness-native`      | `mkharness-native-local` | `mkharness-native-skills-local` |
+| `production`                | `mkharness-native`      | `mkharness-native`       | `mkharness-native-skills`       |
+| `test`                      | `mkharness-native-test` | `mkharness-native-test`  | `mkharness-native-test-skills`  |
+
+Use `test` for independent remote acceptance with its own new resources and exact `APP_URL`. The configuration does not claim the earlier public domain. Do not expose either R2 bucket publicly.
 
 ### 2. Set secrets and deploy
 
 Build after editing configuration so Wrangler uses the intended generated deployment configuration:
 
 ```sh
-pnpm build
-pnpm exec wrangler secret put BETTER_AUTH_SECRET
-pnpm exec wrangler secret put CREDENTIAL_ENCRYPTION_KEY
-pnpm exec wrangler d1 migrations apply DB --remote
-pnpm deploy
+pnpm build:production
+pnpm exec wrangler deploy --dry-run --env production
+pnpm exec wrangler secret put BETTER_AUTH_SECRET --env production
+pnpm exec wrangler secret put CREDENTIAL_ENCRYPTION_KEY --env production
+pnpm exec wrangler d1 migrations apply DB --remote --env production
+pnpm deploy:production
 ```
 
 Run `openssl rand -base64 32` twice to generate **two independent secrets** and enter them at the corresponding prompts. The encryption key must encode exactly 32 random bytes. If Wrangler asks to create the Worker when setting its first secret, allow creation.
 
-Keep these secrets across deployments. Changing the encryption key prevents existing credentials from being decrypted. For existing installations, also preserve the Worker name, database ID, and Durable Object identity. [Environment selection happens at build time](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/); rebuild after changing configuration or environments.
+For the default `AUTH_MODE=account`, also configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in this environment before deployment, and register `https://YOUR_DOMAIN/api/auth/callback/google` with the exact origin in `APP_URL`. Keep the newly generated secrets across subsequent deployments. Changing the encryption key prevents credentials in this new environment from being decrypted. [Environment selection happens at build time](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/); rebuild after changing configuration or environments.
+
+Verify the new environment through its independent URL before switching a public domain. Check real login, model execution, MCP, Skills, OpenUI, recovery and offline alarm progress. Then stop new admissions to the old deployment and drain or explicitly stop its tasks before switching the domain; changing a route does not cancel old alarms. Retain old resources until the new environment is accepted. A dry run validates the bundle/configuration and does not provision or verify remote resources.
 
 ### 3. Open your app
 
 Visit the deployed URL and configure your personal API key through the sidebar menu. Guest mode needs no Google credentials and no deployment model key.
 
-For Google sign-in, set `AUTH_MODE=account`, add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as secrets, and register `https://YOUR_DOMAIN/api/auth/callback/google` with the same origin as `APP_URL`.
+For Google sign-in, use the Google credentials configured for the new deployment. Reconnect MCP services and import Skills again after signing in.
 
-Cloudflare and model usage are billed separately. Check your account's [Durable Object limits](https://developers.cloudflare.com/durable-objects/platform/limits/). Resource provisioning is manual; the template does not provide an automated one-click deployment or spending caps.
+Cloudflare and model usage are billed separately. Check your account's [Durable Object limits](https://developers.cloudflare.com/durable-objects/platform/limits/). The template does not provide spending caps.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   UI[Browser: TanStack + assistant-ui] -->|HTTP submit / SSE observe| API[Workers: Hono + Better Auth]
-  API --> DB[(D1: identity, directory, encrypted keys)]
-  API --> DO[Conversation Durable Object: PiHarness]
-  DO --> History[(DO SQLite: execution history)]
-  DO --> Tools[Pi Extensions / Skills / MCP / remote services]
+  API --> DB[(D1: identity, create receipts, frozen bindings, encrypted keys)]
+  API --> DO[ChatSession DO: native Pi Harness 1.3.0]
+  DO --> History[(Official SQLite adapter: native history, Inbox and host documents)]
+  DO --> MCP[McpConnection DO: transport, OAuth and dispatch receipts]
+  DO --> Skills[(Private R2: immutable Skill files)]
+  DO --> Tools[Trusted native Pi Extensions]
 ```
 
 **Pi owns execution history and results; Query owns read caches; assistant-ui owns chat presentation.** Submit, observe, and Stop are separate operations. Remote side effects require provider idempotency or reconciliation; durable execution alone does not guarantee exactly-once delivery.
 
-To provide the same free default on your own deployment, set `MODEL_PROVIDER=openrouter`, `MODEL_ID=openrouter/free`, `MODEL_THINKING_LEVEL=off`, and `ALLOW_SERVER_MODEL_KEY=1`, then store an OpenRouter key as the `MODEL_API_KEY` Worker secret. The deployment key only authorizes models explicitly configured through `MODEL_ID` / `MODEL_IDS`; personal keys can select other registered models. No paid fallback is configured. Each Agent turn or compaction consumes another provider request, so a chat can use several free requests. [OpenRouter free routing](https://openrouter.ai/docs/guides/routing/routers/free-router).
+One ChatId identifies one DO and Pi Session; native numeric conversation IDs identify its main conversation, forks and task-owned children. The Worker constructs the owner/generation actor from D1, and the DO rechecks it before initialization. Creation uses a stable requestId and a canonical request hash, atomically freezing user MCP, deployment MCP and Skill bindings. Model configuration and prepared admission receipts share a Pi commit; native submission recovery looks up the same requestId before submitting again.
+
+Snapshots always contain a bounded history page, queue and actual native conversation ID. Opaque older-page cursors bind the chat, native conversation and fixed upper entry boundary. The browser rejects unknown envelopes and keeps loaded pages while observing the current run. Historical annotations merge by native entry ID and revision. See [ARCHITECTURE.md](ARCHITECTURE.md) for the source boundaries and storage contract.
+
+To configure an optional OpenRouter free default on your own deployment, set `MODEL_PROVIDER=openrouter`, `MODEL_ID=openrouter/free`, `MODEL_THINKING_LEVEL=off`, and `ALLOW_SERVER_MODEL_KEY=1`, then store an OpenRouter key as the `MODEL_API_KEY` Worker secret. The deployment key only authorizes models explicitly configured through `MODEL_ID` / `MODEL_IDS`; personal keys can select other registered models. No paid fallback is configured. Each Agent turn or compaction consumes another provider request, so a chat can use several free requests. [OpenRouter free routing](https://openrouter.ai/docs/guides/routing/routers/free-router).
 
 ## FAQ
 
@@ -218,14 +236,14 @@ Retired credential versions are retained for up to seven days. Removing a provid
 <details>
 <summary><strong>What is outside the template's scope?</strong></summary>
 
-Attachments, R2 assets, cloud computers/sandboxes, payments, and subscriptions are not bundled. Image/video generation requires a service extension. Interfaces may change as the template develops.
+General file attachments, public asset hosting, cloud computers/sandboxes, payments and subscriptions are not bundled. Image attachments and private R2 Skill storage are included. Image/video generation requires a service extension. Interfaces may change as the template develops.
 
 </details>
 
 <details>
 <summary><strong>Does MkHarness patch its dependencies?</strong></summary>
 
-Pi Durable uses native step configuration without a patch. Two independent fixes remain in `agents`: the Skills result bridge and failed-Session cache cleanup. Their rationale and removal criteria are documented in [patch notes](patches/README.md).
+The application pins `@earendil-works/pi-durable` and `@earendil-works/pi-ai` to 1.3.0 and uses published packages without dependency patches. Native execution and Skills use Pi's public interfaces directly. The Agents SDK remains for MCP/OAuth transport and Skill source data types.
 
 </details>
 
@@ -238,7 +256,7 @@ pnpm test:e2e
 pnpm test:hmr
 ```
 
-E2E uses the Cloudflare Vite production preview from isolated `.wrangler/e2e-build` output. Component fixtures are bundled separately and excluded from normal deployment artifacts; HMR tests exercise the development server separately.
+E2E uses the Cloudflare Vite production preview from isolated `.wrangler/native-e2e-build` output and `.wrangler/native-e2e-state` storage. Component fixtures are bundled separately and excluded from normal deployment artifacts; HMR tests exercise the development server separately.
 
 Tests use controlled model I/O. Verify a real provider request, refresh/reconnect, Stop, and recovery across redeployments in your own environment; these tests do not establish real-cloud acceptance.
 

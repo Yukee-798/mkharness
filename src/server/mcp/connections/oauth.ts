@@ -6,7 +6,7 @@ export class ConnectionOAuth extends DurableObjectOAuthClientProvider {
   constructor(
     storage: DurableObjectStorage,
     private secrets: SecretStore,
-    private connectionId: string,
+    connectionId: string,
     callback: string,
     private appUrl: string,
   ) {

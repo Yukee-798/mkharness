@@ -1,7 +1,7 @@
 import handler from '@tanstack/react-start/server-entry';
 import api from './server/index';
 
-export { ConversationAgent } from './server/conversations/agent';
+export { ChatSession } from './server/chat/session-object';
 export { McpConnection } from './server/mcp/connections/connection';
 
 export default {

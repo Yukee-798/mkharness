@@ -4,7 +4,7 @@ export default defineConfig({
   use: { baseURL: 'http://localhost:5174' },
   webServer: {
     command:
-      'pnpm exec wrangler d1 migrations apply DB --config tests/e2e/worker.jsonc --local --persist-to .wrangler/e2e && pnpm build && pnpm exec vite build --config tests/browser/vite.config.ts && pnpm exec vite preview --host 127.0.0.1 --port 5174 --strictPort',
+      'pnpm exec wrangler d1 migrations apply DB --config tests/e2e/worker.jsonc --local --persist-to .wrangler/native-e2e-state && pnpm build && pnpm exec vite build --config tests/browser/vite.config.ts && pnpm exec vite preview --host 127.0.0.1 --port 5174 --strictPort',
     env: {
       BETTER_AUTH_SECRET: 'local-test-only-secret-at-least-32-chars',
       GOOGLE_CLIENT_ID: 'fixture',

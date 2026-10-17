@@ -1,361 +1,161 @@
 import { expect, it, vi } from 'vitest';
-import { MCPClientManager } from 'agents/mcp/client';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
-import { buildMcp, configureMcpStartup, mcpConfiguration } from '../../src/server/mcp/deployment';
-const configs = [
-  {
-    serverId: 'reference',
-    endpoint: 'https://mcp.example.test/mcp',
-    allowlist: ['lookup'],
-    safeTools: ['lookup'],
-  },
-];
+import {
+  buildMcp,
+  freezeDeploymentBindings,
+  mcpConfiguration,
+  type MCPBinding,
+} from '../../src/server/mcp/deployment';
+import { connectionKey, operationId, deploymentRevision } from '../../src/server/mcp/configuration';
+import { userMcpContribution } from '../../src/extensions/mcp/server';
+import { convertResult, schemaAccepted } from '../../src/server/mcp/connections/protocol';
+const config = {
+  serverId: 'reference',
+  endpoint: 'https://mcp.example.test/mcp',
+  allowlist: ['lookup'],
+  safeTools: [],
+};
 const schema = {
   type: 'object',
   properties: { query: { type: 'string', minLength: 1 } },
   required: ['query'],
   additionalProperties: false,
 };
-function manager(
-  inputSchema: unknown = schema,
-  result: unknown = { content: [{ type: 'text', text: 'found' }], structuredContent: { value: 2 } },
-) {
-  const connection = { connectionState: 'connecting' };
-  return {
-    mcpConnections: { reference: connection },
-    registerServer: async () => 'reference',
-    connectToServer: async () => {
-      connection.connectionState = 'connected';
-      return { state: 'connected' };
-    },
-    discoverIfConnected: async () => {
-      connection.connectionState = 'ready';
-      return { success: true };
-    },
-    listTools: () => [
-      { serverId: 'reference', name: 'lookup', description: 'Lookup', inputSchema },
-    ],
-    callTool: async () => result,
-  } as any;
-}
-it('registers the real schema and converts JSON results and isError', async () => {
-  const unsafe = await buildMcp(
-    manager(),
-    configs.map(({ safeTools: _safe, ...config }) => config),
-    {},
+const binding: MCPBinding = {
+  serverId: 'reference',
+  endpoint: config.endpoint,
+  configurationRevision: 'revision',
+  hash: 'hash',
+  remoteName: 'lookup',
+  name: 'mcp_reference_lookup',
+  schema,
+  description: 'Lookup',
+  replay: 'unsafe',
+};
+
+it('constructs an immutable native extension from frozen metadata without network or secrets', () => {
+  const getByName = vi.fn();
+  const source = structuredClone(binding);
+  const built = buildMcp(
+    { MCP_CONNECTIONS: { getByName } } as unknown as Env,
+    { ownerId: 'owner', chatId: 'chat' },
+    [config],
+    [source],
   );
-  expect(unsafe.extension.tools![0].replay).toBe('unsafe');
-  const built = await buildMcp(manager(), configs, {}, undefined);
-  const tool = built.extension.tools![0];
-  expect(tool.replay).toBe('safe');
+  source.schema.required = [];
+  expect(getByName).not.toHaveBeenCalled();
+  expect(built.bindings[0].schema).toEqual(schema);
+  expect(built.extension.tools![0].replay).toBe('safe'); // Replays a durable child receipt.
   expect(() =>
-    validateToolArguments(tool, {
+    validateToolArguments(built.extension.tools![0], {
       type: 'toolCall',
       id: 'c',
-      name: tool.name,
+      name: binding.name,
       arguments: { query: '' },
     }),
   ).toThrow();
-  const result = await tool.execute(
-    { query: 'hi' },
-    { signal: new AbortController().signal } as any,
-    {} as any,
+});
+it('discovers deployment metadata through the owner-scoped independent connection', async () => {
+  const metadata = vi.fn(async () =>
+    JSON.stringify({
+      id: 'reference',
+      configurationRevision: 'r1',
+      tools: [{ name: 'lookup', schema, hash: 'h1', description: 'Lookup', supported: true }],
+    }),
   );
-  expect(JSON.stringify(result)).toContain('value');
-  const failed = await buildMcp(
-    manager(schema, { content: [], isError: true }),
-    configs,
-    {},
-    undefined,
+  const getByName = vi.fn(() => ({ deploymentMetadata: metadata }));
+  const bindings = await freezeDeploymentBindings(
+    { MCP_CONNECTIONS: { getByName } } as unknown as Env,
+    'owner',
+    [config],
+  );
+  expect(getByName).toHaveBeenCalledWith('deployment:owner:reference');
+  expect(metadata).toHaveBeenCalledWith('owner', 'reference');
+  expect(bindings).toMatchObject([{ configurationRevision: 'r1', hash: 'h1', replay: 'unsafe' }]);
+});
+it('keeps connection identity stable across configuration revisions and invocation identity distinct across chats and branches', () => {
+  expect(connectionKey({ kind: 'user', ownerId: 'owner', connectionId: 'connection' })).toBe(
+    'user:owner:connection',
+  );
+  const scope = { kind: 'deployment' as const, ownerId: 'owner', serverId: 'reference' };
+  expect(connectionKey({ ...scope, configurationRevision: 'one' })).toBe(
+    connectionKey({ ...scope, configurationRevision: 'two' }),
   );
   expect(
-    await failed.extension.tools![0].execute(
-      { query: 'hi' },
-      { signal: new AbortController().signal } as any,
-      {} as any,
-    ),
-  ).toMatchObject({ isError: true });
+    new Set([operationId('chat', 1, 5), operationId('chat', 2, 5), operationId('other-chat', 1, 5)])
+      .size,
+  ).toBe(3);
 });
-
-it('rechecks a recovered connection against the pinned definition instead of latching an outage', async () => {
-  const initial = await buildMcp(manager(), configs, {});
-  const live = manager();
-  const connect = live.connectToServer;
-  let offline = true;
-  live.connectToServer = async () => {
-    if (offline) throw new Error('offline');
-    return connect();
-  };
-  const built = await buildMcp(live, configs, {}, initial.bindings);
-  expect(
-    JSON.stringify(await built.extension.tools![0].execute({}, {} as any, {} as any)),
-  ).toContain('mcp_connection_failed');
-  offline = false;
-  const result = await built.extension.tools![0].execute({ query: 'hi' }, {} as any, {} as any);
-  expect(result.isError).toBe(false);
-  expect(JSON.stringify(result)).toContain('found');
-  expect(built.diagnostics).toEqual([]);
-  expect(built.bindings).toEqual(initial.bindings);
-});
-
-it('uses current deployment transports before native SDK restore and removes disabled servers', async () => {
-  type Row = ReturnType<MCPClientManager['listServers']>[number];
-  const rows = new Map<string, Row>();
-  const makeManager = () => {
-    const native = new MCPClientManager('fixture', '1');
-    const storage = native as unknown as {
-      getServersFromStorage(): Row[];
-      getStoredServerOptions(id: string): unknown;
-      saveServerToStorage(row: Row): void;
-      removeServerFromStorage(id: string): void;
-    };
-    // Store the SDK's own encoded rows, rather than reimplementing its transport codec.
-    vi.spyOn(storage, 'getServersFromStorage').mockImplementation(() => [...rows.values()]);
-    vi.spyOn(storage, 'getStoredServerOptions').mockImplementation((id) => {
-      const text = rows.get(id)?.server_options;
-      return text ? JSON.parse(text) : undefined;
-    });
-    vi.spyOn(storage, 'saveServerToStorage').mockImplementation((row) => {
-      rows.set(row.id, row as Row);
-    });
-    vi.spyOn(storage, 'removeServerFromStorage').mockImplementation((id) => {
-      rows.delete(id);
-    });
-    return native;
-  };
-  const original = makeManager();
-  for (const id of ['reference', 'removed'])
-    await original.registerServer(id, {
-      url: 'https://mcp.example.test/mcp',
-      name: id,
-      transport: {
-        type: 'streamable-http',
-        requestInit: { headers: { Authorization: 'Bearer fixture-old' } },
-        fetch: async () => new Response(),
-      },
-    });
-  expect(JSON.parse(rows.get('reference')!.server_options!).transport.fetch).toBeUndefined();
-  const restored = makeManager();
-  const connected = vi.spyOn(restored, 'connectToServer');
-  configureMcpStartup(restored, () => [{ ...configs[0], credential: 'FIXTURE_TOKEN' }], {
-    FIXTURE_TOKEN: 'fixture-current',
+it('validates deployment policy locally and resolves credential presence only when a connection is used', async () => {
+  for (const endpoint of [
+    'http://localhost/mcp',
+    'https://127.0.0.1/mcp',
+    'https://private.internal/mcp',
+    'https://mcp.example.test/mcp?token=secret',
+  ])
+    expect(() =>
+      mcpConfiguration({ MCP_SERVERS: JSON.stringify([{ ...config, endpoint }]) }),
+    ).toThrow();
+  const [parsed] = mcpConfiguration({
+    MCP_SERVERS: JSON.stringify([{ ...config, credential: 'MISSING_SECRET' }]),
   });
-  await restored.restoreConnectionsFromStorage('fixture');
-  expect(connected).not.toHaveBeenCalled();
-  expect(rows.has('removed')).toBe(false);
-  expect(restored.mcpConnections.removed).toBeUndefined();
-  const transport = restored.mcpConnections.reference.options.transport as {
-    requestInit?: RequestInit;
-    fetch?: typeof fetch;
-  };
-  expect(transport.requestInit?.headers).toBeUndefined();
-  expect(rows.get('reference')!.server_options).not.toContain('fixture-current');
-  expect(transport.fetch).toBeTypeOf('function');
-  const network = vi
-    .spyOn(globalThis, 'fetch')
-    .mockImplementation(async () => new Response(new Uint8Array(2 * 1024 * 1024 + 1)));
-  try {
-    const response = await transport.fetch!('https://mcp.example.test/mcp', transport.requestInit);
-    await expect(response.text()).rejects.toThrow('mcp_result_too_large');
-    expect(network).toHaveBeenCalledWith(
-      'https://mcp.example.test/mcp',
-      expect.objectContaining({
-        redirect: 'manual',
-        headers: expect.any(Headers),
-        signal: expect.any(AbortSignal),
-      }),
-    );
-    const sent = new Headers(network.mock.calls[0][1]?.headers);
-    expect(sent.get('Authorization')).toBe('Bearer fixture-current');
-    const controller = new AbortController();
-    const request = new Request('https://mcp.example.test/mcp', {
-      headers: { 'Content-Type': 'application/json', 'Mcp-Session-Id': 'fixture-session' },
-      method: 'POST',
-      body: '{}',
-      signal: controller.signal,
-    });
-    await transport.fetch!(request);
-    const requestHeaders = new Headers(network.mock.calls[1][1]?.headers);
-    expect(requestHeaders.get('Authorization')).toBe('Bearer fixture-current');
-    expect(requestHeaders.get('Content-Type')).toBe('application/json');
-    expect(requestHeaders.get('Mcp-Session-Id')).toBe('fixture-session');
-    controller.abort();
-    expect(network.mock.calls[1][1]?.signal?.aborted).toBe(true);
-  } finally {
-    network.mockRestore();
-  }
+  await expect(deploymentRevision(parsed, {})).rejects.toThrow('mcp_credential_missing');
+  const current = await deploymentRevision(parsed, { MISSING_SECRET: 'first' });
+  expect(await deploymentRevision(parsed, { MISSING_SECRET: 'rotated' })).not.toBe(current);
 });
-it('pins definitions and refuses silent schema replacement, redirection and unsupported blocks', async () => {
-  const initial = await buildMcp(manager(), configs, {}, undefined);
-  const changed = await buildMcp(
-    manager({ ...schema, required: [] }),
-    configs,
-    {},
-    initial.bindings,
-  );
-  const result = await changed.extension.tools![0].execute(
-    { query: 'hi' },
-    { signal: new AbortController().signal } as any,
-    {} as any,
-  );
-  expect(JSON.stringify(result)).toContain('mcp_definition_changed');
-  expect(changed.bindings).toEqual(initial.bindings);
-  const redirected = await buildMcp(
-    manager(),
-    [{ ...configs[0], endpoint: 'https://other.example.test/mcp' }],
-    {},
-    initial.bindings,
-  );
-  expect(redirected.diagnostics).toContainEqual(
-    expect.objectContaining({ code: 'mcp_definition_changed' }),
-  );
-  const unsupported = await buildMcp(
-    manager(schema, { content: [{ type: 'resource_link', uri: 'https://private.invalid' }] }),
-    configs,
-    {},
-    undefined,
-  );
-  expect(
-    JSON.stringify(
-      await unsupported.extension.tools![0].execute(
-        { query: 'hi' },
-        { signal: new AbortController().signal } as any,
-        {} as any,
-      ),
-    ),
-  ).toContain('mcp_unsupported_content');
-});
-it('validates endpoint, names and credentials before admission', () => {
-  expect(() =>
-    mcpConfiguration({
-      MCP_SERVERS: '[{"serverId":"bad","endpoint":"http://localhost","allowlist":[]}]',
-    }),
-  ).toThrow();
-  expect(() =>
-    mcpConfiguration({
-      MCP_SERVERS: JSON.stringify([{ ...configs[0], credential: 'MISSING_SECRET' }]),
-    }),
-  ).toThrow('mcp_credential_missing');
-});
-
-it('keeps pinned tools unavailable on disconnect and rejects oversized output', async () => {
-  const initial = await buildMcp(manager(), configs, {}, undefined);
-  const offline = await buildMcp(
-    {
-      ...manager(),
-      connectToServer: async () => {
-        throw new Error('offline');
-      },
-    },
-    configs,
-    {},
-    initial.bindings,
-  );
-  expect(offline.extension.tools).toHaveLength(1);
-  expect(
-    JSON.stringify(await offline.extension.tools![0].execute({}, {} as any, {} as any)),
-  ).toContain('mcp_connection_failed');
-  const large = await buildMcp(
-    manager(schema, { content: [{ type: 'text', text: 'x'.repeat(1048577) }] }),
-    configs,
-    {},
-    undefined,
-  );
-  expect(
-    JSON.stringify(await large.extension.tools![0].execute({}, {} as any, {} as any)),
-  ).toContain('mcp_result_too_large');
-  const unsupported = await buildMcp(
-    manager({ type: 'object', properties: { ref: { $ref: '#/bad' } } }),
-    configs,
-    {},
-    undefined,
-  );
-  expect(unsupported.extension.tools).toHaveLength(0);
-  expect(unsupported.diagnostics[0].code).toBe('mcp_schema_unsupported');
-});
-it('disables malformed schemas and overlong mapped names instead of weakening the tool', async () => {
-  for (const inputSchema of [
-    { ...schema, required: 'query' },
-    { ...schema, additionalProperties: 'yes' },
-    { ...schema, properties: { query: { type: 'string', minLength: '1' } } },
-  ]) {
-    const built = await buildMcp(manager(inputSchema), configs, {});
-    expect(built.extension.tools).toHaveLength(0);
-    expect(built.diagnostics[0].code).toBe('mcp_schema_unsupported');
-  }
-  const built = await buildMcp(manager(), [{ ...configs[0], serverId: 'a'.repeat(32) }], {});
-  // Long remote names must not be truncated into an ambiguous mapping.
-  const longManager = {
-    ...manager(),
-    listTools: () => [{ name: 't'.repeat(64), inputSchema: schema }],
-  };
-  const long = await buildMcp(
-    longManager as any,
-    [{ ...configs[0], serverId: 'a'.repeat(32), allowlist: ['t'.repeat(64)] }],
-    {},
-  );
-  expect(built.extension.tools![0].name.length).toBeLessThanOrEqual(64);
-  expect(long.extension.tools).toHaveLength(0);
-  expect(long.diagnostics[0].code).toBe('mcp_name_invalid');
-});
-
-it('refuses live catalog changes before calling and keeps an independent accepted definition', async () => {
-  for (const change of ['schema', 'description', 'removed', 'in-place'] as const) {
-    let tools = [{ name: 'lookup', description: 'Lookup', inputSchema: structuredClone(schema) }];
-    let calls = 0;
-    const live = {
-      ...manager(),
-      listTools: () => tools,
-      callTool: async () => {
-        calls++;
-        return { content: [{ type: 'text', text: 'must not call changed definition' }] };
-      },
-    };
-    const built = await buildMcp(live as any, configs, {});
-    if (change === 'schema') tools = [{ ...tools[0], inputSchema: { ...schema, required: [] } }];
-    if (change === 'description') tools = [{ ...tools[0], description: 'Changed meaning' }];
-    if (change === 'removed') tools = [];
-    if (change === 'in-place') tools[0].inputSchema.required.length = 0;
-    expect(built.bindings[0].schema, change).toEqual(schema);
-    for (let i = 0; i < 2; i++) {
-      const result = await built.extension.tools![0].execute({ query: 'hi' }, {} as any, {} as any);
-      expect(JSON.stringify(result), change).toContain('mcp_definition_changed');
-    }
-    expect(calls, change).toBe(0);
-    expect(built.diagnostics).toEqual([
-      { serverId: 'reference', toolName: 'lookup', code: 'mcp_definition_changed' },
-    ]);
-  }
-});
-
-it('accepts native Notion empty and unrestricted property schemas while retaining argument validation', async () => {
-  const notionSchema = {
-    $schema: 'https://json-schema.org/draft/2020-12/schema',
-    type: 'object',
+it('retains accepted schema validation including unrestricted native Notion properties', () => {
+  const notion = {
+    ...schema,
+    additionalProperties: {},
     properties: {
       query: { type: 'string', minLength: 1 },
       filters: { type: 'object', additionalProperties: {} },
     },
-    required: ['query'],
-    additionalProperties: {},
   };
-  const built = await buildMcp(manager(notionSchema), configs, {});
-  const tool = built.extension.tools![0];
-  expect(tool).toBeDefined();
-  expect(() =>
-    validateToolArguments(tool, {
-      type: 'toolCall',
-      id: 'notion',
-      name: tool.name,
-      arguments: { query: 'docs', filters: { custom: true } },
+  expect(schemaAccepted(notion)).toBe(true);
+  for (const invalid of [
+    { ...schema, required: 'query' },
+    { ...schema, additionalProperties: 'yes' },
+    { ...schema, properties: { query: { $ref: '#/bad' } } },
+  ])
+    expect(schemaAccepted(invalid)).toBe(false);
+});
+it('bounds converted responses and rejects unsupported external content', () => {
+  expect(
+    convertResult({
+      content: [{ type: 'text', text: 'found' }],
+      structuredContent: { value: 2 },
+      isError: true,
     }),
-  ).not.toThrow();
+  ).toMatchObject({
+    isError: true,
+    output: [
+      { type: 'text', text: 'found' },
+      { type: 'text', text: '{"value":2}' },
+    ],
+  });
   expect(() =>
-    validateToolArguments(tool, {
-      type: 'toolCall',
-      id: 'notion',
-      name: tool.name,
-      arguments: { query: '' },
-    }),
-  ).toThrow();
+    convertResult({ content: [{ type: 'resource_link', uri: 'https://example.test/result' }] }),
+  ).toThrow('mcp_unsupported_content');
+  expect(() => convertResult({ content: [{ type: 'text', text: 'x'.repeat(1_048_577) }] })).toThrow(
+    'JSON size limit exceeded',
+  );
+});
+
+it('customMcp=false closes only the user contribution and leaves deployment tools available', async () => {
+  const host = {
+    identity: 'chat',
+    conversationId: 'chat',
+    ownerId: 'owner',
+    nativeConversationId: 1,
+    mcpBindings: [],
+    pi: vi.fn(),
+    command: async () => undefined,
+  };
+  expect(
+    await userMcpContribution({} as Env, host, { mcp: { enabled: true, custom: false } }),
+  ).toEqual({ id: 'mcp' });
+  expect(
+    buildMcp({} as Env, { ownerId: 'owner', chatId: 'chat' }, [config], [binding]).extension.tools,
+  ).toHaveLength(1);
 });

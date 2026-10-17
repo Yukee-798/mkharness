@@ -1,8 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  // Existing Worker identity: keep it to preserve local/remote DO storage.
-  // For a fresh MkHarness installation, set name to "mkharness" before provisioning.
-  "name": "agent-generative-ui",
+  // Fresh native Pi installation. Do not point these bindings at an older deployment.
+  "name": "mkharness-native",
   "main": "src/server.ts",
   "compatibility_date": "2026-10-06",
   "compatibility_flags": ["nodejs_compat"],
@@ -33,60 +32,57 @@
       { "name": "MCP_CONNECTIONS", "class_name": "McpConnection" },
       {
         "name": "CONVERSATIONS",
-        "class_name": "ConversationAgent",
+        "class_name": "ChatSession",
       },
     ],
   },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["ConversationAgent"],
-    },
-    { "tag": "v2-mcp-connections", "new_sqlite_classes": ["McpConnection"] },
-  ],
-  "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "agent-generative-ui-skills-local" }],
+  "exports": {
+    "ChatSession": { "type": "durable-object", "storage": "sqlite" },
+    "McpConnection": { "type": "durable-object", "storage": "sqlite" },
+  },
+  "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-native-skills-local" }],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "agent-generative-ui-local",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // Omit database_id for new-resource provisioning; never copy an existing ID.
+      "database_name": "mkharness-native-local",
       "migrations_dir": "migrations",
     },
   ],
   "env": {
     "production": {
-      "name": "mkharness-template",
+      "name": "mkharness-native",
       "vars": {
-        "APP_URL": "https://template.mkharness.com",
+        // Replace with the new deployment's exact origin before deployment.
+        "APP_URL": "https://mkharness-native.example.com",
         "AUTH_MODE": "account",
-        "ALLOW_SERVER_MODEL_KEY": "1",
-        "MODEL_PROVIDER": "openrouter",
-        "MODEL_ID": "openrouter/free",
+        "ALLOW_SERVER_MODEL_KEY": "0",
+        "MODEL_PROVIDER": "",
+        "MODEL_ID": "",
         "MODEL_THINKING_LEVEL": "off",
       },
-      "routes": [{ "pattern": "template.mkharness.com", "custom_domain": true }],
       "durable_objects": {
         "bindings": [
-          { "name": "CONVERSATIONS", "class_name": "ConversationAgent" },
+          { "name": "CONVERSATIONS", "class_name": "ChatSession" },
           { "name": "MCP_CONNECTIONS", "class_name": "McpConnection" },
         ],
       },
-      "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-template-skills" }],
+      "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-native-skills" }],
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "mkharness-template",
-          "database_id": "02817316-ab35-48b2-891f-66aba0351752",
+          "database_name": "mkharness-native",
           "migrations_dir": "migrations",
         },
       ],
-      "workers_dev": false,
+      "workers_dev": true,
       "preview_urls": false,
     },
     "test": {
-      "name": "agent-generative-ui-test-20261010-7591",
+      "name": "mkharness-native-test",
       "vars": {
-        "APP_URL": "https://agent-generative-ui-test-20261010-7591.yukee798.workers.dev",
+        // Replace with the new test deployment's exact origin before deployment.
+        "APP_URL": "https://mkharness-native-test.yukee798.workers.dev",
         "AUTH_MODE": "guest",
         "ALLOW_SERVER_MODEL_KEY": "0",
         "MODEL_PROVIDER": "",
@@ -97,18 +93,16 @@
           { "name": "MCP_CONNECTIONS", "class_name": "McpConnection" },
           {
             "name": "CONVERSATIONS",
-            "class_name": "ConversationAgent",
+            "class_name": "ChatSession",
           },
         ],
       },
-      "r2_buckets": [
-        { "binding": "SKILL_FILES", "bucket_name": "agent-generative-ui-test-skills" },
-      ],
+      "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-native-test-skills" }],
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "agent-generative-ui-test-20261010-7591",
-          "database_id": "5c257aeb-5d9d-4260-b7e4-381054e00500",
+          "database_name": "mkharness-native-test",
+          "database_id": "945a18c1-1b56-4883-91a5-9fddab5e79a6",
           "migrations_dir": "migrations",
         },
       ],

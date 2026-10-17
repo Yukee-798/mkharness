@@ -6,26 +6,29 @@ import type {
   Harness,
   ConversationDocToken,
   JsonObject,
-  TaskId,
   Conversation,
 } from '@earendil-works/pi-durable';
 import type { Json as JsonValue } from '../../shared/json';
 import { AppError, type StoredCommand } from '../../shared/contracts';
 import { validateExtensions } from './registry';
 import type { successfulTool } from '../../shared/references';
+import type { ConnectionBinding } from '../../shared/mcp-connections';
+import type { SkillBinding } from '../../shared/skills';
 
 /** Trusted deployment code. Read contexts do not expose execution, credentials or writes. */
+export type AcceptedInput = {
+  text: string;
+  source?: StoredCommand['source'];
+  context?: JsonValue;
+};
 export type ReadContext = {
+  nativeConversationId: number;
+  /** Active model context; historical action lookup uses acceptedInputForAnswer instead. */
   entries: () => Promise<readonly EntryRecord[]>;
   successfulTool: (ref: string, name: string) => Promise<ReturnType<typeof successfulTool>>;
-  acceptedInput: (entryId: number) => Promise<
-    | {
-        text: string;
-        source?: StoredCommand['source'];
-        context?: JsonValue;
-      }
-    | undefined
-  >;
+  acceptedInput: (entryId: number) => Promise<AcceptedInput | undefined>;
+  /** Accepted input for this visible, completed answer, including compacted/forked history. */
+  acceptedInputForAnswer: (answerId: number) => Promise<AcceptedInput | undefined>;
 };
 /** Committed native facts, never a second execution runtime or a writable Pi handle. */
 export type ProjectionContext = {
@@ -37,15 +40,19 @@ export type ProjectionContext = {
 /** Trusted execution hooks use Pi itself; they must not introduce another queue or task store. */
 export type ExecutionContext = {
   pi: Harness;
+  nativeConversationId: number;
   context: Parameters<Harness['inspect']>[0];
   command?: StoredCommand;
   entries: readonly EntryRecord[];
 };
 export type ContributionHost = {
   identity: string;
+  ownerId: string;
+  mcpBindings?: ConnectionBinding[];
+  skillBindings?: SkillBinding[];
   conversationId?: string;
   pi: () => Promise<Harness>;
-  command: () => Promise<StoredCommand | undefined>;
+  command: (nativeConversationId: number) => Promise<StoredCommand | undefined>;
 };
 export type ServerContribution = {
   id: string;
@@ -55,8 +62,6 @@ export type ServerContribution = {
     beforeModel?: (context: ExecutionContext) => Promise<void>;
     /** Runs only for a new admission while Pi has no pending inputs. */
     beforeSubmit?: (context: ExecutionContext) => Promise<void>;
-    /** Called after the host aborts an incompatible native task during recovery. */
-    taskUnavailable?: (context: ExecutionContext & { taskId: TaskId }) => Promise<void>;
   };
   /** Only these native conversation documents enter the private projection fold. */
   stateDocuments?: readonly ConversationDocToken<JsonObject>[];
@@ -84,12 +89,9 @@ export type ServerContribution = {
     details?: JsonValue;
     terminal: boolean;
   }) => JsonValue;
-  projectState?: (context: ProjectionContext) => JsonValue;
   /** Historical annotations belong to native entry IDs, independent of loaded pages. */
   projectHistory?: (context: ProjectionContext) => Record<string, JsonValue>;
   projectConversation?: (context: ProjectionContext) => JsonValue;
-  /** Document-only projections never require a conversation history scan. */
-  historyScope?: 'none';
   taskReferences?: (documents: NonNullable<ProjectionContext['documents']>) => readonly number[];
 };
 export function validateContributionIds(ids: readonly string[]) {
@@ -110,8 +112,6 @@ export function collectContributions(contributions: readonly ServerContribution[
           (contribution.resources.validateState !== undefined &&
             typeof contribution.resources.validateState !== 'function'))) ||
       (contribution.projectTool !== undefined && typeof contribution.projectTool !== 'function') ||
-      (contribution.projectState !== undefined &&
-        typeof contribution.projectState !== 'function') ||
       (contribution.projectHistory !== undefined &&
         typeof contribution.projectHistory !== 'function') ||
       (contribution.projectConversation !== undefined &&

@@ -1,4 +1,4 @@
-import { ROOT_CONVERSATION_ID, type TaskId, type TaskRecord } from '@earendil-works/pi-durable';
+import { type ConversationId, type TaskId, type TaskRecord } from '@earendil-works/pi-durable';
 import { AppError } from '../../shared/contracts';
 import type {
   ContributionHost,
@@ -26,9 +26,10 @@ const interrupted = (
 /** A disabled extension can leave a native task aborted without its provider-specific abort handler. */
 async function reconcileInterrupted(
   pi: ExecutionContext['pi'],
+  target: ConversationId,
   context: ExecutionContext['context'],
 ) {
-  const saved = await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, context);
+  const saved = await pi.snapshot(RemoteIntents, target, context);
   if (!saved) return;
   const stale: RemoteIntent[] = [];
   for (const operation of Object.values(saved.operations))
@@ -39,14 +40,14 @@ async function reconcileInterrupted(
       stale.push(operation);
   if (!stale.length) return saved;
   await pi.commit(async (tx) => {
-    const doc = await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID);
+    const doc = await tx.doc(RemoteIntents, target);
     for (const operation of stale) {
       const current = doc.operations[operation.taskId];
       if (current && interrupted(current, await tx.task(current.childTaskId as TaskId)))
         current.status = 'unknown';
     }
   }, context);
-  return pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, context);
+  return pi.snapshot(RemoteIntents, target, context);
 }
 
 /** Example provider, authorization, recovery and public state share one removable contribution. */
@@ -58,12 +59,19 @@ export function asyncExampleContribution(
   const action = (name: 'retry' | 'recheck') => ({
     async normalize(
       payload: Parameters<NonNullable<ServerContribution['actions']>[string]['normalize']>[0],
+      readContext: Parameters<NonNullable<ServerContribution['actions']>[string]['normalize']>[1],
     ) {
       const parsed = remoteActionPayload.safeParse(payload);
       if (!parsed.success) throw new AppError(400, 'invalid_action_payload');
       if (!host) throw new AppError(503, 'remote_disabled');
       const pi = await host.pi();
-      const original = (await reconcileInterrupted(pi, background))?.operations[parsed.data.taskId];
+      const original = (
+        await reconcileInterrupted(
+          pi,
+          readContext.nativeConversationId as ConversationId,
+          background,
+        )
+      )?.operations[parsed.data.taskId];
       if (!original) throw new AppError(404, 'remote_reference_not_found');
       if (!config)
         throw new AppError(503, 'remote_disabled', '远端能力当前不可用，请联系应用维护者。');
@@ -87,8 +95,8 @@ export function asyncExampleContribution(
       ? {
           extension: remoteExample(config, {
             identity: host.identity,
-            command: async () => {
-              const command = await host.command();
+            command: async (nativeConversationId) => {
+              const command = await host.command(nativeConversationId);
               if (!command) throw new AppError(409, 'run_context_missing');
               return command;
             },
@@ -97,7 +105,6 @@ export function asyncExampleContribution(
       : {}),
     actions: { retry: action('retry'), recheck: action('recheck') },
     stateDocuments: [RemoteIntents],
-    historyScope: 'none',
     taskReferences: (documents) =>
       Object.values(
         (documents.get(RemoteIntents.definition.kind)?.operations ?? {}) as Record<
@@ -105,7 +112,7 @@ export function asyncExampleContribution(
           RemoteIntent
         >,
       ).map((operation) => operation.childTaskId),
-    projectState: ({ documents, tasks }) => {
+    projectConversation: ({ documents, tasks }) => {
       const records = new Map(tasks.map((task) => [Number(task.id), task]));
       const operations = (documents?.get(RemoteIntents.definition.kind)?.operations ??
         {}) as Record<string, RemoteIntent>;
@@ -121,13 +128,14 @@ export function asyncExampleContribution(
       );
     },
     execution: {
-      async beforeModel({ pi, context, command, entries }) {
-        const doc = await reconcileInterrupted(pi, context);
+      async beforeModel({ pi, context, command, entries, nativeConversationId }) {
+        const doc = await reconcileInterrupted(pi, nativeConversationId as ConversationId, context);
         if (!remoteModelAllowed(doc?.operations ?? {}, command) || remoteRunBlocked(entries))
           throw new AppError(409, 'remote_outcome_unknown');
       },
-      async beforeSubmit({ pi, context, command, entries }) {
-        const saved = await reconcileInterrupted(pi, context);
+      async beforeSubmit({ pi, context, command, entries, nativeConversationId }) {
+        const target = nativeConversationId as ConversationId;
+        const saved = await reconcileInterrupted(pi, target, context);
         if (!saved) return;
         const referenced = remoteSource(command?.source)?.taskId;
         const published = new Set(
@@ -151,20 +159,11 @@ export function asyncExampleContribution(
         );
         if (completed.length)
           await pi.commit(async (tx) => {
-            const doc = await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID);
+            const doc = await tx.doc(RemoteIntents, target);
             for (const operation of completed)
               if (doc.operations[operation.taskId]?.status === 'completed')
                 delete doc.operations[operation.taskId];
           }, context);
-      },
-      async taskUnavailable({ pi, context, taskId }) {
-        if (!(await pi.snapshot(RemoteIntents, ROOT_CONVERSATION_ID, context))) return;
-        await pi.commit(async (tx) => {
-          for (const operation of Object.values(
-            (await tx.doc(RemoteIntents, ROOT_CONVERSATION_ID)).operations,
-          ))
-            if (operation.childTaskId === Number(taskId)) operation.status = 'unknown';
-        }, context);
       },
     },
   };

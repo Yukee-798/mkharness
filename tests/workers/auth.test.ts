@@ -1,7 +1,11 @@
-import { env, runInDurableObject, abortAllDurableObjects } from 'cloudflare:test';
+import { runDurableObjectAlarm, abortAllDurableObjects } from 'cloudflare:test';
+import type { ChatActor } from '../../src/server/chat/protocol';
+import type { ConversationSnapshot } from '../../src/shared/conversation';
+import { env, runInDurableObject } from './env';
 import { beforeAll, it, expect, vi } from 'vitest';
 import { makeSignature } from 'better-auth/crypto';
 import app from '../../src/server/index';
+const createBody = () => JSON.stringify({ requestId: crypto.randomUUID() });
 const cookie = async (token: string) =>
   'better-auth.session_token=' +
   encodeURIComponent(token + '.' + (await makeSignature(token, env.BETTER_AUTH_SECRET!)));
@@ -19,6 +23,22 @@ beforeAll(async () => {
 });
 it('rejects unauthenticated requests with 401', async () =>
   expect((await app.request('http://localhost:5173/api/conversations', {}, env)).status).toBe(401));
+it('requires an explicit create ID and rejects unknown creation fields', async () => {
+  const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
+  for (const body of [
+    '',
+    '{}',
+    JSON.stringify({ requestId: 'old-id' }),
+    JSON.stringify({ requestId: crypto.randomUUID(), owner: 'b' }),
+  ]) {
+    const response = await app.request(
+      'http://localhost:5173/api/conversations',
+      { method: 'POST', headers, body },
+      env,
+    );
+    expect(response.status).toBe(400);
+  }
+});
 it('capabilities are authenticated configuration reads that never acquire a DO', async () => {
   expect((await app.request('http://localhost:5173/api/capabilities', {}, env)).status).toBe(401);
   const unavailableDO = {
@@ -45,7 +65,7 @@ it('isolates listing and every resource operation using real Better Auth session
     b = await cookie('token-b');
   const created = await app.request(
     'http://localhost:5173/api/conversations',
-    { method: 'POST', headers: { cookie: a, origin: env.APP_URL } },
+    { method: 'POST', headers: { cookie: a, origin: env.APP_URL }, body: createBody() },
     env,
   );
   expect(created.status).toBe(201);
@@ -61,6 +81,7 @@ it('isolates listing and every resource operation using real Better Auth session
     ['runs', 'POST'],
     ['runs/abc/events', 'GET'],
     ['runs/abc/queue', 'POST'],
+    ['runs/abc/queue/ack', 'POST'],
     ['extensions/mcp/controls/decide', 'POST'],
     ['stop', 'POST'],
     ['extensions/openui/resources/1.call', 'GET'],
@@ -86,7 +107,7 @@ it('validates malformed and oversized input bodies before invoking Pi', async ()
   };
   const created = await app.request(
     'http://localhost:5173/api/conversations',
-    { method: 'POST', headers },
+    { method: 'POST', headers, body: createBody() },
     env,
   );
   const { id } = (await created.json()) as any;
@@ -107,18 +128,18 @@ it('rejects an oversized queue action before invoking the durable object', async
   const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
   const created = await app.request(
     'http://localhost:5173/api/conversations',
-    { method: 'POST', headers },
+    { method: 'POST', headers, body: createBody() },
     env,
   );
   const { id } = (await created.json()) as { id: string };
-  const actOnQueuedInput = vi.fn(async () => JSON.stringify({ queue: [] }));
+  const command = vi.fn(async () => ({ queue: [] }));
   const response = await app.request(
     `http://localhost:5173/api/conversations/${id}/runs/${crypto.randomUUID()}/queue`,
     { method: 'POST', headers, body: ' '.repeat(2048) + '{"action":"remove"}' },
-    { ...env, CONVERSATIONS: { getByName: () => ({ actOnQueuedInput }) } } as unknown as Env,
+    { ...env, CONVERSATIONS: { getByName: () => ({ command }) } } as unknown as Env,
   );
-  expect(response.status).toBe(400);
-  expect(actOnQueuedInput).not.toHaveBeenCalled();
+  expect(response.status).toBe(413);
+  expect(command).not.toHaveBeenCalled();
 });
 
 it('returns the Better Auth error shape when OAuth is not configured', async () => {
@@ -138,7 +159,7 @@ it('renames only owned chats, validates titles and preserves explicit names on s
   const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
   const created = await app.request(
     'http://localhost:5173/api/conversations',
-    { method: 'POST', headers },
+    { method: 'POST', headers, body: createBody() },
     env,
   );
   const { id } = (await created.json()) as { id: string };
@@ -185,52 +206,118 @@ it('renames only owned chats, validates titles and preserves explicit names on s
   await env.CONVERSATIONS.getByName(id).stopConversation();
 });
 
-it('accepts empty-chat deletion without running destructive teardown inside the RPC', async () => {
+async function ownedChat() {
+  const requestId = crypto.randomUUID();
   const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
-  const created = await app.request(
-    'http://localhost:5173/api/conversations',
-    { method: 'POST', headers },
-    env,
-  );
-  const { id } = (await created.json()) as { id: string };
-  const target = env.CONVERSATIONS.getByName(id);
-  let destroyed = false;
-  await runInDurableObject(target, (instance) => {
-    const destroy = instance.destroy.bind(instance);
-    instance.destroy = async () => {
-      destroyed = true;
-      await destroy();
-    };
-  });
   const response = await app.request(
-    `http://localhost:5173/api/conversations/${id}`,
-    { method: 'DELETE', headers },
+    'http://localhost:5173/api/conversations',
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ requestId }),
+    },
     env,
   );
-  // Workerd may deliver a reply before ctx.abort; production consistently loses it.
-  // Lock down the cause rather than depend on the local RPC-abort timing.
-  expect(destroyed).toBe(false);
+  expect(response.status).toBe(201);
+  const { id } = (await response.json()) as { id: string };
+  const generation = await env.DB.prepare(
+    'SELECT instance_generation FROM conversations WHERE id=?',
+  )
+    .bind(id)
+    .first<string>('instance_generation');
+  const actor: ChatActor = { chatId: id, ownerId: 'a', generation: generation! };
+  return {
+    id,
+    actor,
+    requestId,
+    headers,
+    target: env.CONVERSATIONS.getByName(id),
+    url: 'http://localhost:5173/api/conversations/' + id,
+  };
+}
+
+async function expectErased(target: ReturnType<typeof env.CONVERSATIONS.getByName>) {
+  await runInDurableObject(target, async (_instance, state) => {
+    expect(await state.storage.list()).toEqual(new Map());
+    expect(await state.storage.get('manifest')).toBeUndefined();
+    expect(await state.storage.get('deleting')).toBeUndefined();
+    expect(await state.storage.get('fixture-secret')).toBeUndefined();
+    const tables = state.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'pi_%' OR name LIKE 'app_%')",
+      )
+      .toArray();
+    for (const { name } of tables)
+      expect(state.storage.sql.exec<{ n: number }>('SELECT COUNT(*) n FROM ' + name).one().n).toBe(
+        0,
+      );
+    expect(await state.storage.getAlarm()).toBeNull();
+  });
+}
+
+it('accepts empty-chat deletion with a durable tombstone before alarm erasure', async () => {
+  const { id, actor, requestId, headers, target, url } = await ownedChat();
+  const response = await app.request(url, { method: 'DELETE', headers }, env);
   expect(response.status).toBe(202);
   expect(await response.json()).toEqual({ deleting: true });
   expect(
-    await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
-  ).toBeNull();
-  await runInDurableObject(target, async (instance) => {
-    // A late observer or model-preparation callback cannot start another runtime.
-    await expect(instance.harness.pi()).rejects.toMatchObject({ code: 'not_found' });
+    await env.DB.prepare('SELECT lifecycle FROM conversations WHERE id=?')
+      .bind(id)
+      .first('lifecycle'),
+  ).toBe('deleting');
+  await runInDurableObject(target, async (_instance, state) => {
+    expect(await state.storage.get('deleting')).toBe(true);
+    expect(await state.storage.getAlarm()).not.toBeNull();
+    const manifest = await state.storage.get<{ mainConversationId?: number }>('manifest');
+    expect(manifest?.mainConversationId).toBeUndefined();
+    expect(
+      state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name LIKE 'pi_%'").toArray(),
+    ).toEqual([]);
   });
-  await vi.waitFor(() => expect(destroyed).toBe(true), { timeout: 5000, interval: 20 });
+  expect(
+    await target.command(actor, {
+      type: 'submit',
+      command: { runId: crypto.randomUUID(), text: 'late' },
+    }),
+  ).toMatchObject({ error: { status: 404 } });
+  expect(await runDurableObjectAlarm(target)).toBe(true);
+  expect(await env.DB.prepare('SELECT * FROM conversations WHERE id=?').bind(id).first()).toEqual({
+    id,
+    owner: 'a',
+    create_request_id: requestId,
+    create_hash: expect.any(String),
+    instance_generation: actor.generation,
+    lifecycle: 'deleted',
+    title: null,
+    title_custom: null,
+    created_at: null,
+    updated_at: null,
+  });
+  for (const table of [
+    'conversation_mcp_bindings',
+    'conversation_skill_bindings',
+    'conversation_deployment_mcp_bindings',
+  ])
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) n FROM ' + table + ' WHERE conversation=?')
+        .bind(id)
+        .first('n'),
+    ).toBe(0);
+  expect((await app.request(url, { method: 'DELETE', headers }, env)).status).toBe(202);
+  expect(
+    (
+      await app.request(
+        'http://localhost:5173/api/conversations',
+        { method: 'POST', headers, body: JSON.stringify({ requestId }) },
+        env,
+      )
+    ).status,
+  ).toBe(410);
+  await expectErased(target);
 });
 
-it('deletes owned chats only, stops running work and erases durable content', async () => {
-  const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
-  const created = await app.request(
-    'http://localhost:5173/api/conversations',
-    { method: 'POST', headers },
-    env,
-  );
-  const { id } = (await created.json()) as { id: string };
-  const url = `http://localhost:5173/api/conversations/${id}`;
+it('deletes only owned chats, closes running work and rejects stale actors after erasure', async () => {
+  const { id, actor, headers, target, url } = await ownedChat();
   expect(
     (
       await app.request(
@@ -240,187 +327,156 @@ it('deletes owned chats only, stops running work and erases durable content', as
       )
     ).status,
   ).toBe(404);
-  const target = env.CONVERSATIONS.getByName(id);
-  await target.submitRun({ runId: crypto.randomUUID(), text: 'ignores_cancel' });
-  for (let i = 0; i < 100; i++) {
-    if (JSON.parse(await target.snapshot()).tools.length) break;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  expect(JSON.parse(await target.snapshot()).tools).toHaveLength(1);
-  await target.submitRun({ runId: crypto.randomUUID(), text: 'must not run' });
-  await runInDurableObject(target, (_instance, state) => {
-    state.storage.sql.exec(
-      'INSERT INTO app_inputs VALUES(?,?,1,?)',
-      'panel',
-      '{"secret":"draft"}',
-      Date.now(),
-    );
-  });
-  let erased = false;
-  await runInDurableObject(target, (_instance, state) => {
-    const deleteAll = state.storage.deleteAll.bind(state.storage);
-    state.storage.deleteAll = async () => {
-      await deleteAll();
-      erased = true;
-    };
-  });
-  const deleting = app.request(url, { method: 'DELETE', headers }, env);
-  for (let i = 0; i < 100; i++) {
-    if (await runInDurableObject(target, (instance) => instance.deleting)) break;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
   expect(
-    await target.submitRun({ runId: crypto.randomUUID(), text: 'racing submit' }),
+    await target.command(actor, {
+      type: 'submit',
+      command: { runId: crypto.randomUUID(), text: 'ignores_cancel' },
+    }),
+  ).toMatchObject({ accepted: true });
+  await vi.waitFor(async () => {
+    const snapshot = (await target.read(actor, { type: 'snapshot' })) as ConversationSnapshot;
+    expect(
+      snapshot.entries.some((entry) =>
+        entry.model?.some(
+          (message) =>
+            message.role === 'assistant' &&
+            message.content.some(
+              (block) => block.type === 'toolCall' && block.name === 'ignores_cancel',
+            ),
+        ),
+      ),
+    ).toBe(true);
+  });
+  expect(
+    await target.command(actor, {
+      type: 'submit',
+      command: { runId: crypto.randomUUID(), text: 'must not run' },
+    }),
+  ).toMatchObject({ accepted: true });
+  await runInDurableObject(target, async (_instance, state) => {
+    await state.storage.put('fixture-secret', 'private draft');
+  });
+  expect((await app.request(url, { method: 'DELETE', headers }, env)).status).toBe(202);
+  expect(
+    await target.command(actor, {
+      type: 'submit',
+      command: { runId: crypto.randomUUID(), text: 'racing submit' },
+    }),
   ).toMatchObject({ error: { status: 404 } });
-  const response = await deleting;
-  expect(response.status).toBe(202);
-  expect(await response.json()).toEqual({ deleting: true });
-  expect(
-    await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
-  ).toBeNull();
   expect((await app.request(url + '/snapshot', { headers }, env)).status).toBe(404);
-  await vi.waitFor(() => expect(erased).toBe(true), { timeout: 5000, interval: 20 });
+  await runDurableObjectAlarm(target);
   await abortAllDurableObjects();
-  const fresh = env.CONVERSATIONS.get(target.id);
-  await runInDurableObject(fresh, (_instance, state) => {
-    expect(state.storage.sql.exec('SELECT * FROM app_requests').toArray()).toEqual([]);
-    expect(state.storage.sql.exec('SELECT * FROM app_inputs').toArray()).toEqual([]);
-  });
-  expect(JSON.parse(await fresh.snapshot()).entries).toEqual([]);
+  const fresh = env.CONVERSATIONS.getByName(id);
+  expect(await fresh.read(actor, { type: 'snapshot' })).toMatchObject({ error: { status: 404 } });
+  await expectErased(fresh);
 });
 
-it('retains failed cleanup after native retry exhaustion until teardown can succeed', async () => {
-  const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
-  const created = await app.request(
-    'http://localhost:5173/api/conversations',
-    { method: 'POST', headers },
-    env,
-  );
-  const { id } = (await created.json()) as { id: string };
-  const target = env.CONVERSATIONS.getByName(id);
+it('keeps a persistent cleanup alarm beyond repeated failures and completes after storage recovers', async () => {
+  const { id, actor, headers, target, url } = await ownedChat();
   let attempts = 0;
   let restore = () => {};
-  let erased = false;
-  await runInDurableObject(target, (instance, state) => {
-    const spy = vi.spyOn(instance, 'destroy').mockImplementation(async () => {
+  await runInDurableObject(target, (_instance, state) => {
+    const original = state.storage.deleteAll.bind(state.storage);
+    state.storage.deleteAll = async () => {
       attempts++;
       throw new Error('fixture cleanup unavailable');
-    });
-    restore = () => spy.mockRestore();
-    const deleteAll = state.storage.deleteAll.bind(state.storage);
-    state.storage.deleteAll = async () => {
-      await deleteAll();
-      erased = true;
+    };
+    restore = () => {
+      state.storage.deleteAll = original;
     };
   });
-  expect(
-    (
-      await app.request(
-        `http://localhost:5173/api/conversations/${id}`,
-        { method: 'DELETE', headers },
-        env,
-      )
-    ).status,
-  ).toBe(202);
-  await vi.waitFor(
-    async () => {
-      expect(attempts).toBe(3);
-      await runInDurableObject(target, (_instance, state) => {
-        const job = state.storage.sql
-          .exec("SELECT time,running FROM cf_agents_jobs WHERE capability='app-requests'")
-          .one();
-        expect(job.running).toBe(0);
-        expect(Number(job.time)).toBeGreaterThan(Date.now() + 30_000);
-        expect(
-          state.storage.sql.exec("SELECT value FROM app_meta WHERE key='deleting'").one().value,
-        ).toBe(id);
+  expect((await app.request(url, { method: 'DELETE', headers }, env)).status).toBe(202);
+  try {
+    for (let attempt = 0; attempt < 7; attempt++) {
+      expect(await runDurableObjectAlarm(target).catch(() => true)).toBe(true);
+      await runInDurableObject(target, async (_instance, state) => {
+        expect(await state.storage.get('deleting')).toBe(true);
+        expect(await state.storage.getAlarm()).toBeGreaterThan(Date.now());
       });
-    },
-    { timeout: 5000, interval: 20 },
-  );
-  expect(erased).toBe(false);
-  expect(
-    await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
-  ).toBeNull();
-  restore();
-  // Bring the persisted deadline forward in this fixture, rather than wait a minute.
-  await runInDurableObject(target, async (instance, state) => {
-    state.storage.sql.exec(
-      "UPDATE cf_agents_jobs SET time=? WHERE capability='app-requests'",
-      Date.now() + 100,
-    );
-    await instance.lifecycle.rearmAlarm();
-  });
-  await vi.waitFor(() => expect(erased).toBe(true), { timeout: 5000, interval: 20 });
+    }
+    expect(attempts).toBe(7);
+    expect(await target.read(actor, { type: 'snapshot' })).toMatchObject({
+      error: { status: 404 },
+    });
+    expect(
+      await env.DB.prepare('SELECT lifecycle FROM conversations WHERE id=?')
+        .bind(id)
+        .first('lifecycle'),
+    ).toBe('deleted');
+  } finally {
+    restore();
+  }
+  expect(await runDurableObjectAlarm(target)).toBe(true);
+  await expectErased(target);
 });
 
-for (const scheduled of [false, true]) {
-  it(`recovers ${scheduled ? 'scheduled' : 'interrupted admission of'} deletion after eviction without reopening Pi`, async () => {
-    const headers = { cookie: await cookie('token-a'), origin: env.APP_URL };
-    const created = await app.request(
-      'http://localhost:5173/api/conversations',
-      { method: 'POST', headers },
-      env,
-    );
-    const { id } = (await created.json()) as { id: string };
-    const target = env.CONVERSATIONS.getByName(id);
-    if (scheduled) await target.deleteConversation(id);
-    else
-      await runInDurableObject(target, (_instance, state) => {
-        state.storage.sql.exec('INSERT INTO app_meta(key,value) VALUES(?,?)', 'deleting', id);
-      });
-    const deadline = scheduled
-      ? await runInDurableObject(
-          target,
-          (_instance, state) =>
-            state.storage.sql
-              .exec("SELECT time FROM cf_agents_jobs WHERE capability='app-requests'")
-              .one().time,
-        )
-      : undefined;
-    await abortAllDurableObjects();
-    const resumed = env.CONVERSATIONS.get(target.id);
-    let erased = false;
-    await runInDurableObject(resumed, (instance, state) => {
-      expect(instance.deleting).toBe(true);
-      if (scheduled)
-        expect(
-          state.storage.sql
-            .exec("SELECT time FROM cf_agents_jobs WHERE capability='app-requests'")
-            .one().time,
-        ).toBe(deadline);
-      vi.spyOn(instance.harness, 'pi').mockImplementation(() => {
-        throw new Error('Deleting recovery must not open a runtime');
-      });
-      const deleteAll = state.storage.deleteAll.bind(state.storage);
-      state.storage.deleteAll = async () => {
-        await deleteAll();
-        erased = true;
-      };
-    });
-    expect(JSON.parse(await resumed.snapshot())).toMatchObject({ error: { code: 'not_found' } });
-    await vi.waitFor(() => expect(erased).toBe(true), { timeout: 5000, interval: 20 });
+it('recovers scheduled deletion after eviction without opening Pi or resurrecting erased state', async () => {
+  const { id, actor, headers, url } = await ownedChat();
+  expect((await app.request(url, { method: 'DELETE', headers }, env)).status).toBe(202);
+  await abortAllDurableObjects();
+  const resumed = env.CONVERSATIONS.getByName(id);
+  await runInDurableObject(resumed, async (_instance, state) => {
+    expect(await state.storage.get('deleting')).toBe(true);
     expect(
-      await env.DB.prepare('SELECT id FROM conversations WHERE id=?').bind(id).first(),
-    ).toBeNull();
-    expect(
-      (
-        await app.request(
-          `http://localhost:5173/api/conversations/${id}/snapshot`,
-          { headers },
-          env,
-        )
-      ).status,
-    ).toBe(404);
-    await abortAllDurableObjects();
-    const fresh = env.CONVERSATIONS.get(target.id);
-    await runInDurableObject(fresh, (_instance, state) => {
-      expect(state.storage.sql.exec('SELECT * FROM app_meta').toArray()).toEqual([]);
-      expect(state.storage.sql.exec('SELECT * FROM app_requests').toArray()).toEqual([]);
-    });
-    expect(JSON.parse(await fresh.snapshot()).entries).toEqual([]);
+      state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name LIKE 'pi_%'").toArray(),
+    ).toEqual([]);
   });
-}
+  expect(await resumed.read(actor, { type: 'snapshot' })).toMatchObject({
+    error: { status: 404 },
+  });
+  expect(await runDurableObjectAlarm(resumed)).toBe(true);
+  await expectErased(resumed);
+  expect(
+    await env.DB.prepare('SELECT lifecycle FROM conversations WHERE id=?')
+      .bind(id)
+      .first('lifecycle'),
+  ).toBe('deleted');
+  for (let repeat = 0; repeat < 2; repeat++) {
+    await abortAllDurableObjects();
+    const fresh = env.CONVERSATIONS.getByName(id);
+    expect(await fresh.command(actor, { type: 'delete' })).toEqual({ deleting: true });
+    await runInDurableObject(fresh, (instance) => instance.alarm());
+    expect(await runDurableObjectAlarm(fresh)).toBe(false);
+    await expectErased(fresh);
+    await runInDurableObject(fresh, async (_instance, state) => {
+      expect(
+        state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name LIKE 'pi_%'").toArray(),
+      ).toEqual([]);
+    });
+  }
+});
+
+it('refuses stale generations and unknown chats before an empty DO creates Pi storage', async () => {
+  const { actor, target } = await ownedChat();
+  const stale = { ...actor, generation: crypto.randomUUID() };
+  expect(await target.read(stale, { type: 'snapshot' })).toMatchObject({ error: { status: 404 } });
+  expect(
+    await target.command(stale, {
+      type: 'submit',
+      command: { runId: crypto.randomUUID(), text: 'stale' },
+    }),
+  ).toMatchObject({ error: { status: 404 } });
+  await runInDurableObject(target, async (_instance, state) => {
+    expect(await state.storage.get('manifest')).toBeUndefined();
+    expect(
+      state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name LIKE 'pi_%'").toArray(),
+    ).toEqual([]);
+  });
+  const id = crypto.randomUUID(),
+    unknown = env.CONVERSATIONS.getByName(id);
+  expect(
+    await unknown.read(
+      { chatId: id, ownerId: 'a', generation: crypto.randomUUID() },
+      { type: 'snapshot' },
+    ),
+  ).toMatchObject({ error: { status: 404 } });
+  await runInDurableObject(unknown, async (_instance, state) => {
+    expect(await state.storage.get('manifest')).toBeUndefined();
+    expect(
+      state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name LIKE 'pi_%'").toArray(),
+    ).toEqual([]);
+  });
+});
 
 it('scopes custom MCP management to the session owner and validates callbacks and bodies', async () => {
   const base = 'http://localhost:5173/api';
@@ -510,7 +566,14 @@ it('scopes custom MCP management to the session owner and validates callbacks an
     (
       await app.request(
         base + '/conversations',
-        { method: 'POST', headers, body: JSON.stringify({ mcpConnectionIds: [connection.id] }) },
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            mcpConnectionIds: [connection.id],
+          }),
+        },
         env,
       )
     ).status,
@@ -522,7 +585,10 @@ it('scopes custom MCP management to the session owner and validates callbacks an
         {
           method: 'POST',
           headers: other,
-          body: JSON.stringify({ mcpConnectionIds: [connection.id] }),
+          body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            mcpConnectionIds: [connection.id],
+          }),
         },
         env,
       )

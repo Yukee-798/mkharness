@@ -70,7 +70,6 @@ export const replyContribution = (): ServerContribution => ({
       },
     ],
   },
-  projectState: projectSuggestions,
   projectHistory: (facts) =>
     Object.fromEntries(
       Object.entries(projectSuggestions(facts).replies).map(([id, prompts]) => [
@@ -89,12 +88,7 @@ export const replyContribution = (): ServerContribution => ({
           !/^[1-9]\d*$/.test(payload.entryId)
         )
           throw new AppError(400, 'invalid_action_payload');
-        const entries = [...(await context.entries())].sort((a, b) => Number(a.id) - Number(b.id));
-        const target = entries.findIndex((entry) => String(entry.id) === payload.entryId);
-        if (target < 0 || !entries[target]!.model?.some((message) => message.role === 'assistant'))
-          throw new AppError(404, 'reply_not_found');
-        const user = entries.slice(0, target).findLast((entry) => entry.kind === 'pi.user');
-        const input = user ? await context.acceptedInput(Number(user.id)) : undefined;
+        const input = await context.acceptedInputForAnswer(Number(payload.entryId));
         if (!input) throw new AppError(404, 'reply_not_found');
         if (
           input.source?.action === 'extension_action' &&

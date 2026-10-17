@@ -2,7 +2,13 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { connectionInput, toolPermission } from '../../../shared/mcp-connections';
 import { AppError } from '../../../shared/contracts';
-import { ownedConnection, connectionViews, customMcpEnabled, connectionView } from './catalog';
+import {
+  ownedConnection,
+  connectionViews,
+  customMcpEnabled,
+  connectionView,
+  userConnection,
+} from './catalog';
 import { publicMcpUrl } from './endpoint';
 import { secretKey } from './secrets';
 import { boundedText } from '../../http/body';
@@ -48,7 +54,7 @@ mcpRoutes.post('/connections', async (c) => {
     .first();
   if (!row) throw new AppError(429, 'mcp_connection_limit');
   try {
-    const connection = await c.env.MCP_CONNECTIONS.getByName(id).initialize(owner, id, input);
+    const connection = await userConnection(c.env, owner, id).initialize(owner, id, input);
     return c.json({ connection: connectionView(connection) }, 201);
   } catch (error) {
     await c.env.DB.prepare('UPDATE mcp_connections SET deleted_at=? WHERE id=? AND owner=?')

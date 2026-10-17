@@ -18,18 +18,22 @@ export type HistoryPage = {
   history: HistoryWindow;
   toolProgress?: ToolProgressMap;
 };
+/** Unclaimed draft transfers; discovery never exposes or executes their input. */
+export type QueueEditRecovery = { runId: string; expiresAt: number };
 export type ConversationSnapshot = {
+  conversationId: number;
   entries: EntryRecord[];
-  cursor?: unknown;
-  history?: HistoryWindow;
+  history: HistoryWindow;
   toolProgress?: ToolProgressMap;
   extensionState?: ExtensionState;
   pending: { operationId: string; status: 'running' | 'queued' }[];
   stopping: boolean;
-  queue?: QueuedInput[];
+  queue: QueuedInput[];
+  queueEdits: QueueEditRecovery[];
   modelCatalog?: ModelCatalog;
   selection?: ModelSelection;
   runtimeIssues?: RuntimeIssue[];
+  capabilityIssues?: unknown;
 };
 export type ObservationState = {
   runId?: string;
@@ -42,53 +46,148 @@ export type ObservationState = {
   history?: HistoryWindow;
 };
 
-/** Validate the owned transport envelope; Pi owns the extensible entry payload. */
-export function decodeSnapshot(value: unknown): ConversationSnapshot {
-  if (!value || typeof value !== 'object') throw new Error('Invalid conversation snapshot');
-  const snapshot = value as ConversationSnapshot;
-  if (
-    !Array.isArray(snapshot.entries) ||
-    !Array.isArray(snapshot.pending) ||
-    typeof snapshot.stopping !== 'boolean'
-  )
-    throw new Error('Invalid conversation snapshot');
-  for (const entry of snapshot.entries)
+const object = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+const integer = (value: unknown, min = 0): value is number =>
+  Number.isSafeInteger(value) && Number(value) >= min;
+function mismatch(): never {
+  throw new Error('protocol_mismatch: Refresh to load the current chat protocol.');
+}
+function page(value: unknown): asserts value is HistoryPage {
+  if (!object(value) || !Array.isArray(value.entries) || !object(value.history)) mismatch();
+  for (const entry of value.entries)
     if (
-      !entry ||
-      !Number.isSafeInteger(entry.id) ||
-      Number(entry.id) < 1 ||
+      !object(entry) ||
+      !integer(entry.id, 1) ||
+      !integer(entry.conversationId, 1) ||
+      typeof entry.kind !== 'string' ||
       (entry.model !== undefined && !Array.isArray(entry.model))
     )
-      throw new Error('Invalid conversation entry');
+      mismatch();
+  const history = value.history;
+  if (
+    !integer(history.upperEntryId) ||
+    !integer(history.revision) ||
+    !object(history.annotations) ||
+    (history.olderCursor !== undefined &&
+      (typeof history.olderCursor !== 'string' || !history.olderCursor.length)) ||
+    Object.keys(history).some(
+      (key) => !['upperEntryId', 'revision', 'annotations', 'olderCursor'].includes(key),
+    )
+  )
+    mismatch();
+  let previous = 0;
+  for (const entry of value.entries) {
+    if (entry.id <= previous || entry.id > history.upperEntryId) mismatch();
+    previous = entry.id;
+  }
+  const ids = new Set(value.entries.map((entry) => String(entry.id)));
+  for (const [id, annotation] of Object.entries(history.annotations))
+    if (!ids.has(id) || !object(annotation)) mismatch();
+  if (value.toolProgress !== undefined && !object(value.toolProgress)) mismatch();
+}
+/** Validate our one transport envelope; Pi retains ownership of entry payload shapes. */
+export function decodeSnapshot(value: unknown): ConversationSnapshot {
+  page(value);
+  const snapshot = value as unknown as ConversationSnapshot;
+  if (
+    !integer(snapshot.conversationId, 1) ||
+    !Array.isArray(snapshot.pending) ||
+    !Array.isArray(snapshot.queue) ||
+    !Array.isArray(snapshot.queueEdits) ||
+    snapshot.queueEdits.length > 32 ||
+    typeof snapshot.stopping !== 'boolean' ||
+    Object.keys(snapshot).some(
+      (key) =>
+        ![
+          'conversationId',
+          'entries',
+          'history',
+          'toolProgress',
+          'extensionState',
+          'pending',
+          'stopping',
+          'queue',
+          'queueEdits',
+          'modelCatalog',
+          'selection',
+          'runtimeIssues',
+          'capabilityIssues',
+        ].includes(key),
+    )
+  )
+    mismatch();
   for (const pending of snapshot.pending)
     if (
-      !pending ||
+      !object(pending) ||
       typeof pending.operationId !== 'string' ||
       !['running', 'queued'].includes(pending.status)
     )
-      throw new Error('Invalid conversation run');
-  if (
-    snapshot.history &&
-    (!Number.isSafeInteger(snapshot.history.upperEntryId) ||
-      !Number.isSafeInteger(snapshot.history.revision) ||
-      !snapshot.history.annotations ||
-      typeof snapshot.history.annotations !== 'object')
-  )
-    throw new Error('Invalid history window');
+      mismatch();
+  for (const queued of snapshot.queue)
+    if (
+      !object(queued) ||
+      typeof queued.runId !== 'string' ||
+      typeof queued.text !== 'string' ||
+      !['followUp', 'steer'].includes(queued.mode)
+    )
+      mismatch();
+  const edits = new Set<string>();
+  for (const edit of snapshot.queueEdits) {
+    if (
+      !object(edit) ||
+      typeof edit.runId !== 'string' ||
+      !edit.runId.length ||
+      !integer(edit.expiresAt, 1) ||
+      edits.has(edit.runId) ||
+      Object.keys(edit).some((key) => !['runId', 'expiresAt'].includes(key))
+    )
+      mismatch();
+    edits.add(edit.runId);
+  }
+  if (snapshot.extensionState !== undefined && !object(snapshot.extensionState)) mismatch();
+  if (snapshot.runtimeIssues !== undefined && !Array.isArray(snapshot.runtimeIssues)) mismatch();
   return snapshot;
 }
+export function decodeHistoryPage(value: unknown): HistoryPage {
+  page(value);
+  if (Object.keys(value).some((key) => !['entries', 'history', 'toolProgress'].includes(key)))
+    mismatch();
+  return value;
+}
 
-export type HistoryPosition = { v: 1; before: number; upper: number };
-export function historyPosition(raw?: string): HistoryPosition | undefined {
-  if (!raw) return;
+export type HistoryPosition = {
+  v: 1;
+  chatId: string;
+  conversationId: number;
+  before: number;
+  upper: number;
+};
+export function encodeHistoryPosition(position: HistoryPosition) {
+  return btoa(JSON.stringify(position))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/, '');
+}
+export function historyPosition(
+  raw: string | undefined,
+  chatId: string,
+  conversationId: number,
+): HistoryPosition | undefined {
+  if (raw === undefined) return;
   try {
-    const value = JSON.parse(raw) as HistoryPosition;
+    if (!raw || raw.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(raw)) throw new Error('invalid');
+    const value = JSON.parse(
+      atob(raw.replaceAll('-', '+').replaceAll('_', '/')),
+    ) as HistoryPosition;
     if (
+      !object(value) ||
       value.v !== 1 ||
-      !Number.isSafeInteger(value.before) ||
-      value.before < 1 ||
-      !Number.isSafeInteger(value.upper) ||
-      value.upper < value.before
+      value.chatId !== chatId ||
+      value.conversationId !== conversationId ||
+      !integer(value.before, 1) ||
+      !integer(value.upper, value.before) ||
+      Object.keys(value).length !== 5
     )
       throw new Error('invalid');
     return value;

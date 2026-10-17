@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from './env';
 import { it, expect } from 'vitest';
 const chat = () => env.CONVERSATIONS.getByName(crypto.randomUUID());
 const command = (text = 'hello') => ({ runId: crypto.randomUUID(), text });
@@ -24,10 +24,10 @@ it('stop closes admission until an ignoring-cancellation tool actually settles',
   const stub = chat();
   await stub.submitRun(command('ignores_cancel'));
   for (let i = 0; i < 100; i++) {
-    if (JSON.parse(await stub.snapshot()).tools?.length) break;
+    if (Object.keys(JSON.parse(await stub.snapshot()).toolProgress ?? {}).length) break;
     await new Promise((r) => setTimeout(r, 10));
   }
-  expect(JSON.parse(await stub.snapshot()).tools).toHaveLength(1);
+  expect(Object.keys(JSON.parse(await stub.snapshot()).toolProgress ?? {})).toHaveLength(1);
   await stub.submitRun(command('later'));
   await stub.stopConversation();
   expect(JSON.parse(await stub.snapshot()).stopping).toBe(true);

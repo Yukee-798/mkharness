@@ -4,8 +4,8 @@
   "compatibility_date": "2026-10-06",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
-    "bindings": [{ "name": "CONVERSATIONS", "class_name": "ConversationAgent" }],
+    "bindings": [{ "name": "CONVERSATIONS", "class_name": "ChatSession" }],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConversationAgent"] }],
+  "exports": { "ChatSession": { "type": "durable-object", "storage": "sqlite" } },
   "vars": { "MODEL_PROVIDER": "fixture", "MODEL_ID": "fixture" },
 }

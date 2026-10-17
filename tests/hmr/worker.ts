@@ -1,57 +1,47 @@
-import { ConversationAgent as Base } from '../../src/server/conversations/agent';
-import { BG } from '../../src/server/conversations/context';
+import { DurableObject } from 'cloudflare:workers';
+import { ChatRuntime } from '../../src/server/chat/runtime';
+import { BG } from '../../src/server/chat/context';
 import type { Harness } from '@earendil-works/pi-durable';
 import { fixtureModels } from '../fixture-model';
 import { revision } from './revision';
-
-// Test-only observations survive module replacement, but not a Worker restart.
 const state = globalThis as typeof globalThis & {
   piHmrProbe?: { runtime: Harness; closed: boolean; id: string }[];
 };
 state.piHmrProbe ??= [];
-
-export class ConversationAgent extends Base {
-  protected override async credentials() {
-    return {
-      select: async () => ({ source: 'server' as const, fingerprint: 'fixture-only' }),
-      resolve: async () => ({ apiKey: 'fixture' }),
-    };
-  }
-
-  protected override models() {
-    return fixtureModels();
-  }
+export class ChatSession extends DurableObject<Env> {
+  private runtime = new ChatRuntime(this.ctx);
   async probe() {
-    const runtime = await this.harness.pi();
-    if (!state.piHmrProbe!.some((item) => item.runtime === runtime)) {
-      const item = { runtime, closed: false, id: crypto.randomUUID() };
+    const pi = await this.runtime.open({
+      models: fixtureModels(),
+      extensions: [],
+      restore: async () => {},
+      committed: () => {},
+    });
+    if (!state.piHmrProbe!.some((item) => item.runtime === pi)) {
+      const item = { runtime: pi, closed: false, id: crypto.randomUUID() };
       state.piHmrProbe!.push(item);
-      const close = runtime.close.bind(runtime);
-      runtime.close = async (context) => {
-        await close(context);
+      pi.subscribeClose(() => {
         item.closed = true;
-      };
+      });
     }
-    this.ctx.storage.sql.exec(
-      'INSERT OR IGNORE INTO app_meta(key,value) VALUES(?,?)',
-      'hmr-test-marker',
-      crypto.randomUUID(),
-    );
-    const marker = this.ctx.storage.sql
-      .exec('SELECT value FROM app_meta WHERE key=?', 'hmr-test-marker')
-      .one().value;
-    return Promise.all(
-      state.piHmrProbe!.map(async (item) => {
-        await item.runtime.inspect(BG);
-        return { closed: item.closed, id: item.id, marker, revision };
-      }),
-    );
+    const root = await pi.root(BG);
+    await root.commit(async () => {}, BG);
+    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS hmr_probe(marker TEXT PRIMARY KEY)');
+    if (!this.ctx.storage.sql.exec('SELECT marker FROM hmr_probe').toArray().length)
+      this.ctx.storage.sql.exec('INSERT INTO hmr_probe VALUES(?)', crypto.randomUUID());
+    const marker = this.ctx.storage.sql.exec('SELECT marker FROM hmr_probe').one().marker;
+    return state.piHmrProbe!.map((item) => ({
+      closed: item.closed,
+      id: item.id,
+      marker,
+      revision,
+    }));
   }
 }
-
 export default {
   async fetch(_request, env) {
-    const target = env.CONVERSATIONS.getByName('hmr-probe') as DurableObjectStub<ConversationAgent>;
-    return Response.json(await target.probe());
+    return Response.json(
+      await (env.CONVERSATIONS.getByName('hmr-probe') as DurableObjectStub<ChatSession>).probe(),
+    );
   },
 } satisfies ExportedHandler<Env>;

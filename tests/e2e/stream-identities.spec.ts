@@ -1,3 +1,4 @@
+import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from './fixtures';
 import { toMessages } from '../../src/shared/stream';
 
@@ -38,6 +39,8 @@ test('tool commits update live calls once; later reasoning and genuine repeated 
       }
       emit({ type: 'TEXT_MESSAGE_END', messageId: id });
       entries.push({
+        conversationId: 1,
+        kind: 'pi.assistant',
         id: entryId,
         model: [
           {
@@ -50,6 +53,8 @@ test('tool commits update live calls once; later reasoning and genuine repeated 
     };
     const result = (id: number, call: any, isError = false) => {
       entries.push({
+        conversationId: 1,
+        kind: 'pi.tool-result',
         id,
         model: [
           {
@@ -100,6 +105,8 @@ test('tool commits update live calls once; later reasoning and genuine repeated 
     finish = () => {
       done = true;
       entries.push({
+        conversationId: 1,
+        kind: 'pi.assistant',
         id: 9,
         model: [
           {
@@ -126,14 +133,14 @@ test('tool commits update live calls once; later reasoning and genuine repeated 
   const port = (server.address() as { port: number }).port;
   try {
     await page.route('**/api/conversations/**', (route) => {
-      if (route.request().url().endsWith('/events'))
+      if (new URL(route.request().url()).pathname.endsWith('/events'))
         return route.continue({ url: `http://127.0.0.1:${port}/events` });
       return route.fulfill({
-        json: {
+        json: snapshotFixture({
           entries: done ? entries : [],
           pending: done ? [] : [{ operationId: runId, status: 'running' }],
           stopping: false,
-        },
+        }),
       });
     });
     await page.goto('/tests/browser/chat.html');
