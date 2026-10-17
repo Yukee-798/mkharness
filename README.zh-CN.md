@@ -138,16 +138,16 @@ pnpm exec wrangler r2 bucket create mkharness-native-skills
 
 构建前修改 [`wrangler.jsonc`](wrangler.jsonc) 的 **`env.production`**：
 
-| 配置                                            | 填写内容                                       |
-| ----------------------------------------------- | ---------------------------------------------- |
-| `name`                                          | `mkharness-native` 或其他尚未使用的 Worker 名  |
-| `d1_databases[0].database_name` / `database_id` | 刚创建的新 D1 名称和 ID                        |
-| `r2_buckets[0].bucket_name`                     | 新的私有桶名称                                 |
-| `vars.APP_URL`                                  | 新部署的精确 origin，替换 `example.com` 占位值 |
-| `vars.AUTH_MODE`                                | Google 登录使用 `account`，访客使用 `guest`    |
-| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0`，仅使用个人 Key                            |
+| 配置                                            | 填写内容                                             |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| `name`                                          | `mkharness-native` 或其他尚未使用的 Worker 名        |
+| `d1_databases[0].database_name` / `database_id` | 刚创建的新 D1 名称和 ID                              |
+| `r2_buckets[0].bucket_name`                     | 新的私有桶名称                                       |
+| `vars.APP_URL`                                  | 自己部署的精确 origin，替换 `template.mkharness.com` |
+| `vars.AUTH_MODE`                                | Google 登录使用 `account`，访客使用 `guest`          |
+| `vars.ALLOW_SERVER_MODEL_KEY`                   | `0`，仅使用个人 Key                                  |
 
-保留 `DB`、`SKILL_FILES`、`CONVERSATIONS` → `ChatSession`、`MCP_CONNECTIONS` → `McpConnection`。使用 declarative `exports` 声明 SQLite DO，不添加旧 migration tag 或转移旧 namespace。仓库有意省略 D1 ID；Wrangler 可在部署时自动创建 D1，上面的显式创建流程则可在首次部署前应用基线。不要使用旧数据库 ID。
+保留 `DB`、`SKILL_FILES`、`CONVERSATIONS` → `ChatSession`、`MCP_CONNECTIONS` → `McpConnection`。使用 declarative `exports` 声明 SQLite DO，不添加旧 migration tag 或转移旧 namespace。自行安装时，将 production 和 test 的数据库 ID 替换为自己刚创建的资源 ID。本地配置省略 D1 ID；Wrangler 可在部署时自动创建 D1，上面的显式创建流程则可在首次部署前应用基线。不要使用旧数据库 ID。
 
 | 环境         | Worker                  | D1                       | 私有 R2                         |
 | ------------ | ----------------------- | ------------------------ | ------------------------------- |
@@ -155,7 +155,7 @@ pnpm exec wrangler r2 bucket create mkharness-native-skills
 | `production` | `mkharness-native`      | `mkharness-native`       | `mkharness-native-skills`       |
 | `test`       | `mkharness-native-test` | `mkharness-native-test`  | `mkharness-native-test-skills`  |
 
-独立远程验收使用 `test`，为其创建独立资源并配置精确 `APP_URL`。配置未接管之前的公开域名，R2 保持私有。
+仓库的 production 环境发布到 `template.mkharness.com`。自行安装时，同时修改 `vars.APP_URL` 和 `routes` 中的自定义域名。独立远程验收使用 `test`，为其创建独立资源并配置精确 `APP_URL`。R2 保持私有。
 
 ### 2. 设置 Secrets 并部署
 

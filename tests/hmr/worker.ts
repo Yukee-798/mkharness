@@ -4,11 +4,12 @@ import { BG } from '../../src/server/chat/context';
 import type { Harness } from '@earendil-works/pi-durable';
 import { fixtureModels } from '../fixture-model';
 import { revision } from './revision';
+type HmrEnv = { CONVERSATIONS: DurableObjectNamespace<ChatSession> };
 const state = globalThis as typeof globalThis & {
   piHmrProbe?: { runtime: Harness; closed: boolean; id: string }[];
 };
 state.piHmrProbe ??= [];
-export class ChatSession extends DurableObject<Env> {
+export class ChatSession extends DurableObject<HmrEnv> {
   private runtime = new ChatRuntime(this.ctx);
   async probe() {
     const pi = await this.runtime.open({
@@ -40,8 +41,6 @@ export class ChatSession extends DurableObject<Env> {
 }
 export default {
   async fetch(_request, env) {
-    return Response.json(
-      await (env.CONVERSATIONS.getByName('hmr-probe') as DurableObjectStub<ChatSession>).probe(),
-    );
+    return Response.json(await env.CONVERSATIONS.getByName('hmr-probe').probe());
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<HmrEnv>;

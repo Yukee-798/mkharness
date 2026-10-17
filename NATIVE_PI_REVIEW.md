@@ -1,5 +1,19 @@
 # Pi 1.3.0 修复与复审记录
 
+## 生产部署记录：2026-10-17
+
+已按用户确认将 `https://template.mkharness.com` 切换到新 Worker `mkharness-native`，线上版本为 `173c81d7-2fb9-4fcd-9757-93f6b612e19e`，流量比例 100%。正式环境关闭 workers.dev 和预览地址，仅使用此自定义域名。
+
+新生产 D1 为 `mkharness-native`（`a063ea46-7733-492c-bd22-c95ff4493b6c`），仅应用 `0001_initial.sql`；R2 为私有桶 `mkharness-native-skills`；`ChatSession` 与 `McpConnection` 均使用新 namespace，已核对与旧部署不同。发布前账号、聊天、模型凭据、MCP 连接和 Skills 数量全部为 0，没有导入旧数据。会话签名和凭据加密使用两个新生成的独立密钥；Google OAuth 配置到新 Worker，仍使用原公开域名的回调地址。当前为 account 模式与个人 Key 模式，`ALLOW_SERVER_MODEL_KEY=0`。
+
+先在独立 workers.dev 地址完成页面、鉴权和静态资源检查，再切换正式域名。切换后重新验证：首页 200，bootstrap 为 account，未登录 session 为 null，聊天/模型设置/MCP/Skills 接口返回 401；线上 Chat JS 的 SHA-256 与本次生产构建一致。浏览器显示正常登录页。Google OAuth 初始化成功，provider 与回调 `https://template.mkharness.com/api/auth/callback/google` 正确；未完成真实账号登录、模型请求或 MCP/Skills 外部验收。
+
+发布时重新生成 Wrangler 绑定类型，移除生成文件中残留的 ConversationAgent 类型引用；HMR 夹具改为声明自身的 HmrEnv，避免将应用 ChatSession stub 强转为夹具 stub。随后 typecheck、定向 lint/format、HMR、生产构建与 dry-run 通过。HMR 再次验证并发单 runtime、依赖更新重启、SQLite 保留和 client-only HMR。
+
+发布日志：`/tmp/mkharness-native-production-deploy.log`；线上检查：`/tmp/mkharness-native-production-smoke.log`；HMR：`/tmp/mkharness-native-production-hmr.log`。下方保留提交 `55f499b` 之前各轮修复与审查的时间点证据，其中“未提交、推送或部署”描述的是相应记录当时的状态。
+
+## 修复与复审范围
+
 本轮范围：修复先前确认的 S1–S5、D1–D3 共 8 项；优先处理两个 P1，并在修复中补齐故障注入、冷启动和产品 Interface 回归。只使用 Pi 1.3.0 当前格式及公开接口，没有恢复旧运行时、增加历史兼容分支或执行数据迁移。
 
 ## 后续 P3 清理

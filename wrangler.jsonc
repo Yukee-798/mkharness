@@ -53,14 +53,14 @@
     "production": {
       "name": "mkharness-native",
       "vars": {
-        // Replace with the new deployment's exact origin before deployment.
-        "APP_URL": "https://mkharness-native.example.com",
+        "APP_URL": "https://template.mkharness.com",
         "AUTH_MODE": "account",
         "ALLOW_SERVER_MODEL_KEY": "0",
         "MODEL_PROVIDER": "",
         "MODEL_ID": "",
         "MODEL_THINKING_LEVEL": "off",
       },
+      "routes": [{ "pattern": "template.mkharness.com", "custom_domain": true }],
       "durable_objects": {
         "bindings": [
           { "name": "CONVERSATIONS", "class_name": "ChatSession" },
@@ -72,10 +72,11 @@
         {
           "binding": "DB",
           "database_name": "mkharness-native",
+          "database_id": "a063ea46-7733-492c-bd22-c95ff4493b6c",
           "migrations_dir": "migrations",
         },
       ],
-      "workers_dev": true,
+      "workers_dev": false,
       "preview_urls": false,
     },
     "test": {
