@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { MessageSquare, PanelLeft, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../ui/utils';
+import { useIsomorphicLayoutEffect } from '../hooks/use-isomorphic-layout-effect';
 import {
   Sheet,
   SheetContent,
@@ -22,6 +23,7 @@ export function AppShell({
   onMenuChange,
   onNewChat,
   creating = false,
+  navigation,
 }: {
   children: ReactNode;
   directory?: ReactNode;
@@ -31,22 +33,29 @@ export function AppShell({
   onMenuChange: (open: boolean) => void;
   onNewChat?: () => void;
   creating?: boolean;
+  navigation?: (collapsed: boolean) => ReactNode;
 }) {
   const { t } = useLocale();
-  const [collapsed, setCollapsed] = useState(() => {
+  // Apply saved browser preferences before the first paint and preserve them
+  // across workspace mounts.
+  const [collapsed, setCollapsed] = useState(false);
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  useIsomorphicLayoutEffect(() => {
     try {
-      return localStorage.getItem('agent-ui.sidebar-collapsed') === 'true';
+      setCollapsed(localStorage.getItem('agent-ui.sidebar-collapsed') === 'true');
     } catch {
-      return false;
+      /* Use the expanded layout when browser storage is unavailable. */
     }
-  });
+    setPreferencesReady(true);
+  }, []);
   useEffect(() => {
+    if (!preferencesReady) return;
     try {
       localStorage.setItem('agent-ui.sidebar-collapsed', String(collapsed));
     } catch {
       /* The layout remains usable when browser storage is unavailable. */
     }
-  }, [collapsed]);
+  }, [collapsed, preferencesReady]);
   useEffect(() => {
     const desktop = matchMedia('(min-width: 768px)');
     const closeDrawer = () => {
@@ -119,6 +128,7 @@ export function AppShell({
                 <TooltipContent side="right">{toggleLabel}</TooltipContent>
               </Tooltip>
             </div>
+            {navigation?.(collapsed)}
             <div
               id="sidebar-directory"
               className={cn('min-h-0 flex-1 overflow-hidden', collapsed && 'hidden')}
@@ -157,6 +167,7 @@ export function AppShell({
                 {t('选择已有聊天或开始新聊天；账号和登录位于底部')}
               </SheetDescription>
             </SheetHeader>
+            {navigation?.(false)}
             <div className="min-h-0 flex-1 overflow-hidden">{content}</div>
             <footer className="shrink-0 border-t p-2">{footer(false)}</footer>
           </SheetContent>

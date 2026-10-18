@@ -1,5 +1,20 @@
 // Application copy only; model output and resource content are never translated.
 export const english: Record<string, string> = {
+  工作台导航: 'Workspace navigation',
+  定时任务: 'Scheduled tasks',
+  插件市场: 'Plugin marketplace',
+  即将开放: 'Coming soon',
+  工作面板: 'Workspace panel',
+  恢复面板大小: 'Restore panel size',
+  最大化面板: 'Maximize panel',
+  收起工作面板: 'Hide workspace panel',
+  打开工作面板: 'Open workspace panel',
+  查看新内容: 'View new content',
+  查看和操作当前工作内容: 'View and interact with the current workspace content',
+  工作面板暂时无法显示: 'The workspace panel could not be displayed. Retry',
+  此工作面板当前不可用: 'This workspace panel is currently unavailable',
+  在工作面板中打开: 'Open in workspace panel',
+  '正在生成预览…': 'Generating preview…',
   '正在加载历史消息…': 'Loading earlier messages…',
   向上滚动加载更早的消息: 'Scroll up to load earlier messages',
   '历史消息加载失败，点击重试': 'Could not load earlier messages. Retry',
@@ -96,14 +111,9 @@ export const english: Record<string, string> = {
     'Optional: stored as plaintext in localStorage to fill in again. Page scripts can read it. Cleared on sign-out.',
   '部署未配置凭据加密主密钥，请联系部署者。':
     'Credential encryption is not configured. Contact the deployment owner.',
-  '保存后，下次提交消息时应用新配置，并影响该会话尚未准备的模型调用（含排队消息和压缩）。 已保存的步骤快照继续使用原版本；旧版本最多保留七天供恢复。更换浏览器或清除 Cookie 后无法找回访客身份。部署者可以解密 Key。':
-    'New settings apply when you next submit a message, including model calls not yet prepared in that chat (queued messages and compaction). Saved step snapshots retain their original version; old versions are kept for up to seven days for recovery. Guest identity cannot be recovered after switching browsers or clearing cookies. The deployment owner can decrypt your key.',
+  '保存后，下次提交消息时应用新配置，并影响该会话尚未准备的模型调用（含排队消息和压缩）。 已保存的步骤快照继续使用原版本；旧版本最多保留七天供恢复。部署者可以解密 Key。':
+    'New settings apply when you next submit a message, including model calls not yet prepared in that chat (queued messages and compaction). Saved step snapshots retain their original version; old versions are kept for up to seven days for recovery. The deployment owner can decrypt your key.',
   保存配置: 'Save configuration',
-  '无法建立浏览器身份，请重试': 'Could not create a browser identity. Please try again.',
-  '当前身份不适用于此部署模式，请退出后重新进入':
-    'This identity does not match the deployment mode. Sign out and try again.',
-  退出当前身份: 'Sign out',
-  '正在建立浏览器身份…': 'Creating browser identity…',
   '正在恢复身份…': 'Restoring session…',
   '正在打开登录…': 'Opening sign-in…',
   '使用 Google 登录': 'Sign in with Google',
@@ -116,7 +126,6 @@ export const english: Record<string, string> = {
     'Could not load sign-in configuration. Check the server settings.',
   '从侧栏底部使用 Google 登录。聊天和输入仅保存在你的个人会话中。':
     'Sign in with Google at the bottom of the sidebar. Chats and inputs are saved in your personal session.',
-  此浏览器的访客: 'Guest in this browser',
   Today: 'Today',
   Earlier: 'Earlier',
   退出失败: 'Sign-out failed',
@@ -128,7 +137,6 @@ export const english: Record<string, string> = {
   更多聊天: 'More chats',
   聊天: 'Chat',
   '账号：{name}': 'Account: {name}',
-  身份保留在此浏览器: 'Identity saved in this browser',
   个人账号: 'Personal account',
   '正在退出…': 'Signing out…',
   退出登录: 'Sign out',

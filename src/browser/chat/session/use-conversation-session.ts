@@ -45,9 +45,9 @@ export function useConversationSession({
     queryKey: userKeys(userId).snapshot(id),
     queryFn: ({ signal }) => remote.snapshot(id, signal),
     retry: false,
-    enabled: !!id,
+    enabled: !!userId && !!id,
   });
-  const settings = useQuery(modelSettingsOptions(userId));
+  const settings = useQuery({ ...modelSettingsOptions(userId), enabled: !!userId });
   const {
     send,
     retry: retrySubmission,
@@ -157,6 +157,7 @@ export function useConversationSession({
     source?: RunCommand['source'],
     images?: RunCommand['images'],
   ) => {
+    if (!userId) throw new ApiError(401, 'unauthorized', '请先登录');
     if (
       !id &&
       (!selected ||
@@ -229,7 +230,7 @@ export function useConversationSession({
   // Calling runtime.send/abort here would replace the live subscription or cancel a durable task.
   const renderedSnapshot = snapshot ?? (!id || initialSubmission ? emptySnapshot : undefined);
   const submitting = sending || latest?.status === 'pending';
-  const composerReady = !id || !!renderedSnapshot;
+  const composerReady = !!userId && (!id || !!renderedSnapshot);
   const hasPending = !!snapshot?.pending.length || ackPending;
   const isStopping = stopSending || !!snapshot?.stopping;
   const loadOlder = useCallback(async () => {

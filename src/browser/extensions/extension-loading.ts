@@ -12,6 +12,7 @@ export function useBrowserExtensions(userId: string) {
         signal,
       }),
     retry: false,
+    enabled: !!userId,
     // Deployment capabilities do not change between workspace/runtime mounts.
     // Recheck on focus so an already open page can still observe a redeployment.
     staleTime: Infinity,
@@ -21,7 +22,7 @@ export function useBrowserExtensions(userId: string) {
   const loaded = useQuery({
     queryKey: ['user', userId, 'browser-extensions', ids],
     queryFn: () => loadBrowserExtensions(ids, browserLoaders),
-    enabled: !!capabilities.data,
+    enabled: !!userId && !!capabilities.data,
     retry: false,
     // Partial success is usable but not permanently fresh. A focus or explicit
     // retry may recover a transient chunk failure without reloading the chat.

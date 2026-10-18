@@ -2,7 +2,7 @@ import { modelRoutes } from './models/routes';
 import { conversationRoutes } from './chat/routes';
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { auth, authMode } from './auth';
+import { auth } from './auth';
 import { extensionIds } from '../extensions/server';
 import { AppError } from '../shared/contracts';
 import { skillRoutes } from './skills/routes';
@@ -19,13 +19,10 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth(c.env).handler(c.req.raw));
-app.get('/api/bootstrap', (c) => c.json({ authMode: authMode(c.env) }));
 app.use('/api/*', async (c, next) => {
   const session = await auth(c.env).api.getSession({ headers: c.req.raw.headers });
   if (!session)
     return c.json({ error: { code: 'unauthenticated', message: 'Sign in to continue' } }, 401);
-  if (Boolean(session.user.isAnonymous) !== (authMode(c.env) === 'guest'))
-    throw new AppError(409, 'auth_mode_mismatch', '当前身份不适用于此部署模式，请退出后重新进入');
   if (
     !['GET', 'HEAD'].includes(c.req.method) &&
     c.req.header('Origin') !== new URL(c.env.APP_URL).origin

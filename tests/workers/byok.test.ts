@@ -27,9 +27,9 @@ async function fixture() {
     chat = crypto.randomUUID(),
     now = Date.now();
   await env.DB.prepare(
-    'INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt,isAnonymous) VALUES(?,?,?,0,?,?,1)',
+    'INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES(?,?,?,1,?,?)',
   )
-    .bind(owner, 'guest', owner + '@test.invalid', now, now)
+    .bind(owner, 'account', owner + '@test.invalid', now, now)
     .run();
   await env.DB.prepare(
     'INSERT INTO conversations(id,owner,create_request_id,create_hash,instance_generation,title,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',

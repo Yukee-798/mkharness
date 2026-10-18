@@ -1,49 +1,29 @@
 import { snapshotFixture } from './chat-fixtures';
 import { test, expect } from '@playwright/test';
-test.beforeEach(async ({ context }) => {
+import { seedAccount } from './account-fixture';
+test.beforeEach(async ({ context }, info) => {
+  if (!info.title.startsWith('signed-out')) await seedAccount(context);
   await context.addInitScript(() => localStorage.setItem('mkharness.locale', 'zh-CN'));
 });
-test('native anonymous identity survives reload, shares tabs and isolates browsers', async ({
+test('signed-out browsers show Google sign-in without creating an identity', async ({
   page,
   context,
-  browser,
 }) => {
   const calls: string[] = [];
   page.on('request', (r) => {
     if (r.url().includes('/api/')) calls.push(r.method() + ' ' + new URL(r.url()).pathname);
   });
   await page.goto('/');
-  await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '账号：此浏览器的访客' })).toBeVisible();
-  expect(calls.filter((p) => p === 'POST /api/auth/sign-in/anonymous')).toHaveLength(1);
-  expect(calls.some((p) => p === 'POST /api/conversations' || p.endsWith('/events'))).toBe(false);
-  const first = await (await context.request.get('/api/auth/get-session')).json();
+  await expect(page.getByRole('button', { name: '使用 Google 登录', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel('消息', { exact: true })).toBeVisible();
-  const restored = await (await context.request.get('/api/auth/get-session')).json();
-  expect(restored.user.id).toBe(first.user.id);
-  const sharedTab = await context.newPage();
-  const sharedCalls: string[] = [];
-  sharedTab.on('request', (r) => sharedCalls.push(new URL(r.url()).pathname));
-  await sharedTab.goto('/');
-  await expect(sharedTab.getByLabel('消息', { exact: true })).toBeVisible();
-  expect(sharedCalls.filter((p) => p === '/api/auth/sign-in/anonymous')).toHaveLength(0);
-  expect((await (await context.request.get('/api/auth/get-session')).json()).user.id).toBe(
-    first.user.id,
+  await expect(page.getByRole('button', { name: '使用 Google 登录', exact: true })).toBeVisible();
+  expect(await (await context.request.get('/api/auth/get-session')).json()).toBeNull();
+  expect(
+    calls.some((p) => p.includes('/sign-in/anonymous') || p === 'POST /api/conversations'),
+  ).toBe(false);
+  expect((await context.request.post('/api/auth/sign-in/anonymous', { data: {} })).status()).toBe(
+    404,
   );
-  await sharedTab.close();
-  const other = await browser.newContext();
-  try {
-    const tab = await other.newPage();
-    await tab.goto('/');
-    await expect(
-      tab.getByPlaceholder('Describe your question or what you want to do'),
-    ).toBeVisible();
-    const another = await (await other.request.get('/api/auth/get-session')).json();
-    expect(another.user.id).not.toBe(first.user.id);
-  } finally {
-    await other.close();
-  }
 });
 test('metadata-only settings, credential preflight and saved Base URL survive reload', async ({
   page,
@@ -62,7 +42,7 @@ test('metadata-only settings, credential preflight and saved Base URL survive re
   if (settings.modelCatalog.models.length > 5)
     await page.getByPlaceholder('搜索模型…').fill(selected.name);
   await page.getByRole('option', { name: selected.name, exact: true }).click();
-  await page.getByRole('button', { name: '账号：此浏览器的访客' }).click();
+  await page.getByRole('button', { name: '账号：Test account' }).click();
   await page.getByRole('menuitem', { name: '设置' }).click();
   await page.getByRole('tab', { name: '模型与 API Key' }).click();
   await expect(page.getByLabel('Base URL', { exact: true })).toHaveValue(

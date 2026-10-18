@@ -1,6 +1,7 @@
 import type { Toolkit, ToolCallMessagePartProps } from '@assistant-ui/react';
 import type { ComponentType } from 'react';
 import type { ExtensionState } from '../../shared/extension-state';
+import type { WorkbenchPanelDefinition } from '../workbench/panels';
 export type ExtensionUI = {
   toolDisplayName?: (name: string, state?: ExtensionState) => string | undefined;
   toolFooter?: ComponentType<{ part: ToolCallMessagePartProps }>;
@@ -14,6 +15,7 @@ export type BrowserExtension = {
   toolkit?: Toolkit;
   activity?: Record<string, 'visible' | 'hidden'>;
   ui?: ExtensionUI;
+  panels?: Readonly<Record<string, WorkbenchPanelDefinition>>;
 };
 export type BrowserLoaders = Record<string, () => Promise<BrowserExtension>>;
 export async function loadBrowserExtensions(ids: readonly string[], loaders: BrowserLoaders) {
@@ -39,6 +41,17 @@ export async function loadBrowserExtensions(ids: readonly string[], loaders: Bro
       const module = result.value;
       const tools = Object.keys(module.toolkit ?? {});
       if (
+        Object.entries(module.panels ?? {}).some(
+          ([name, panel]) =>
+            !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/.test(name) ||
+            !panel ||
+            !['conversation', 'workspace'].includes(panel.scope) ||
+            typeof panel.parse !== 'function' ||
+            typeof panel.key !== 'function' ||
+            typeof panel.title !== 'function' ||
+            typeof panel.Content !== 'function' ||
+            (panel.restore !== undefined && typeof panel.restore !== 'function'),
+        ) ||
         tools.some((name) => names.has(name)) ||
         Object.entries(module.activity ?? {}).some(
           ([name, visibility]) =>

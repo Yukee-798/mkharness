@@ -20,7 +20,7 @@ for (const mobile of [false, true]) {
               userId: 'owner',
               expiresAt: new Date(Date.now() + 86400000).toISOString(),
             },
-            user: { id: 'owner', name: 'Test User', email: 'test@example.com', isAnonymous: false },
+            user: { id: 'owner', name: 'Test User', email: 'test@example.com' },
           },
         });
       if (path === '/api/conversations') return route.fulfill({ json: { items: [], next: null } });
@@ -160,7 +160,7 @@ test('language and theme switching preserve the active SSE observer and runtime'
             userId: 'owner',
             expiresAt: new Date(Date.now() + 86400000).toISOString(),
           },
-          user: { id: 'owner', name: 'Test User', email: 'test@example.com', isAnonymous: false },
+          user: { id: 'owner', name: 'Test User', email: 'test@example.com' },
         },
       });
     if (path === '/api/conversations')

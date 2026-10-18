@@ -7,7 +7,8 @@ This document describes the native Pi Durable 1.3.0 implementation. The runtime 
 | Location                                                | Responsibility                                                                                          |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `src/routes/`, `src/router.tsx`                         | TanStack application routing and Query setup                                                            |
-| `src/browser/app/`                                      | Identity bootstrap, navigation, directory, locale and theme                                             |
+| `src/browser/app/`                                      | Google session, navigation, directory, locale and theme                                                 |
+| `src/browser/workbench/`                                | Panel selection and layout, developer contribution Interface, navigation and in-memory composer drafts  |
 | `src/browser/chat/`                                     | Composer, queue and assistant-ui presentation                                                           |
 | `src/browser/chat/session/`                             | Stable creation/submission receipts, HTTP/SSE remote, recovery, loaded history and assistant-ui binding |
 | `src/browser/chat/messages/`                            | Messages, reasoning, tools and reply actions                                                            |
@@ -105,7 +106,9 @@ Regenerate uses an exact visible answer → authoritative completed input receip
 
 `ConversationHistory` merges pages and current stream snapshots by native identity, retains entry annotations by revision and resets state when the native target changes. Pagination is single-flight, aborts on unmount and preserves a DOM scroll anchor without reconnecting the stream or replacing the composer. `ConversationRemote` provides snapshot/history, submit/create, queue, Stop and observation through the same HTTP seam; controlled test adapters replace network behavior.
 
-Contributions declare native `stateDocuments`, derive conversation state with `projectConversation`, and attach page annotations with `projectHistory`. `taskReferences` identifies extra exact facts needed by a declared document. They receive selected page facts and documents, not an implicit scan of all completed history. OpenUI's `PanelSession` and draft saver retain input epochs, compute provenance, debounce, CAS, conflict and lost-acknowledgement recovery. Browser Worker and server QuickJS are separate compute adapters.
+Contributions declare native `stateDocuments`, derive conversation state with `projectConversation`, and attach page annotations with `projectHistory`. `taskReferences` identifies extra exact facts needed by a declared document. They receive selected page facts and documents, not an implicit scan of all completed history. The browser workbench collects namespaced `panels` from enabled browser contributions. One selected panel shares the existing assistant-ui runtime and conversation submission port. Desktop uses resizable panes; mobile uses a full-screen Sheet. Account-scoped local storage holds only opted-in resource references and layout; unsent text/images/model drafts remain in memory. Scheduled-task and marketplace routes are placeholders. See [the workbench implementation and developer Interface](WORKBENCH_DESIGN.md#13-首期实际实现与开发者接入).
+
+OpenUI's `PanelSession` and draft saver retain input epochs, compute provenance, debounce, CAS, conflict and lost-acknowledgement recovery. Browser Worker and server QuickJS are separate compute adapters.
 
 ## Storage and cost boundaries
 
@@ -133,4 +136,4 @@ Trusted extensions register native tools/tasks/prompts/hooks and explicit host r
 
 Tests are grouped by `unit`, `native`, `workers`, `e2e` and `hmr`. Test-only fixture conveniences call the production command/read/observe protocol; they are not shipped runtime aliases. Source paths have no compatibility forwarding modules.
 
-Wrangler declares fresh SQLite DO exports and a single D1 baseline, `migrations/0001_initial.sql`. Local storage uses `.wrangler/native-state`; browser fixtures use separate native E2E storage/build output. The independent `mkharness-native-test` environment must pass real authentication, provider, MCP, Skills, OpenUI and offline-wake acceptance before a public-domain cutover. Keep old deployed resources separate until that cutover is approved and their work has drained or been explicitly stopped.
+Wrangler declares fresh SQLite DO exports and a native D1 migration chain starting at `migrations/0001_initial.sql`. `0002_google_accounts.sql` revokes legacy browser-only sessions and drops the retired identity flag without deleting users or their owned data. Apply it before deploying Google-only authentication. Local storage uses `.wrangler/native-state`; browser fixtures use separate native E2E storage/build output. The independent `mkharness-native-test` environment must pass real authentication, provider, MCP, Skills, OpenUI and offline-wake acceptance before a public-domain cutover. Keep old deployed resources separate until that cutover is approved and their work has drained or been explicitly stopped.

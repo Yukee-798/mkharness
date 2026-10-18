@@ -11,6 +11,7 @@ import {
   useIsMarkdownCodeBlock,
 } from '@assistant-ui/react-markdown';
 import remarkGfm from 'remark-gfm';
+import { remarkCjkAutolinks } from './remark-cjk-autolinks';
 import { type FC, memo, useMemo, useRef } from 'react';
 import type { TextMessagePartProps } from '@assistant-ui/react';
 import { CheckIcon, CopyIcon } from 'lucide-react';
@@ -51,7 +52,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components, componentsByLangu
 
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkCjkAutolinks]}
       className="aui-md"
       components={markdownComponents}
       componentsByLanguage={stableComponentsByLanguage}

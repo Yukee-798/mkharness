@@ -6,11 +6,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "APP_URL": "http://localhost:5174",
-    "AUTH_MODE": "guest",
     "ALLOW_SERVER_MODEL_KEY": "0",
     "MODEL_PROVIDER": "",
     "MODEL_ID": "",
-    "BETTER_AUTH_SECRET": "e2e-fixture-only-secret-at-least-32-characters",
+    "BETTER_AUTH_SECRET": "local-test-only-secret-at-least-32-chars",
+    "GOOGLE_CLIENT_ID": "fixture",
+    "GOOGLE_CLIENT_SECRET": "fixture",
     "CREDENTIAL_ENCRYPTION_KEY": "bW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW0=",
   },
   "durable_objects": {

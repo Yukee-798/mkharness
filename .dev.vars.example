@@ -1,9 +1,9 @@
 # Copy to .dev.vars. This file contains no credentials.
-AUTH_MODE=guest
 ALLOW_SERVER_MODEL_KEY=0
 # pnpm setup fills only missing secrets in .dev.vars; retain these across restarts/deploys.
 CREDENTIAL_ENCRYPTION_KEY=
 BETTER_AUTH_SECRET=
+# Required in local and deployed environments. Local callback: http://localhost:5173/api/auth/callback/google
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 MODEL_PROVIDER=deepseek

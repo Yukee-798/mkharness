@@ -6,7 +6,7 @@
 
 MkHarness is an open-source application template for building your own Agent product. It combines a streaming chat interface, persistent execution, and extensions for tools and interactive results, using **TanStack, Cloudflare, Pi, and assistant-ui**.
 
-Start locally without signing in, add your API key in the UI, and deploy the same application to Cloudflare.
+Sign in with Google, add your API key in the UI, and deploy the same application to Cloudflare.
 
 [Quick start](#quick-start) · [Features](#features) · [Extensions](#extend-mkharness) · [Deployment](#deploy-to-cloudflare) · [FAQ](#faq) · [MIT License](LICENSE)
 
@@ -14,7 +14,7 @@ The native Pi replacement uses a separate fresh environment. Its public-domain c
 
 ## Quick start
 
-You need **Node.js 24**, **pnpm 11.17.0**, and a supported model API key. Local development requires neither a Cloudflare account nor Google OAuth configuration.
+You need **Node.js 24**, **pnpm 11.17.0**, and a supported model API key. Local development requires Google OAuth credentials but no Cloudflare account.
 
 ```sh
 git clone https://github.com/Yukee-798/mkharness.git
@@ -25,10 +25,12 @@ pnpm setup
 pnpm dev
 ```
 
-Open **http://localhost:5173**:
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.dev.vars`, with callback `http://localhost:5173/api/auth/callback/google`. Restart the server after editing secrets.
+
+Open **http://localhost:5173** and sign in with Google:
 
 1. Select a model in the composer.
-2. Open the visitor menu at the bottom of the sidebar → **Settings → Models & API Key**. Configure **Model name**, **Base URL** and **API Key**, then click **Save configuration**.
+2. Open the account menu at the bottom of the sidebar → **Settings → Models & API Key**. Configure **Model name**, **Base URL** and **API Key**, then click **Save configuration**.
 3. Send your first message.
 
 The interface defaults to English. Switch to Chinese in **Settings → General → Language**, and choose **Light**, **Dark**, or **System** in **Appearance**. These preferences are remembered in this browser; the default theme follows your system.
@@ -37,18 +39,19 @@ Try asking a question, requesting an interactive plan, or reading a public web p
 
 > Keys entered through the UI are sent to your deployment and encrypted on the server for background execution and recovery. Use your own deployment or one you trust. Saving a key does not test the connection; the first model request uses it.
 
-`pnpm setup` generates missing local authentication and encryption secrets and applies `migrations/0001_initial.sql` to the new local D1 database. Keep `.dev.vars` across restarts; Git ignores it. Native Pi development data lives in `.wrangler/native-state`, separate from earlier local installations. Setup accepts an empty database or this exact baseline and refuses older schemas; it never imports accounts, chats, credentials, MCP connections or Skills. Run `node scripts/setup.mjs --check` to check local readiness without changing secrets or applying migrations. Use `localhost` consistently rather than switching between it and `127.0.0.1`. The interface supports English and Chinese.
+`pnpm setup` generates missing local authentication and encryption secrets and applies the native D1 migrations, starting with `migrations/0001_initial.sql`. Keep `.dev.vars` across restarts; Git ignores it. Native Pi development data lives in `.wrangler/native-state`, separate from earlier local installations. Setup accepts an empty database or the known native migration chain and refuses unrelated older schemas; it never imports accounts, chats, credentials, MCP connections or Skills. Migration `0002_google_accounts.sql` revokes previous browser-only sessions and drops their identity flag while retaining users and owned data. Apply it before deploying Google-only authentication. Run `node scripts/setup.mjs --check` to check local readiness without changing secrets or applying migrations. Use `localhost` consistently rather than switching between it and `127.0.0.1`. The interface supports English and Chinese.
 
 ## Features
 
+- **An Agent workbench.** A unified collapsible sidebar for Agent, scheduled tasks and the plugin marketplace, with developer-defined right panels. OpenUI is the default panel; scheduling and marketplace pages are placeholders. Desktop panels resize, maximize and restore; mobile uses a full-screen sheet.
 - **A working chat app.** Streaming responses, reasoning and tool activity, model and thinking-level selection, conversation history, and reply/tool timing. Built with assistant-ui, shadcn/ui, and Tailwind CSS.
 - **Image attachments.** Preview and remove PNG, JPEG, WebP, or GIF images using assistant-ui; send images with text or on their own to an image-capable model. Up to 4 images totaling 512 KiB per message, retained in Pi history for retries and recovery.
 - **A durable, editable queue.** Pending messages survive refresh. Edit withdraws an unstarted message and restores its text and images to the composer; Steer joins the current work at a native Pi boundary; Remove withdraws one pending message. Already-started tasks cannot be withdrawn through queue controls. Pi remains the only queue authority.
 - **Durable Agent execution.** Each chat runs in a `ChatSession` Durable Object with one native Pi Durable 1.3.0 Harness and the official SQLite adapter. Pi owns submissions, Inbox, history and task recovery. Closing the browser detaches observation; Stop is a separate action. Deletion returns `202` after a durable tombstone and cleanup alarm, hides the chat, and erases its content after runtime shutdown. D1 retains a minimal create/deletion receipt so delayed calls cannot recreate it.
-- **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, and message footers in the browser.
+- **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, message footers, and workbench panels in the browser.
 - **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
 - **Remote integrations.** User-added remote MCP connections with native SDK OAuth, deployment-configured MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.
-- **Guest access and personal keys.** Better Auth anonymous sessions isolate each browser's data. Users configure their own model name, Base URL and API Key; Google sign-in and a deployment default key are optional.
+- **Google accounts and personal keys.** Better Auth Google sign-in scopes data to each account. Users configure their own model name, Base URL and API Key; a deployment default key is optional.
 
 Use this foundation for research assistants, data workflows, or creative Agents that call your services. MkHarness provides application and execution infrastructure; product-specific tools, image/video services, billing, and subscriptions are yours to add.
 
@@ -68,6 +71,8 @@ Extensions are trusted code that you review and ship with your application. Serv
 | An async service                                           | [`src/extensions/async-example/`](src/extensions/async-example/) — adapt to your service's submit/query/cancel contract |
 
 Manage all extension switches in [`extensions.config.ts`](extensions.config.ts). For a small example, set `example.enabled` to `true` there. Its [server tool, prompt section and hook](src/extensions/example/server.ts) and [browser renderer](src/extensions/example/browser.tsx) live together in `src/extensions/example/` and are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
+
+For custom workbench panels, export `panels` from your reviewed browser extension using `defineWorkbenchPanel`. The host handles target validation, selection, hide/restore, responsive layout and account-scoped reference persistence. See the [current panel Interface and example](WORKBENCH_DESIGN.md#13-首期实际实现与开发者接入) and the [OpenUI adapter](src/extensions/openui/WorkbenchPanel.tsx). Browser or cloud desktop providers own their connection lifecycle; the template ships the OpenUI preview adapter.
 
 Successful web reads and searches populate Sources cards from committed Pi results. The reply extension adds native assistant-ui follow-up buttons and Regenerate to the action bar. Follow-ups are localized common prompts and require no background model call. Regenerate submits a new operation referring to the original committed input, including its form context; the original answer stays in history. It uses current model settings and does not authorize replay of an unknown remote side effect.
 
@@ -95,7 +100,7 @@ Generic finite-JSON validation, size checks and canonical equality live in `src/
 
 ## Custom remote MCP connections
 
-Open **Settings → Connections → Add connection**, enter a name and a public HTTPS Streamable HTTP endpoint (for example, `https://mcp.notion.com/mcp`), and connect. Automatic OAuth uses the Cloudflare Agents SDK for protected-resource/authorization-server discovery, client registration, PKCE, callback validation, token exchange and refresh. HTTPS deployments publish client metadata at `/api/mcp/client-metadata`; servers without dynamic registration or client metadata support can use the advanced pre-registered Client ID/secret fields. OAuth compatibility depends on the server; arbitrary nonstandard provider flows are not bundled. Anonymous local sessions and signed-in cloud accounts own separate connections.
+Open **Settings → Connections → Add connection**, enter a name and a public HTTPS Streamable HTTP endpoint (for example, `https://mcp.notion.com/mcp`), and connect. Automatic OAuth uses the Cloudflare Agents SDK for protected-resource/authorization-server discovery, client registration, PKCE, callback validation, token exchange and refresh. HTTPS deployments publish client metadata at `/api/mcp/client-metadata`; servers without dynamic registration or client metadata support can use the advanced pre-registered Client ID/secret fields. OAuth compatibility depends on the server; arbitrary nonstandard provider flows are not bundled. Connections belong to the signed-in account within each deployment.
 
 Newly discovered tools default to **Ask every time**. Each tool can be disabled or allowed automatically. New chats freeze enabled tool definitions; permission restrictions and disconnects apply again immediately before dispatch. Tool or authorization changes require a new chat. Pending confirmations appear beside their tool invocation and survive refresh; Reject and Stop prevent undispatched operations. An interrupted dispatched call is marked **outcome unknown** and is never resent automatically. That connection remains blocked until externally reconciled; this version has no manual outcome-resolution action. Disconnecting erases locally stored tokens; revoke the application's authorization at the provider separately if needed.
 
@@ -146,7 +151,6 @@ Edit **`env.production`** in [`wrangler.jsonc`](wrangler.jsonc) before building:
 | `d1_databases[0].database_name` / `database_id` | Name and ID returned by the new `d1 create`                                             |
 | `r2_buckets[0].bucket_name`                     | The new private bucket name                                                             |
 | `vars.APP_URL`                                  | Your deployment's exact origin; change `template.mkharness.com` for your installation   |
-| `vars.AUTH_MODE`                                | `account` with Google OAuth, or `guest` without a sign-in screen                        |
 | `vars.ALLOW_SERVER_MODEL_KEY`                   | `0` for your own installation; the public template demo uses `1` with `openrouter/free` |
 
 Keep `DB`, `SKILL_FILES`, `CONVERSATIONS` → `ChatSession`, and `MCP_CONNECTIONS` → `McpConnection`. Wrangler's declarative `exports` declares both DO classes with SQLite storage. Do not add historical DO migration tags or transfer old namespaces. Replace the production and test database IDs with IDs from your own newly created resources. The local configuration omits its ID; Wrangler supports automatic D1 provisioning on deployment, but the explicit creation above lets you apply the baseline before first deployment. Never reuse an old database ID.
@@ -174,7 +178,7 @@ pnpm deploy:production
 
 Run `openssl rand -base64 32` twice to generate **two independent secrets** and enter them at the corresponding prompts. The encryption key must encode exactly 32 random bytes. If Wrangler asks to create the Worker when setting its first secret, allow creation.
 
-For the default `AUTH_MODE=account`, also configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in this environment before deployment, and register `https://YOUR_DOMAIN/api/auth/callback/google` with the exact origin in `APP_URL`. Keep the newly generated secrets across subsequent deployments. Changing the encryption key prevents credentials in this new environment from being decrypted. [Environment selection happens at build time](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/); rebuild after changing configuration or environments.
+Configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in this environment before deployment, and register `https://YOUR_DOMAIN/api/auth/callback/google` with the exact origin in `APP_URL`. Keep the newly generated secrets across subsequent deployments. Changing the encryption key prevents credentials in this new environment from being decrypted. [Environment selection happens at build time](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/); rebuild after changing configuration or environments.
 
 Verify the new environment through its independent URL before switching a public domain. Check real login, model execution, MCP, Skills, OpenUI, recovery and offline alarm progress. Then stop new admissions to the old deployment and drain or explicitly stop its tasks before switching the domain; changing a route does not cancel old alarms. Retain old resources until the new environment is accepted. A dry run validates the bundle/configuration and does not provision or verify remote resources.
 
@@ -210,9 +214,9 @@ To configure an optional OpenRouter free default on your own deployment, set `MO
 ## FAQ
 
 <details>
-<summary><strong>How are guest identities and API keys stored?</strong></summary>
+<summary><strong>How are accounts and API keys stored?</strong></summary>
 
-Each browser gets an authenticated anonymous Better Auth session. Clearing cookies or switching browsers loses access to that guest identity; cross-browser recovery and guest-to-account migration are not included.
+Google sign-in identifies the account; signing in again restores access to that account within the same deployment. Local and production databases remain separate.
 
 Keys are encrypted in D1 with AES-256-GCM, excluded from chat history. Browser storage is opt-in: “Remember API key in this browser” keeps a plaintext copy in localStorage for this identity, cleared on sign-out; it is never automatically re-uploaded. The deployment operator holds the encryption secret and can decrypt them. The most recently saved personal model is the default for new submissions; its key takes precedence over a deployment key for the same provider. The default `ALLOW_SERVER_MODEL_KEY=0` requires users to supply a key; setting it to `1` with `MODEL_API_KEY` enables an operator-funded default.
 

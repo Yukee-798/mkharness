@@ -2,20 +2,19 @@ import { useConversationSession } from './session/use-conversation-session';
 import type { QueueDraft } from '../../shared/queue';
 import { ImageComposer, AddImage } from './image-attachments';
 import { useLocale } from '../app/locale';
-import { useState, useRef, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import type { Json } from '../../shared/json';
-import type { RunCommand } from '../../shared/contracts';
 import { TaskQueue } from './task-queue';
 import { ResourceDrafts } from '../extensions/ResourceDrafts';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
-import { ChatLoading } from './chat-loading';
 import { Alert, AlertDescription } from '../ui/alert';
 import { ModelPicker } from '../models/model-picker';
 import { resolveModelSelection } from '../../shared/model-selection';
 import { ArrowUp, Check, Square, LoaderCircle } from 'lucide-react';
 import { ChatRuntime } from './ChatRuntime';
+import { useComposerDraft } from '../workbench/composer-drafts';
 function ConversationChat({
   id,
   userId,
@@ -60,13 +59,21 @@ function ConversationChat({
     error: visibleError,
     credentialRequired,
   } = session.view;
-  const renderedSnapshot = snapshot;
-  const [text, setText] = useState('');
-  const [draftSource, setDraftSource] = useState<RunCommand['source']>();
+  const draft = useComposerDraft(id);
+  const {
+    text,
+    source: draftSource,
+    version: composerVersion,
+  } = useSyncExternalStore(draft.subscribe, draft.getSnapshot, draft.getSnapshot);
   const [editingQueue, setEditingQueue] = useState(false);
-  const draftVersion = useRef(0);
-  const composerVersion = draftVersion.current;
   const { submit, reportError: setError, selectModel: setSelection } = session;
+  const restoredModel = useRef(false);
+  useEffect(() => {
+    if (!catalog || restoredModel.current) return;
+    restoredModel.current = true;
+    const config = draft.getSnapshot().config;
+    if (config) setSelection(resolveModelSelection(catalog, config));
+  }, [catalog, draft, setSelection]);
   const footer = (
     <div className="space-y-3">
       <TaskQueue
@@ -77,12 +84,13 @@ function ConversationChat({
         editing={setEditingQueue}
         act={session.actOnQueue}
         acknowledge={session.acknowledgeQueueEdit}
-        edit={(draft: QueueDraft) => {
+        edit={(queuedDraft: QueueDraft) => {
           flushSync(() => {
-            draftVersion.current++;
-            setText(draft.text);
-            setDraftSource(draft.source);
-            if (draft.config && catalog) setSelection(resolveModelSelection(catalog, draft.config));
+            draft.edit(queuedDraft.text, queuedDraft.source);
+            if (queuedDraft.config && catalog) {
+              draft.setConfig(queuedDraft.config);
+              setSelection(resolveModelSelection(catalog, queuedDraft.config));
+            }
           });
         }}
       />
@@ -137,6 +145,7 @@ function ConversationChat({
       )}
       {!id && newChatControls?.(submitting)}
       <ImageComposer
+        draft={draft}
         className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
         onSubmit={async (images) => {
           if (
@@ -150,10 +159,7 @@ function ConversationChat({
           const submittedVersion = composerVersion;
           try {
             await submit(text, draftSource, images);
-            if (draftVersion.current === submittedVersion) {
-              setText('');
-              setDraftSource(undefined);
-            }
+            draft.clearText(submittedVersion);
             return true;
           } catch (e) {
             setError(e as Error);
@@ -170,9 +176,7 @@ function ConversationChat({
               id="message"
               value={text}
               onChange={(e) => {
-                draftVersion.current++;
-                setText(e.target.value);
-                if (!e.target.value) setDraftSource(undefined);
+                draft.edit(e.target.value);
               }}
               rows={2}
               placeholder={t('描述你的问题，或说说你想完成什么')}
@@ -192,7 +196,10 @@ function ConversationChat({
                   <ModelPicker
                     catalog={catalog}
                     value={selected}
-                    onChange={setSelection}
+                    onChange={(value) => {
+                      draft.setConfig(value);
+                      setSelection(value);
+                    }}
                     disabled={submitting || isStopping || editingQueue}
                   />
                 ) : (
@@ -242,25 +249,7 @@ function ConversationChat({
   return (
     <ResourceDrafts>
       <div className="chat flex min-h-0 flex-1 flex-col">
-        {renderedSnapshot ? (
-          <ChatRuntime key={`${userId}:${id}`} session={session} footer={footer} />
-        ) : (
-          <>
-            <ChatLoading />
-            <div className="mx-auto w-full max-w-3xl px-4 pb-4">
-              {visibleError && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    {t(visibleError.message)}
-                    <Button variant="outline" size="sm" onClick={session.reconnect}>
-                      {t('重新连接')}
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-            </div>
-          </>
-        )}
+        <ChatRuntime key={`${userId}:${id}`} session={session} footer={footer} />
       </div>
     </ResourceDrafts>
   );

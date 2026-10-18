@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AttachmentPrimitive,
   ComposerPrimitive,
@@ -13,6 +13,7 @@ import { ImagePlus, X } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Alert, AlertDescription } from '../ui/alert';
 import { useLocale } from '../app/locale';
+import type { ComposerDraft } from '../workbench/composer-drafts';
 import {
   IMAGE_LIMITS,
   imageTypes,
@@ -100,23 +101,94 @@ export function AddImage({ disabled }: { disabled: boolean }) {
 export function ImageComposer({
   onSubmit,
   children,
+  draft,
   ...props
 }: {
   onSubmit: (images?: ImageAttachment[]) => Promise<boolean>;
   children: (hasImages: boolean) => ReactNode;
   className?: string;
+  draft?: ComposerDraft;
 }) {
   const aui = useAui();
   const attachments = useAuiState((state) => state.composer.attachments);
   const [error, setError] = useState<string>();
   const preparing = useRef(false);
   const mounted = useRef(true);
+  const restoring = useRef(false);
+  const retired = useRef(new Set<string>());
+  const initialized = useRef(false);
+  const remember = useCallback(() => {
+    if (!draft || restoring.current) return;
+    draft.setImages(
+      aui
+        .composer()
+        .getState()
+        .attachments.filter((attachment) => !retired.current.has(attachment.id))
+        .map((attachment) => ({
+          id: attachment.id,
+          input:
+            'file' in attachment && attachment.file
+              ? attachment.file
+              : {
+                  type: attachment.type,
+                  name: attachment.name,
+                  contentType: attachment.contentType,
+                  content: attachment.content ?? [],
+                },
+        })),
+    );
+  }, [aui, draft]);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
+  useEffect(() => {
+    if (!draft) return;
+    let previous = draft.getSnapshot().images;
+    return draft.subscribe(() => {
+      const next = draft.getSnapshot().images;
+      const present = new Set(next.map((image) => image.id));
+      for (const image of previous) if (!present.has(image.id)) retired.current.add(image.id);
+      previous = next;
+      // A receipt can arrive after leaving and reopening this chat. Remove the
+      // original images from this runtime too, without touching newer uploads.
+      for (const attachment of aui.composer().getState().attachments)
+        if (retired.current.has(attachment.id))
+          void aui.composer().attachment({ id: attachment.id }).remove();
+    });
+  }, [aui, draft]);
+  useEffect(() => {
+    if (!draft || initialized.current) return;
+    initialized.current = true;
+    const images = [...draft.getSnapshot().images];
+    if (!images.length) return;
+    restoring.current = true;
+    void (async () => {
+      try {
+        for (const image of images) {
+          if (!mounted.current) return;
+          const input =
+            image.input instanceof File
+              ? await imageAttachmentAdapter.send(
+                  await imageAttachmentAdapter.add({ file: image.input }),
+                )
+              : image.input;
+          if (!mounted.current || retired.current.has(image.id)) continue;
+          await aui.composer().addAttachment({ ...input, id: image.id });
+        }
+      } catch (error) {
+        if (mounted.current) setError(error instanceof Error ? error.message : String(error));
+      } finally {
+        restoring.current = false;
+        if (mounted.current) remember();
+      }
+    })();
+  }, [aui, draft, remember]);
+  useEffect(() => {
+    if (attachments) remember();
+  }, [attachments, remember]);
   const { t } = useLocale();
   useAuiEvent('composer.attachmentAddError', ({ message, reason }) =>
     setError(reason === 'not-accepted' ? '仅支持 PNG、JPEG、WebP 或 GIF 图片' : message),
@@ -150,7 +222,9 @@ export function ImageComposer({
           const validated = images.length ? imagesSchema.safeParse(images) : undefined;
           if (validated && !validated.success)
             throw new Error('最多添加 4 张图片，总大小不能超过 512 KiB');
-          if ((await onSubmit(validated?.data)) && mounted.current) {
+          if (await onSubmit(validated?.data)) {
+            draft?.removeImages(new Set(captured.map((attachment) => attachment.id)));
+            if (!mounted.current) return;
             for (const attachment of captured)
               if (
                 aui

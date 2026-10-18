@@ -136,10 +136,29 @@ const LocaleContext = createContext({
   setLocale: (_locale: Locale) => {},
   t: (message: string, values?: Values) => translate('en', message, values),
 });
-export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, updateLocale] = useState<Locale>(readLocale);
+export function LocaleProvider({
+  children,
+  initialLocale,
+}: {
+  children: ReactNode;
+  initialLocale?: Locale;
+}) {
+  const [locale, updateLocale] = useState<Locale>(() => initialLocale ?? readLocale());
+  useEffect(() => {
+    // Migrate a preference saved before server-rendered shells used the cookie.
+    try {
+      if (localStorage.getItem(localeStorageKey)) updateLocale(readLocale());
+    } catch {
+      // Keep the server preference when browser storage is unavailable.
+    }
+  }, []);
   useEffect(() => {
     document.documentElement.lang = locale;
+    try {
+      document.cookie = `${localeStorageKey}=${locale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    } catch {
+      // Language switching still works without cookies.
+    }
   }, [locale]);
   useEffect(() => {
     const sync = (event: StorageEvent) => {

@@ -1,11 +1,9 @@
 import { useLocale } from './locale';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { authClient } from './auth';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useInfiniteQuery, useQueryClient, useQuery } from '@tanstack/react-query';
-import { ensureGuestSession } from './session-bootstrap';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { directoryOptions, userKeys } from '../queries';
-import { request } from '../api';
 import { Button } from '../ui/button';
 import { ResourceDrafts } from '../extensions/ResourceDrafts';
 import { ConversationActions } from './ConversationActions';
@@ -16,10 +14,18 @@ import { Skeleton } from '../ui/skeleton';
 import { ScrollArea } from '../ui/scroll-area';
 import { SettingsDialog } from '../settings/Settings';
 import { retainModelKeys } from '../models/local-model-key';
-import { ChatLoading } from '../chat/chat-loading';
+import { Chat } from '../chat/Chat';
+import { Delayed } from '../ui/delayed';
 import { useBrowserExtensions } from '../extensions/extension-loading';
 import { useSkillSelection } from '../../extensions/skills/selection';
 import { cn } from '../ui/utils';
+import { WorkbenchProvider, useWorkbench } from '../workbench/panel-host';
+import { ComposerDraftsProvider, useComposerDrafts } from '../workbench/composer-drafts';
+import {
+  WorkbenchNavigation,
+  WorkbenchPlaceholder,
+  type WorkbenchView,
+} from '../workbench/navigation';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,16 +34,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-const Chat = lazy(() => import('../chat/Chat').then((module) => ({ default: module.Chat })));
+type AuthState = ReturnType<typeof authClient.useSession>;
+type WorkspaceProps = {
+  name: string;
+  userId: string;
+  sessionError: AuthState['error'];
+  retrySession: () => void;
+};
 export function App() {
-  const { t } = useLocale();
   const { data: session, isPending, error: sessionError, refetch } = authClient.useSession();
-  const bootstrap = useQuery({
-    queryKey: ['bootstrap'],
-    queryFn: () => request<{ authMode: 'guest' | 'account' }>('/bootstrap'),
-    staleTime: Infinity,
-    retry: false,
-  });
   const queryClient = useQueryClient();
   const sessionId = session?.user.id;
   useEffect(() => {
@@ -50,168 +55,41 @@ export function App() {
         query.queryKey[0] === 'user' && (!sessionId || query.queryKey[1] !== sessionId),
     });
   }, [queryClient, sessionId]);
-  const [error, setError] = useState(''),
-    [signingIn, setSigningIn] = useState(false),
-    [guestFailed, setGuestFailed] = useState(false),
-    [menu, setMenu] = useState(false);
-  useEffect(() => {
-    if (bootstrap.data?.authMode !== 'guest' || isPending || session || sessionError || guestFailed)
-      return;
-    let active = true;
-    setSigningIn(true);
-    void ensureGuestSession()
-      .then(() => refetch())
-      .catch(() => {
-        if (active) {
-          setError('无法建立浏览器身份，请重试');
-          setGuestFailed(true);
-        }
-      })
-      .finally(() => {
-        if (active) setSigningIn(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [bootstrap.data?.authMode, isPending, session, sessionError, guestFailed, refetch]);
-  if (
-    bootstrap.error ||
-    (session &&
-      bootstrap.data &&
-      Boolean(session.user.isAnonymous) !== (bootstrap.data.authMode === 'guest'))
-  )
-    return (
-      <main className="m-auto max-w-md p-6">
-        <Alert variant="destructive">
-          <AlertDescription>
-            {bootstrap.error
-              ? bootstrap.error.message
-              : t('当前身份不适用于此部署模式，请退出后重新进入')}
-          </AlertDescription>
-        </Alert>
-        <Button
-          className="mt-4"
-          onClick={() => {
-            if (bootstrap.error) void bootstrap.refetch();
-            else void authClient.signOut();
-          }}
-        >
-          {bootstrap.error ? t('重试') : t('退出当前身份')}
-        </Button>
-      </main>
-    );
-  if (isPending || bootstrap.isPending || (!session && bootstrap.data?.authMode === 'guest'))
-    return (
-      <main className="flex min-h-dvh items-center justify-center p-6">
-        <p role="status" className="text-sm text-muted-foreground">
-          {t(
-            error || sessionError?.message || (signingIn ? '正在建立浏览器身份…' : '正在恢复身份…'),
-          )}
-        </p>
-        {(guestFailed || sessionError) && (
-          <Button
-            onClick={() => {
-              setError('');
-              setGuestFailed(false);
-              void refetch();
-            }}
-          >
-            {t('重试')}
-          </Button>
-        )}
-      </main>
-    );
-  if (!session)
-    return (
-      <AppShell
-        menu={menu}
-        onMenuChange={setMenu}
-        footer={(collapsed) => (
-          <Button
-            variant="ghost"
-            className={cn('h-12 w-full justify-start px-3', collapsed && 'justify-center px-0')}
-            aria-label={signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
-            disabled={signingIn || !!sessionError}
-            onClick={async () => {
-              setSigningIn(true);
-              setError('');
-              setMenu(false);
-              try {
-                const result = await authClient.signIn.social({
-                  provider: 'google',
-                  callbackURL: location.origin,
-                });
-                if (result.error) throw new Error(result.error.message ?? '登录失败，请重试');
-              } catch (e) {
-                setError((e as Error).message);
-              } finally {
-                setSigningIn(false);
-              }
-            }}
-          >
-            <LogIn className="size-4 shrink-0" />
-            <span className={collapsed ? 'sr-only' : undefined}>
-              {signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
-            </span>
-          </Button>
-        )}
-      >
-        <div className="flex min-h-0 flex-1 overflow-y-auto">
-          <div className="m-auto w-full max-w-md shrink-0 px-6 py-12">
-            <h1 className="text-3xl leading-tight font-semibold tracking-tight">
-              {t('把问题变成')}
-              <br />
-              {t('可以操作的答案。')}
-            </h1>
-            <p className="mt-4 mb-8 text-sm leading-relaxed text-muted-foreground">
-              {t('对话、探索和调整参数。在自己的聊天中继续每一项任务。')}
-            </p>
-            {(error || sessionError) && (
-              <Alert variant="destructive" className="mt-4">
-                <AlertDescription>
-                  {t(error || sessionError?.message || '无法读取登录配置，请检查服务端设置')}{' '}
-                  {sessionError && (
-                    <Button variant="link" onClick={() => void refetch()}>
-                      {t('重试')}
-                    </Button>
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
-            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              {t('从侧栏底部使用 Google 登录。聊天和输入仅保存在你的个人会话中。')}
-            </p>
-          </div>
-        </div>
-      </AppShell>
-    );
+  // Mount the workspace once its account is known; there is no startup replica.
+  // A background session refresh keeps the existing workspace visible.
+  if (isPending && !session) return null;
   return (
     <Workspace
-      key={session.user.id}
-      name={session.user.isAnonymous ? t('此浏览器的访客') : session.user.name}
-      userId={session.user.id}
-      anonymous={Boolean(session.user.isAnonymous)}
+      name={session?.user.name ?? ''}
+      userId={sessionId ?? ''}
+      sessionError={sessionError}
+      retrySession={() => void refetch()}
     />
   );
 }
-function Workspace({
-  name,
-  userId,
-  anonymous,
-}: {
-  name: string;
-  userId: string;
-  anonymous: boolean;
-}) {
+function Workspace(props: WorkspaceProps) {
+  const { chat = '', view = 'agent' } = useSearch({ from: '/' });
+  return (
+    <WorkbenchProvider userId={props.userId} chatId={chat} visible={view === 'agent'}>
+      <ComposerDraftsProvider userId={props.userId}>
+        <WorkspaceContents {...props} />
+      </ComposerDraftsProvider>
+    </WorkbenchProvider>
+  );
+}
+function WorkspaceContents({ name, userId, sessionError, retrySession }: WorkspaceProps) {
   const { t } = useLocale();
   // Start capability discovery and reviewed module downloads while Chat and its
   // snapshot load. The runtime reuses these same user-scoped query results.
   const extensions = useBrowserExtensions(userId);
-  const { chat: id = '' } = useSearch({ from: '/' });
+  const { chat: requestedId = '', view = 'agent', mcp } = useSearch({ from: '/' });
+  const id = userId ? requestedId : '';
+  const workbench = useWorkbench();
+  const composerDrafts = useComposerDrafts();
   const navigate = useNavigate({ from: '/' });
   const skillSelection = useSkillSelection(
     userId,
-    !id && extensions.capabilities.data?.skills === true,
+    !!userId && !id && extensions.capabilities.data?.skills === true,
   );
   const client = useQueryClient();
   useEffect(
@@ -225,21 +103,30 @@ function Workspace({
     },
     [client, userId],
   );
-  const directoryQuery = useInfiniteQuery(directoryOptions(userId));
+  const directoryQuery = useInfiniteQuery({ ...directoryOptions(userId), enabled: !!userId });
   const items = directoryQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const next = directoryQuery.hasNextPage;
-  const loading = directoryQuery.isPending || directoryQuery.isFetching;
+  const loading = !!userId && (directoryQuery.isPending || directoryQuery.isFetching);
   const [menu, setMenu] = useState(false),
     [error, setError] = useState(''),
-    [settingsOpen, setSettingsOpen] = useState(() =>
-      new URLSearchParams(window.location.search).has('mcp'),
-    ),
+    [settingsOpen, setSettingsOpen] = useState(!!mcp),
     [settingsSection, setSettingsSection] = useState<'general' | 'models' | 'connections'>(() =>
-      new URLSearchParams(window.location.search).has('mcp') ? 'connections' : 'general',
+      mcp ? 'connections' : 'general',
     ),
     [settingsProvider, setSettingsProvider] = useState<string>(),
     [activeProvider, setActiveProvider] = useState<string>(),
-    [signingOut, setSigningOut] = useState(false);
+    [signingOut, setSigningOut] = useState(false),
+    [signingIn, setSigningIn] = useState(false);
+  const resetSkills = skillSelection.setSelected;
+  useEffect(() => {
+    setError('');
+    setSettingsOpen(!!mcp);
+    setSettingsProvider(undefined);
+    setActiveProvider(undefined);
+    setSigningIn(false);
+    setSigningOut(false);
+    resetSkills(undefined);
+  }, [userId, mcp, resetSkills]);
   const showSettings = useCallback((provider?: string) => {
     setSettingsProvider(provider);
     setSettingsSection('models');
@@ -250,12 +137,22 @@ function Workspace({
   }, [client, userId]);
   const choose = useCallback(
     (value: string, replace = false) => {
-      void navigate({ search: value ? { chat: value } : {}, replace });
+      void navigate({
+        search: (previous) => ({
+          ...previous,
+          chat: value || undefined,
+          view: undefined,
+          mcp: undefined,
+        }),
+        replace,
+      });
       setMenu(false);
     },
     [navigate],
   );
   const deleted = (value: string) => {
+    workbench?.removeChat(value);
+    composerDrafts?.remove(value);
     client.removeQueries({ queryKey: userKeys(userId).snapshot(value) });
     for (const mutation of client.getMutationCache().findAll({
       mutationKey: userKeys(userId).submissions,
@@ -268,6 +165,16 @@ function Workspace({
     refreshDirectory();
   };
   const create = () => choose('');
+  const changeView = (value: WorkbenchView) => {
+    void navigate({
+      search: (previous) => ({
+        ...previous,
+        view: value === 'agent' ? undefined : value,
+        mcp: undefined,
+      }),
+    });
+    setMenu(false);
+  };
   const current = items.find((item) => item.id === id);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -291,24 +198,24 @@ function Workspace({
   };
   const directory = (
     <div className="flex h-full min-h-0 flex-col gap-5 p-4">
-      <Button
-        variant="outline"
-        className="w-full justify-start"
-
-        onClick={() => void create()}
-      >
+      <Button variant="outline" className="w-full justify-start" onClick={() => void create()}>
         <Plus className="size-4" />
         {t('新建聊天')}
       </Button>
       <div className="flex min-h-0 flex-1 flex-col gap-2">
         {loading && !items.length && (
-          <div className="space-y-2" role="status" aria-label={t('正在读取目录')}>
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-4/5" />
-          </div>
+          <Delayed>
+            <div className="space-y-2" role="status" aria-label={t('正在读取目录')}>
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-4/5" />
+            </div>
+          </Delayed>
         )}
-        {!loading && !items.length && (
+        {!loading && !!userId && !items.length && (
           <p className="px-2 py-4 text-sm text-muted-foreground">{t('第一段对话，从这里开始。')}</p>
+        )}
+        {!userId && (
+          <p className="px-2 text-sm text-muted-foreground">{t('登录后，在这里继续你的聊天。')}</p>
         )}
         <ScrollArea className="-mx-4 min-h-0 flex-1">
           <nav className="space-y-4 px-4" aria-label={t('聊天记录')}>
@@ -362,34 +269,83 @@ function Workspace({
     </div>
   );
   return (
-    <ResourceDrafts>
+    <ResourceDrafts scope={userId}>
       <AppShell
         menu={menu}
         onMenuChange={setMenu}
         directory={directory}
-        title={id ? (current?.title ?? t('聊天')) : undefined}
-        onNewChat={() => void create()}
-        footer={(collapsed) => (
-          <AccountMenu
-            name={name}
-            anonymous={anonymous}
-            collapsed={collapsed}
-            busy={signingOut}
-            onSettings={() => {
-              setSettingsProvider(activeProvider);
-              setSettingsSection('general');
-              setSettingsOpen(true);
-            }}
-            onSignOut={() => void signOut()}
-          />
+        navigation={(collapsed) => (
+          <WorkbenchNavigation view={view} collapsed={collapsed} onChange={changeView} />
         )}
+        title={
+          view === 'agent'
+            ? id
+              ? (current?.title ?? t('聊天'))
+              : undefined
+            : t(view === 'schedules' ? '定时任务' : '插件市场')
+        }
+        onNewChat={() => void create()}
+        footer={(collapsed) =>
+          userId ? (
+            <AccountMenu
+              name={name}
+              collapsed={collapsed}
+              busy={signingOut}
+              onSettings={() => {
+                setSettingsProvider(activeProvider);
+                setSettingsSection('general');
+                setSettingsOpen(true);
+              }}
+              onSignOut={() => void signOut()}
+            />
+          ) : (
+            <Button
+              variant="ghost"
+              className={cn('h-12 w-full justify-start px-3', collapsed && 'justify-center px-0')}
+              aria-label={signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
+              disabled={signingIn || !!sessionError}
+              onClick={async () => {
+                setSigningIn(true);
+                setError('');
+                setMenu(false);
+                try {
+                  const result = await authClient.signIn.social({
+                    provider: 'google',
+                    callbackURL: location.origin,
+                  });
+                  if (result.error) throw new Error(result.error.message ?? '登录失败，请重试');
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setSigningIn(false);
+                }
+              }}
+            >
+              <LogIn className="size-4 shrink-0" />
+              <span className={collapsed ? 'sr-only' : undefined}>
+                {signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
+              </span>
+            </Button>
+          )
+        }
       >
-        {(error || directoryQuery.error) && (
+        {(error || sessionError || directoryQuery.error) && (
           <Alert variant="destructive" className="mx-4 mt-4 w-auto">
-            <AlertDescription>{t(error || directoryQuery.error?.message || '')}</AlertDescription>
+            <AlertDescription>
+              {t(error || sessionError?.message || directoryQuery.error?.message || '')}
+              {sessionError && (
+                <Button variant="link" onClick={retrySession}>
+                  {t('重试')}
+                </Button>
+              )}
+            </AlertDescription>
           </Alert>
         )}
-        <Suspense fallback={<ChatLoading />}>
+        <div
+          className="flex min-h-0 flex-1 flex-col"
+          hidden={view !== 'agent'}
+          style={view !== 'agent' ? { display: 'none' } : undefined}
+        >
           <Chat
             key={id}
             id={id}
@@ -408,16 +364,20 @@ function Workspace({
                 : undefined
             }
           />
-        </Suspense>
-        <SettingsDialog
-          userId={userId}
-          customMcp={extensions.capabilities.data?.customMcp === true}
-          skills={extensions.capabilities.data?.skills === true}
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          initialProvider={settingsProvider}
-          initialSection={settingsSection}
-        />
+        </div>
+        {view !== 'agent' && <WorkbenchPlaceholder view={view} />}
+        {!!userId && (
+          <SettingsDialog
+            key={userId}
+            userId={userId}
+            customMcp={extensions.capabilities.data?.customMcp === true}
+            skills={extensions.capabilities.data?.skills === true}
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            initialProvider={settingsProvider}
+            initialSection={settingsSection}
+          />
+        )}
       </AppShell>
     </ResourceDrafts>
   );
@@ -425,14 +385,12 @@ function Workspace({
 
 function AccountMenu({
   name,
-  anonymous,
   collapsed,
   busy,
   onSignOut,
   onSettings,
 }: {
   name: string;
-  anonymous: boolean;
   collapsed: boolean;
   busy: boolean;
   onSignOut: () => void;
@@ -461,9 +419,7 @@ function AccountMenu({
             <>
               <span className="min-w-0 flex-1 text-left">
                 <span className="block truncate text-sm font-medium">{name}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {anonymous ? t('身份保留在此浏览器') : t('个人账号')}
-                </span>
+                <span className="block text-xs text-muted-foreground">{t('个人账号')}</span>
               </span>
               <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
             </>

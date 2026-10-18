@@ -1,12 +1,13 @@
-import { ClientOnly, createFileRoute } from '@tanstack/react-router';
-import { lazy, Suspense } from 'react';
-
-const Application = lazy(() => import('../browser/app/application'));
+import { createFileRoute } from '@tanstack/react-router';
+import { App } from '../browser/app/App';
+import { LocaleProvider } from '../browser/app/locale';
+import { initialLocale } from '../browser/app/initial-locale';
 
 export const Route = createFileRoute('/')({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { chat?: string; mcp?: 'connected' | 'error' } => ({
+  ): { chat?: string; view?: 'agent' | 'schedules' | 'plugins'; mcp?: 'connected' | 'error' } => ({
+    view: search.view === 'schedules' || search.view === 'plugins' ? search.view : undefined,
     mcp: search.mcp === 'connected' || search.mcp === 'error' ? search.mcp : undefined,
     chat:
       typeof search.chat === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(search.chat)
@@ -14,24 +15,14 @@ export const Route = createFileRoute('/')({
         : undefined,
   }),
   component: ChatApplication,
+  loader: () => initialLocale(),
 });
 
-function LoadingShell() {
-  return (
-    <main aria-label="Chat application" className="flex h-dvh items-center justify-center">
-      <p role="status" className="text-sm text-muted-foreground">
-        Loading application…
-      </p>
-    </main>
-  );
-}
-
 function ChatApplication() {
+  const locale = Route.useLoaderData();
   return (
-    <ClientOnly fallback={<LoadingShell />}>
-      <Suspense fallback={<LoadingShell />}>
-        <Application />
-      </Suspense>
-    </ClientOnly>
+    <LocaleProvider initialLocale={locale}>
+      <App />
+    </LocaleProvider>
   );
 }

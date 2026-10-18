@@ -12,7 +12,6 @@ export const test = base.extend<{ uiLocale: 'en' | 'zh-CN' }>({
     }, uiLocale);
     await page.route('**/api/**', async (route) => {
       const path = new URL(route.request().url()).pathname;
-      if (path === '/api/bootstrap') return route.fulfill({ json: { authMode: 'account' } });
       if (path === '/api/settings/models')
         return route.fulfill({
           json: {

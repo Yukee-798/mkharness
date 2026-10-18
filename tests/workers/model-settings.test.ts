@@ -1,27 +1,22 @@
 import { env } from './env';
 import { expect, it } from 'vitest';
 import app from '../../src/server/index';
+import { accountSession } from './account-session';
 const origin = 'http://localhost:5173';
-async function guest() {
+async function account() {
   const settingsEnv = {
     ...env,
-    AUTH_MODE: 'guest',
     MODEL_PROVIDER: '',
     MODEL_ID: '',
     MODEL_API_KEY: '',
     CREDENTIAL_ENCRYPTION_KEY: btoa('m'.repeat(32)),
   };
-  const response = await app.request(
-    origin + '/api/auth/sign-in/anonymous',
-    { method: 'POST', headers: { origin, 'Content-Type': 'application/json' }, body: '{}' },
-    settingsEnv,
-  );
-  const cookie = response.headers.get('set-cookie')!.match(/better-auth\.session_token=[^;]+/)![0];
+  const cookie = await accountSession();
   return { settingsEnv, headers: { cookie, origin, 'Content-Type': 'application/json' } };
 }
 
 it('reads the static provider catalog without a key, supplier request, or DO', async () => {
-  const { settingsEnv, headers } = await guest();
+  const { settingsEnv, headers } = await account();
   const response = await app.request(origin + '/api/settings/models', { headers }, {
     ...settingsEnv,
     CONVERSATIONS: {
@@ -50,8 +45,8 @@ it('reads the static provider catalog without a key, supplier request, or DO', a
 });
 
 it('only returns metadata on credential writes and keeps other owners separate', async () => {
-  const a = await guest(),
-    b = await guest();
+  const a = await account(),
+    b = await account();
   const saved = await app.request(
     origin + '/api/settings/model-credentials/openai',
     {
@@ -103,7 +98,7 @@ it('only returns metadata on credential writes and keeps other owners separate',
 });
 
 it('enforces session, Origin, registered providers and bounded strict input before writes', async () => {
-  const { settingsEnv, headers } = await guest();
+  const { settingsEnv, headers } = await account();
   const url = origin + '/api/settings/model-credentials/';
   expect((await app.request(origin + '/api/settings/models', {}, settingsEnv)).status).toBe(401);
   expect(
@@ -141,7 +136,7 @@ it('enforces session, Origin, registered providers and bounded strict input befo
 });
 
 it('saves a registered API model name, narrows public choices and rejects unknown names before rotating the key', async () => {
-  const { settingsEnv, headers } = await guest();
+  const { settingsEnv, headers } = await account();
   const url = origin + '/api/settings/model-credentials/deepseek';
   const save = await app.request(
     url,

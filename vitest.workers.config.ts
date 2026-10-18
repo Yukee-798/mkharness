@@ -23,7 +23,6 @@ export default defineConfig({
         r2Buckets: ['SKILL_FILES'],
         bindings: {
           APP_URL: 'http://localhost:5173',
-          AUTH_MODE: 'account',
           MODEL_PROVIDER: 'fixture',
           MODEL_ID: 'fixture',
           BETTER_AUTH_SECRET: 'test-secret-is-long-and-only-in-fixtures-12345',

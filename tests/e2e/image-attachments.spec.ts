@@ -166,3 +166,62 @@ test('a failed image receipt retries exactly once with unchanged bytes and does 
   await expect(page.getByLabel('消息', { exact: true })).toHaveValue('Keep my new draft');
   await expect(page.getByRole('img', { name: 'new.png', exact: true })).toBeVisible();
 });
+
+test('chat switching restores image drafts and a late receipt removes only the submitted images', async ({
+  page,
+}) => {
+  await workspace(page);
+  await page.route('**/api/conversations', (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          { id: 'one', title: 'One', updated_at: 1 },
+          { id: 'two', title: 'Two', updated_at: 2 },
+        ],
+        next: null,
+      },
+    }),
+  );
+  await page.route('**/api/conversations/*/snapshot*', (route) =>
+    route.fulfill({ json: snapshotFixture({ entries: [], pending: [], stopping: false }) }),
+  );
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let submitted = false;
+  await page.route('**/api/conversations/*/runs', async (route) => {
+    submitted = true;
+    await gate;
+    await route.fulfill({ status: 202, json: { accepted: true } });
+  });
+  try {
+    await page.goto('/?chat=one');
+    const input = page.getByLabel('消息', { exact: true });
+    await expect(input).toBeEnabled();
+    await input.fill('First draft');
+    await upload(page, 'sent.png');
+    await expect(page.getByRole('img', { name: 'sent.png' })).toBeVisible();
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await expect.poll(() => submitted).toBe(true);
+    await page.getByRole('button', { name: 'Two', exact: true }).click();
+    await expect(input).toHaveValue('');
+    await input.fill('Second chat draft');
+    await page.getByRole('button', { name: 'One', exact: true }).click();
+    await expect(input).toHaveValue('First draft');
+    await expect(page.getByRole('img', { name: 'sent.png' })).toBeVisible();
+    await input.fill('New first chat draft');
+    release();
+    await expect(page.getByRole('img', { name: 'sent.png' })).toHaveCount(0);
+    await expect(input).toHaveValue('New first chat draft');
+    await upload(page, 'new.png');
+    await expect(page.getByRole('img', { name: 'new.png' })).toBeVisible();
+    await page.getByRole('button', { name: 'Two', exact: true }).click();
+    await expect(input).toHaveValue('Second chat draft');
+    await page.getByRole('button', { name: 'One', exact: true }).click();
+    await expect(page.getByRole('img', { name: 'sent.png' })).toHaveCount(0);
+    await expect(page.getByRole('img', { name: 'new.png' })).toBeVisible();
+  } finally {
+    release();
+  }
+});

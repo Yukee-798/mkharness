@@ -15,7 +15,6 @@
   },
   "vars": {
     "APP_URL": "http://localhost:5173",
-    "AUTH_MODE": "guest",
     "ALLOW_SERVER_MODEL_KEY": "0",
     "MODEL_PROVIDER": "",
     "MODEL_ID": "",
@@ -54,7 +53,6 @@
       "name": "mkharness-native",
       "vars": {
         "APP_URL": "https://template.mkharness.com",
-        "AUTH_MODE": "account",
         // Public template demo only; other deployments use personal keys.
         "ALLOW_SERVER_MODEL_KEY": "1",
         "MODEL_PROVIDER": "openrouter",
@@ -85,7 +83,6 @@
       "vars": {
         // Replace with the new test deployment's exact origin before deployment.
         "APP_URL": "https://mkharness-native-test.yukee798.workers.dev",
-        "AUTH_MODE": "guest",
         "ALLOW_SERVER_MODEL_KEY": "0",
         "MODEL_PROVIDER": "",
         "MODEL_ID": "",

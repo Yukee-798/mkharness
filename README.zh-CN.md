@@ -6,7 +6,7 @@
 
 MkHarness 是一个开源 Agent 应用模板，提供流式聊天、持久化执行，以及工具与交互结果的扩展能力。基于 **TanStack、Cloudflare、Pi 和 assistant-ui**，帮助你从可运行的工程开始搭建自己的 Agent 产品。
 
-本地启动无需登录，在界面配置自己的 API Key，同一套应用可部署到 Cloudflare。
+本地启动使用 Google 登录，在界面配置自己的 API Key，同一套应用可部署到 Cloudflare。
 
 [快速开始](#快速开始) · [核心能力](#核心能力) · [扩展](#扩展-mkharness) · [部署](#部署到-cloudflare) · [常见问题](#常见问题) · [MIT 许可证](LICENSE)
 
@@ -14,7 +14,7 @@ MkHarness 是一个开源 Agent 应用模板，提供流式聊天、持久化执
 
 ## 快速开始
 
-准备 **Node.js 24**、**pnpm 11.17.0** 和一个受支持的模型 API Key。本地开发不需要 Cloudflare 账号，也不需要配置 Google OAuth。
+准备 **Node.js 24**、**pnpm 11.17.0** 和一个受支持的模型 API Key。本地开发需要 Google OAuth 凭据，不需要 Cloudflare 账号。
 
 ```sh
 git clone https://github.com/Yukee-798/mkharness.git
@@ -25,10 +25,12 @@ pnpm setup
 pnpm dev
 ```
 
-打开 **http://localhost:5173**：
+在 `.dev.vars` 填写 `GOOGLE_CLIENT_ID` 和 `GOOGLE_CLIENT_SECRET`，回调地址为 `http://localhost:5173/api/auth/callback/google`。修改后重启服务。
+
+打开 **http://localhost:5173** 并使用 Google 登录：
 
 1. 在输入框选择模型。
-2. 点击侧栏底部的访客菜单 → **Settings → Models & API Key**，填写 **模型名**、**Base URL** 和 **API Key**，点击 **Save configuration**。
+2. 点击侧栏底部的账号菜单 → **Settings → Models & API Key**，填写 **模型名**、**Base URL** 和 **API Key**，点击 **Save configuration**。
 3. 发送第一条消息。
 
 应用界面默认英文。可在 **Settings → General → Language** 切换中文，在 **Appearance** 选择浅色、深色或跟随系统。偏好保存在当前浏览器，默认主题跟随系统。
@@ -37,7 +39,7 @@ pnpm dev
 
 > 在界面填写的 Key 会发送给当前部署，并在服务端加密保存，用于后台执行与恢复。请在自己的部署或可信部署填写。保存 Key 不会测试连接，首次模型请求才会实际使用它。
 
-`pnpm setup` 生成缺失的本地认证与加密密钥，并把 `migrations/0001_initial.sql` 应用于新的本地 D1。重启时保留 `.dev.vars`，该文件已被 Git 忽略。数据保存在隔离的 `.wrangler/native-state`。Setup 仅接受空库或当前基线，拒绝旧 schema，不导入账号、聊天、凭据、MCP 连接或 Skills。`node scripts/setup.mjs --check` 只检查本地状态，不修改密钥或应用迁移。统一使用 `localhost`，不要与 `127.0.0.1` 混用。
+`pnpm setup` 生成缺失的本地认证与加密密钥，并应用从 `migrations/0001_initial.sql` 开始的原生 D1 迁移。重启时保留 `.dev.vars`，该文件已被 Git 忽略。数据保存在隔离的 `.wrangler/native-state`。Setup 仅接受空库或已知原生迁移链，拒绝无关旧 schema，不导入账号、聊天、凭据、MCP 连接或 Skills。`0002_google_accounts.sql` 使旧浏览器访客会话失效并移除其身份标记，保留用户和所属数据；上线前先应用此迁移。`node scripts/setup.mjs --check` 只检查本地状态，不修改密钥或应用迁移。统一使用 `localhost`，不要与 `127.0.0.1` 混用。
 
 ## 核心能力
 
@@ -48,7 +50,7 @@ pnpm dev
 - **前后端扩展。** 服务端接入 Pi 原生工具、提示词与 hooks；浏览器注册 assistant-ui Toolkit、工具标题装饰和回复 Footer。
 - **交互式生成 UI。** 可选 OpenUI 扩展支持表单、表格、图表、输入保存，以及有资源限制的 QuickJS 计算。
 - **远程集成。** 用户可添加远程 MCP 并通过原生 SDK 完成 OAuth，也支持部署级 HTTPS MCP 工具、静态 Skills，以及包含 submit/query/cancel 和恢复引用保存的异步服务示例。
-- **免登录与个人 Key。** Better Auth 匿名会话隔离各浏览器的数据；用户自行配置模型名、Base URL 与 API Key，也可启用 Google 登录和部署默认 Key。
+- **Google 账号与个人 Key。** Better Auth Google 登录隔离各账号数据；用户自行配置模型名、Base URL 与 API Key，也可启用部署默认 Key。
 
 你可以在此基础上搭建调研助手、数据工作流，或调用自有服务的创作 Agent。MkHarness 提供应用与执行基础设施；业务工具、生图/视频服务、计费与订阅由你按需接入。
 
@@ -95,7 +97,7 @@ root = Stack([
 
 ## 自定义远程 MCP 连接
 
-在 **设置 → 连接 → 添加连接** 中填写名称和公开 HTTPS Streamable HTTP 地址（例如 `https://mcp.notion.com/mcp`）。自动 OAuth 复用 Cloudflare Agents SDK 的服务发现、客户端注册、PKCE、回调校验、令牌交换与刷新。HTTPS 部署通过 `/api/mcp/client-metadata` 发布客户端元数据；不支持动态注册或客户端元数据的服务，可在高级设置填写预注册 Client ID 和 secret。兼容性取决于服务端，未内置各家非标准 OAuth 流程。本地匿名身份与云端登录账号均拥有各自的连接。
+在 **设置 → 连接 → 添加连接** 中填写名称和公开 HTTPS Streamable HTTP 地址（例如 `https://mcp.notion.com/mcp`）。自动 OAuth 复用 Cloudflare Agents SDK 的服务发现、客户端注册、PKCE、回调校验、令牌交换与刷新。HTTPS 部署通过 `/api/mcp/client-metadata` 发布客户端元数据；不支持动态注册或客户端元数据的服务，可在高级设置填写预注册 Client ID 和 secret。兼容性取决于服务端，未内置各家非标准 OAuth 流程。连接归属于当前部署中登录的账号。
 
 新发现的工具默认 **每次询问**，也可逐个禁用或自动允许。新聊天固定当时启用的工具定义，真正派发前再次检查当前权限和连接状态；工具定义或授权身份变化后需创建新聊天。确认卡片跟随对应的工具调用展示，刷新后可恢复；拒绝和 Stop 会阻止尚未派发的请求。已派发但未确认结果的操作标记为 **结果未知**，不会自动重发，该连接在外部核对前保持阻塞；本版尚未提供手动核对结果的操作。断开连接会删除本地令牌；如需撤销服务商授权，还需在服务商处单独操作。
 
@@ -144,7 +146,6 @@ pnpm exec wrangler r2 bucket create mkharness-native-skills
 | `d1_databases[0].database_name` / `database_id` | 刚创建的新 D1 名称和 ID                                           |
 | `r2_buckets[0].bucket_name`                     | 新的私有桶名称                                                    |
 | `vars.APP_URL`                                  | 自己部署的精确 origin，替换 `template.mkharness.com`              |
-| `vars.AUTH_MODE`                                | Google 登录使用 `account`，访客使用 `guest`                       |
 | `vars.ALLOW_SERVER_MODEL_KEY`                   | 自行安装使用 `0`；公开 template 展示使用 `1` 和 `openrouter/free` |
 
 保留 `DB`、`SKILL_FILES`、`CONVERSATIONS` → `ChatSession`、`MCP_CONNECTIONS` → `McpConnection`。使用 declarative `exports` 声明 SQLite DO，不添加旧 migration tag 或转移旧 namespace。自行安装时，将 production 和 test 的数据库 ID 替换为自己刚创建的资源 ID。本地配置省略 D1 ID；Wrangler 可在部署时自动创建 D1，上面的显式创建流程则可在首次部署前应用基线。不要使用旧数据库 ID。
@@ -170,13 +171,13 @@ pnpm deploy:production
 
 执行两次 `openssl rand -base64 32` 生成两个独立密钥，分别输入 Secret 提示；加密密钥须编码恰好 32 字节随机值。设置首个 Secret 时若提示创建 Worker，可同意创建。
 
-默认 `AUTH_MODE=account` 还需在该环境配置 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`，并注册 `https://YOUR_DOMAIN/api/auth/callback/google`，origin 与 `APP_URL` 一致。以后部署保留这组新密钥，更换加密密钥会使该环境已有凭据无法解密。[环境在构建时选择](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/)，修改配置后重新构建。
+每个环境均需配置 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`，并注册 `https://YOUR_DOMAIN/api/auth/callback/google`，origin 与 `APP_URL` 一致。以后部署保留这组新密钥，更换加密密钥会使该环境已有凭据无法解密。[环境在构建时选择](https://developers.cloudflare.com/workers/vite-plugin/reference/cloudflare-environments/)，修改配置后重新构建。
 
 先通过独立网址验收真实登录、模型、MCP、Skills、OpenUI、恢复和离线 alarm。切公开域名前停止旧环境新受理，排空或显式停止旧任务；切路由不会取消旧 alarm。新环境验收前保留旧资源。Dry-run 只验证构建与配置，不创建或验收远程资源。
 
 ### 3. 打开应用
 
-访问部署网址，在侧栏设置中配置个人 Key。访客模式无需 Google 凭据或部署默认模型 Key；Google 登录使用新部署配置的客户端。登录后重新连接 MCP、导入 Skills。
+访问部署网址，在侧栏设置中配置个人 Key。Google 登录使用当前部署配置的客户端。登录后重新连接 MCP、导入 Skills。
 
 Cloudflare 与模型分别计费，请核对账号的 [Durable Object 限制](https://developers.cloudflare.com/durable-objects/platform/limits/)。模板不提供费用硬上限。
 
@@ -204,9 +205,9 @@ flowchart LR
 ## 常见问题
 
 <details>
-<summary><strong>访客身份和 API Key 如何保存？</strong></summary>
+<summary><strong>账号和 API Key 如何保存？</strong></summary>
 
-每个浏览器拥有经过认证的 Better Auth 匿名会话。清除 Cookie 或更换浏览器后无法找回原访客身份；不包含跨浏览器恢复和访客到账号的数据迁移。
+Google 登录标识账号；重新登录同一账号即可访问该部署中的原有数据。本地与线上数据库仍相互独立。
 
 Key 在 D1 中使用 AES-256-GCM 加密保存，不写入聊天历史。可选的“在此浏览器记住 API Key”会将明文副本保存在当前身份的 localStorage，退出时清除；不会自动重新上传。部署者持有加密密钥，可以解密凭据。最近保存的个人模型成为新提交的默认选择；同一供应商的个人 Key 优先于部署默认 Key。默认 `ALLOW_SERVER_MODEL_KEY=0` 要求用户提供 Key；设为 `1` 并配置 `MODEL_API_KEY` 可提供由部署者承担费用的默认 Key。
 

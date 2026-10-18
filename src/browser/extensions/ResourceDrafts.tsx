@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { createResourceDrafts } from './draft';
 const Context = createContext<ReturnType<typeof createResourceDrafts> | null>(null);
-export function useResourceDrafts() {
+export function useResourceDrafts(scope?: string) {
   const inherited = useContext(Context),
-    [local] = useState(createResourceDrafts);
+    local = useMemo(() => ({ scope, drafts: createResourceDrafts() }), [scope]).drafts;
   useEffect(
     () => () => {
       if (!inherited) local.dispose();
@@ -12,7 +12,7 @@ export function useResourceDrafts() {
   );
   return inherited ?? local;
 }
-export function ResourceDrafts({ children }: { children: ReactNode }) {
-  const drafts = useResourceDrafts();
+export function ResourceDrafts({ children, scope }: { children: ReactNode; scope?: string }) {
+  const drafts = useResourceDrafts(scope);
   return <Context value={drafts}>{children}</Context>;
 }

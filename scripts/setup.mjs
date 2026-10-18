@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 export const localStatePath = '.wrangler/native-state';
-const initialMigration = '0001_initial.sql';
+const nativeMigrations = ['0001_initial.sql', '0002_google_accounts.sql'];
 const directoryColumns = ['create_request_id', 'create_hash', 'instance_generation', 'lifecycle'];
 const baselineTables = [
   'user',
@@ -55,14 +55,14 @@ function queryLocalDatabase(command, root) {
   return results.flatMap((result) => result.results);
 }
 
-/** Refuse an upgrade/import path. Only an empty database or this baseline is accepted. */
+/** Accept empty storage or the known native migration chain, never a legacy import. */
 export function checkLocalBaseline(root = projectRoot) {
-  const migrations = readdirSync(resolve(root, 'migrations')).filter((name) =>
-    name.endsWith('.sql'),
-  );
-  if (migrations.length !== 1 || migrations[0] !== initialMigration) {
+  const migrations = readdirSync(resolve(root, 'migrations'))
+    .filter((name) => name.endsWith('.sql'))
+    .sort();
+  if (JSON.stringify(migrations) !== JSON.stringify(nativeMigrations)) {
     throw new Error(
-      'Native Pi setup requires migrations/0001_initial.sql as the only fresh-install baseline.',
+      'Native Pi setup requires the known migrations/0001_initial.sql + 0002_google_accounts.sql chain.',
     );
   }
   const tables = queryLocalDatabase(
@@ -80,8 +80,9 @@ export function checkLocalBaseline(root = projectRoot) {
       )
     : [];
   if (
-    migrationsApplied.length !== 1 ||
-    migrationsApplied[0] !== initialMigration ||
+    !migrationsApplied.length ||
+    migrationsApplied.length > nativeMigrations.length ||
+    migrationsApplied.some((name, index) => name !== nativeMigrations[index]) ||
     !baselineTables.every((name) => tables.includes(name)) ||
     !directoryColumns.every((name) => columns.includes(name))
   ) {
@@ -91,12 +92,12 @@ export function checkLocalBaseline(root = projectRoot) {
         '; existing accounts, chats and connections are not migrated.',
     );
   }
-  return 'ready';
+  return migrationsApplied.length === nativeMigrations.length ? 'ready' : 'pending';
 }
 
 export function setupLocalDatabase(root = projectRoot) {
   const state = checkLocalBaseline(root);
-  if (state === 'empty') localWrangler(['d1', 'migrations', 'apply', 'DB'], root);
+  if (state !== 'ready') localWrangler(['d1', 'migrations', 'apply', 'DB'], root);
   if (checkLocalBaseline(root) !== 'ready')
     throw new Error('The native Pi baseline was not applied.');
 }
