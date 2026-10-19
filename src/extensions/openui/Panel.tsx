@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { Renderer, type ActionEvent } from '@openuidev/react-lang';
 import { library, PanelContext } from './catalog';
+import { ActionSubmissionContext } from './action-button';
 import type { Program } from './compute/contracts';
 import type { RawState, RunCommand } from '../../shared/contracts';
 import { actionParams, externalURL, UI_ACTIONS } from './contracts';
@@ -49,6 +50,9 @@ export function Panel({
     [error, setError] = useState(''),
     [status, setStatus] = useState<SaveStatus>('saved');
   const [draft, setDraft] = useState<ResourceDraft>();
+  const [pendingButton, setPendingButton] = useState<object | null>(null);
+  const submitting = useRef(false);
+  const actionButton = useRef<object | null>(null);
   const drafts = useResourceDrafts();
   const userEvent = useRef(false),
     mounted = useRef(true);
@@ -125,7 +129,7 @@ export function Panel({
     [bundle, session],
   );
   const change = (raw: Record<string, unknown>) => session.change(raw, userEvent.current);
-  const act = (event: ActionEvent) => {
+  const act = async (event: ActionEvent) => {
     if (!bundle) return;
     if (event.type === UI_ACTIONS.link) {
       try {
@@ -142,10 +146,14 @@ export function Panel({
       setError('此操作暂不可用，请继续发送消息。');
       return;
     }
+    if (submitting.current) return;
     try {
       const params = actionParams(event.params);
       const inputs = inputState({ ...session.current(), ...event.formState });
-      void submit(event.humanFriendlyMessage || 'Analyze the current inputs', {
+      submitting.current = true;
+      setPendingButton(actionButton.current ?? {});
+      setError('');
+      await submit(event.humanFriendlyMessage || 'Analyze the current inputs', {
         action: 'extension_action',
         extensionId: 'openui',
         name: 'continue',
@@ -154,10 +162,13 @@ export function Panel({
           state: inputs,
           ...(Object.keys(params).length ? { params } : {}),
         },
-      }).catch((e) => setError(e.message));
-      setError('');
+      });
     } catch (error) {
-      setError(error instanceof Error ? error.message : '此操作暂不可用，请继续发送消息。');
+      if (mounted.current)
+        setError(error instanceof Error ? error.message : '此操作暂不可用，请继续发送消息。');
+    } finally {
+      submitting.current = false;
+      if (mounted.current) setPendingButton(null);
     }
   };
   // Immediate native controls use capture; delayed Slider commits mark their own boundary.
@@ -177,23 +188,38 @@ export function Panel({
         onKeyDownCapture={edit}
       >
         <div className="min-w-0 overflow-x-auto" inert={!bundle || undefined}>
-          <PanelContext value={session}>
-            <RenderBoundary key={bundle ? 'committed' : 'preview'}>
-              <Renderer
-                response={bundle?.ui ?? preview ?? null}
-                library={library}
-                isStreaming={!bundle}
-                initialState={bundle?.state}
-                onStateUpdate={bundle ? change : undefined}
-                onAction={bundle ? act : undefined}
-                onError={(errors) => {
-                  if (bundle && errors.length) setError(errors.map((e) => e.message).join('; '));
-                }}
-                toolProvider={provider}
-                publishObservability={false}
-              />
-            </RenderBoundary>
-          </PanelContext>
+          <ActionSubmissionContext
+            value={{
+              pending: pendingButton,
+              invoke: (button, sendsMessage, trigger) => {
+                if (sendsMessage && submitting.current) return;
+                actionButton.current = button;
+                try {
+                  trigger();
+                } finally {
+                  actionButton.current = null;
+                }
+              },
+            }}
+          >
+            <PanelContext value={session}>
+              <RenderBoundary key={bundle ? 'committed' : 'preview'}>
+                <Renderer
+                  response={bundle?.ui ?? preview ?? null}
+                  library={library}
+                  isStreaming={!bundle}
+                  initialState={bundle?.state}
+                  onStateUpdate={bundle ? change : undefined}
+                  onAction={bundle ? act : undefined}
+                  onError={(errors) => {
+                    if (bundle && errors.length) setError(errors.map((e) => e.message).join('; '));
+                  }}
+                  toolProvider={provider}
+                  publishObservability={false}
+                />
+              </RenderBoundary>
+            </PanelContext>
+          </ActionSubmissionContext>
         </div>
         {bundle && (status === 'error' || status === 'conflict') && (
           <p

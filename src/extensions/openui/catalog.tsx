@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { jsonEqual } from '../../shared/json';
 import { validateSlider } from './slider';
 import { Progress } from './progress-component';
+import { ActionButton } from './action-button';
 import { PanelSession } from './panel/session';
 export const PanelContext = createContext<PanelSession | null>(null);
 export const StateSync = defineComponent({
@@ -95,8 +96,11 @@ const Slider = defineComponent({
 export const library = createLibrary({
   root: openuiLibrary.root,
   components: [
-    ...Object.values(openuiLibrary.components).filter((component) => component.name !== 'Slider'),
+    ...Object.values(openuiLibrary.components).filter(
+      (component) => component.name !== 'Slider' && component.name !== 'Button',
+    ),
     Slider,
+    ActionButton,
     Progress,
     StateSync,
   ],
