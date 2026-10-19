@@ -96,9 +96,12 @@ conversationRoutes.patch('/:id', async (c) => {
 conversationRoutes.delete('/:id', async (c) => {
   const chat = c.get('chat');
   if (chat.lifecycle === 'deleted') return c.json({ deleting: true }, 202);
-  const result = await c.env.CONVERSATIONS.getByName(chat.id).command(directoryActor(chat), {
-    type: 'delete',
-  });
+  const result = await c.env.CONVERSATIONS.getByName(chat.runtime_name ?? chat.id).command(
+    directoryActor(chat),
+    {
+      type: 'delete',
+    },
+  );
   if (result && typeof result === 'object' && 'error' in result) return jsonResult(result);
   // The chat DO owns erasure. Keep this row and its create receipt to refuse stale initialization.
   await c.env.DB.prepare(
@@ -111,16 +114,15 @@ conversationRoutes.delete('/:id', async (c) => {
 
 conversationRoutes.post('/:id/extensions/:extensionId/controls/:name', async (c) => {
   const payload = await jsonBody(c.req.raw, 4096);
-  const result = await c.env.CONVERSATIONS.getByName(c.get('chat').id).command(
-    directoryActor(c.get('chat')),
-    {
-      type: 'extension_control',
-      extensionId: c.req.param('extensionId'),
-      name: c.req.param('name'),
-      payload: JSON.stringify(payload),
-      ...nativeTarget(c.req.query('conversationId')),
-    },
-  );
+  const result = await c.env.CONVERSATIONS.getByName(
+    c.get('chat').runtime_name ?? c.get('chat').id,
+  ).command(directoryActor(c.get('chat')), {
+    type: 'extension_control',
+    extensionId: c.req.param('extensionId'),
+    name: c.req.param('name'),
+    payload: JSON.stringify(payload),
+    ...nativeTarget(c.req.query('conversationId')),
+  });
   return jsonResult(result);
 });
 
@@ -128,11 +130,14 @@ conversationRoutes.post('/:id/runs', async (c) => {
   const parsed = commandSchema.safeParse(await jsonBody(c.req.raw, 1048576));
   if (!parsed.success) throw new AppError(400, 'invalid_request');
   const chat = c.get('chat');
-  const result = await c.env.CONVERSATIONS.getByName(chat.id).command(directoryActor(chat), {
-    type: 'submit',
-    command: parsed.data,
-    ...nativeTarget(c.req.query('conversationId')),
-  });
+  const result = await c.env.CONVERSATIONS.getByName(chat.runtime_name ?? chat.id).command(
+    directoryActor(chat),
+    {
+      type: 'submit',
+      command: parsed.data,
+      ...nativeTarget(c.req.query('conversationId')),
+    },
+  );
   if (result && typeof result === 'object' && 'error' in result) return jsonResult(result);
   // A directory projection failure must not turn an accepted native submission into a retry.
   await c.env.DB.prepare(
@@ -157,20 +162,26 @@ conversationRoutes.post('/:id/runs', async (c) => {
 conversationRoutes.get('/:id/snapshot', async (c) => {
   if (c.req.query('cursor') !== undefined) throw new AppError(400, 'invalid_cursor');
   return jsonResult(
-    await c.env.CONVERSATIONS.getByName(c.get('chat').id).read(directoryActor(c.get('chat')), {
-      type: 'snapshot',
-      ...nativeTarget(c.req.query('conversationId')),
-    }),
+    await c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).read(
+      directoryActor(c.get('chat')),
+      {
+        type: 'snapshot',
+        ...nativeTarget(c.req.query('conversationId')),
+      },
+    ),
   );
 });
 
 conversationRoutes.get('/:id/history', async (c) =>
   jsonResult(
-    await c.env.CONVERSATIONS.getByName(c.get('chat').id).read(directoryActor(c.get('chat')), {
-      type: 'history',
-      cursor: c.req.query('cursor'),
-      ...nativeTarget(c.req.query('conversationId')),
-    }),
+    await c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).read(
+      directoryActor(c.get('chat')),
+      {
+        type: 'history',
+        cursor: c.req.query('cursor'),
+        ...nativeTarget(c.req.query('conversationId')),
+      },
+    ),
   ),
 );
 
@@ -178,50 +189,78 @@ conversationRoutes.post('/:id/runs/:runId/queue', async (c) => {
   const parsed = queueActionSchema.safeParse(await jsonBody(c.req.raw, 1024));
   if (!parsed.success) throw new AppError(400, 'invalid_request');
   return jsonResult(
-    await c.env.CONVERSATIONS.getByName(c.get('chat').id).command(directoryActor(c.get('chat')), {
-      type: 'queue',
-      runId: c.req.param('runId'),
-      action: parsed.data.action,
-      ...nativeTarget(c.req.query('conversationId')),
-    }),
+    await c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).command(
+      directoryActor(c.get('chat')),
+      {
+        type: 'queue',
+        runId: c.req.param('runId'),
+        action: parsed.data.action,
+        ...nativeTarget(c.req.query('conversationId')),
+      },
+    ),
   );
 });
 
 conversationRoutes.post('/:id/runs/:runId/queue/ack', async (c) =>
   jsonResult(
-    await c.env.CONVERSATIONS.getByName(c.get('chat').id).command(directoryActor(c.get('chat')), {
-      type: 'acknowledge_queue_edit',
-      runId: c.req.param('runId'),
-      ...nativeTarget(c.req.query('conversationId')),
-    }),
+    await c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).command(
+      directoryActor(c.get('chat')),
+      {
+        type: 'acknowledge_queue_edit',
+        runId: c.req.param('runId'),
+        ...nativeTarget(c.req.query('conversationId')),
+      },
+    ),
   ),
 );
 
 conversationRoutes.get('/:id/runs/:runId/events', (c) =>
-  c.env.CONVERSATIONS.getByName(c.get('chat').id).observe(directoryActor(c.get('chat')), {
-    runId: c.req.param('runId'),
-    ...nativeTarget(c.req.query('conversationId')),
-  }),
+  c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).observe(
+    directoryActor(c.get('chat')),
+    {
+      runId: c.req.param('runId'),
+      ...nativeTarget(c.req.query('conversationId')),
+    },
+  ),
 );
 
 conversationRoutes.post('/:id/stop', async (c) =>
   jsonResult(
-    await c.env.CONVERSATIONS.getByName(c.get('chat').id).command(directoryActor(c.get('chat')), {
-      type: 'stop',
-      ...nativeTarget(c.req.query('conversationId')),
-    }),
+    await c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).command(
+      directoryActor(c.get('chat')),
+      {
+        type: 'stop',
+        ...nativeTarget(c.req.query('conversationId')),
+      },
+    ),
     202,
   ),
 );
 
 conversationRoutes.get('/:id/extensions/:extensionId/resources/:ref', async (c) =>
   jsonResult(
-    await c.env.CONVERSATIONS.getByName(c.get('chat').id).read(directoryActor(c.get('chat')), {
-      type: 'resource',
+    await c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).read(
+      directoryActor(c.get('chat')),
+      {
+        type: 'resource',
+        extensionId: c.req.param('extensionId'),
+        ref: c.req.param('ref'),
+        ...nativeTarget(c.req.query('conversationId')),
+      },
+    ),
+  ),
+);
+
+conversationRoutes.get('/:id/extensions/:extensionId/resources/:ref/files/:name', async (c) =>
+  c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).file(
+    directoryActor(c.get('chat')),
+    {
       extensionId: c.req.param('extensionId'),
       ref: c.req.param('ref'),
+      name: c.req.param('name'),
+      download: c.req.query('download') === '1',
       ...nativeTarget(c.req.query('conversationId')),
-    }),
+    },
   ),
 );
 
@@ -242,13 +281,16 @@ conversationRoutes.patch('/:id/extensions/:extensionId/resources/:ref/state', as
     throw new AppError(400, 'invalid_state');
   }
   return jsonResult(
-    await c.env.CONVERSATIONS.getByName(c.get('chat').id).command(directoryActor(c.get('chat')), {
-      type: 'save_resource_state',
-      extensionId: c.req.param('extensionId'),
-      ref: c.req.param('ref'),
-      state: body.state,
-      expectedRevision: Number(body.expectedRevision),
-      ...nativeTarget(c.req.query('conversationId')),
-    }),
+    await c.env.CONVERSATIONS.getByName(c.get('chat').runtime_name ?? c.get('chat').id).command(
+      directoryActor(c.get('chat')),
+      {
+        type: 'save_resource_state',
+        extensionId: c.req.param('extensionId'),
+        ref: c.req.param('ref'),
+        state: body.state,
+        expectedRevision: Number(body.expectedRevision),
+        ...nativeTarget(c.req.query('conversationId')),
+      },
+    ),
   );
 });

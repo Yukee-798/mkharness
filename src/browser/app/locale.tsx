@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { english } from './messages';
+import { workspaceChinese } from './workspace-messages';
 
 export type Locale = 'en' | 'zh-CN';
 export const localeStorageKey = 'mkharness.locale';
 type Values = Record<string, string | number>;
 const chinese: Record<string, string> = {
+  ...workspaceChinese,
   Skills: '技能',
   'Import skill': '导入技能',
   'Update skill': '更新技能',

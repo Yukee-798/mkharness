@@ -1,3 +1,4 @@
+import { directoryActor, resolveChat } from '../../src/server/chat/directory';
 import { runDurableObjectAlarm, abortAllDurableObjects } from 'cloudflare:test';
 import type { ChatActor } from '../../src/server/chat/protocol';
 import type { ConversationSnapshot } from '../../src/shared/conversation';
@@ -55,7 +56,17 @@ it('capabilities are authenticated configuration reads that never acquire a DO',
   );
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({
-    extensionIds: ['skills', 'mcp', 'timing', 'web', 'openui', 'reply', 'async-example'],
+    extensionIds: [
+      'workspace',
+      'images',
+      'skills',
+      'mcp',
+      'timing',
+      'web',
+      'openui',
+      'reply',
+      'async-example',
+    ],
     customMcp: true,
     skills: true,
   });
@@ -203,7 +214,9 @@ it('renames only owned chats, validates titles and preserves explicit names on s
   expect(
     await env.DB.prepare('SELECT title FROM conversations WHERE id=?').bind(id).first('title'),
   ).toBe('新聊天');
-  await env.CONVERSATIONS.getByName(id).stopConversation();
+  await env.CONVERSATIONS.getByName(
+    (await resolveChat(env, 'a', id)).runtime_name!,
+  ).stopConversation();
 });
 
 async function ownedChat() {
@@ -225,13 +238,15 @@ async function ownedChat() {
   )
     .bind(id)
     .first<string>('instance_generation');
-  const actor: ChatActor = { chatId: id, ownerId: 'a', generation: generation! };
+  const row = await resolveChat(env, 'a', id);
+  const actor: ChatActor = directoryActor(row);
+  expect(actor.generation).toBe(generation);
   return {
     id,
     actor,
     requestId,
     headers,
-    target: env.CONVERSATIONS.getByName(id),
+    target: env.CONVERSATIONS.getByName(row.runtime_name!),
     url: 'http://localhost:5173/api/conversations/' + id,
   };
 }
@@ -366,7 +381,7 @@ it('deletes only owned chats, closes running work and rejects stale actors after
   expect((await app.request(url + '/snapshot', { headers }, env)).status).toBe(404);
   await runDurableObjectAlarm(target);
   await abortAllDurableObjects();
-  const fresh = env.CONVERSATIONS.getByName(id);
+  const fresh = env.CONVERSATIONS.getByName(actor.runtimeName ?? id);
   expect(await fresh.read(actor, { type: 'snapshot' })).toMatchObject({ error: { status: 404 } });
   await expectErased(fresh);
 });
@@ -414,7 +429,7 @@ it('recovers scheduled deletion after eviction without opening Pi or resurrectin
   const { id, actor, headers, url } = await ownedChat();
   expect((await app.request(url, { method: 'DELETE', headers }, env)).status).toBe(202);
   await abortAllDurableObjects();
-  const resumed = env.CONVERSATIONS.getByName(id);
+  const resumed = env.CONVERSATIONS.getByName(actor.runtimeName ?? id);
   await runInDurableObject(resumed, async (_instance, state) => {
     expect(await state.storage.get('deleting')).toBe(true);
     expect(
@@ -433,7 +448,7 @@ it('recovers scheduled deletion after eviction without opening Pi or resurrectin
   ).toBe('deleted');
   for (let repeat = 0; repeat < 2; repeat++) {
     await abortAllDurableObjects();
-    const fresh = env.CONVERSATIONS.getByName(id);
+    const fresh = env.CONVERSATIONS.getByName(actor.runtimeName ?? id);
     expect(await fresh.command(actor, { type: 'delete' })).toEqual({ deleting: true });
     await runInDurableObject(fresh, (instance) => instance.alarm());
     expect(await runDurableObjectAlarm(fresh)).toBe(false);

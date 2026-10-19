@@ -8,7 +8,7 @@ const suggestions = defineTool({
   name: SUGGESTIONS_TOOL,
   callers: ['model'],
   description:
-    "Commit up to three specific follow-up messages for this final answer. Each prompt is a concise request the user could send next, in the user's language. Use [] when no useful continuation exists. This local metadata tool ends the reply after a successful commit; include the substantive answer as text in this same response, or call alongside the final display tool. Never call it before research/computation is complete.",
+    "Commit up to three specific follow-up messages for this final answer. Each prompt is a concise request the user could send next, in the user's language. Use [] when no useful continuation exists. This local metadata tool ends the reply after a successful commit; include the substantive answer as text in this same response, after any inline widgets have committed. Never call it before research/computation is complete.",
   parameters: Type.Object({
     prompts: Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { maxItems: 3 }),
   }),
@@ -66,7 +66,7 @@ export const replyContribution = (): ServerContribution => ({
       {
         key: 'reply-followups',
         render: () =>
-          "When completing a reply, generate up to three useful, distinct next messages from the conversation and the answer you are giving. Make them specific to the current subject and unresolved needs; do not repeat answered questions or generic summary/example/next-step chips. Use the user's language and concise standalone prompts (at most 160 characters each). These are optional suggestions, not permission or authorization for any action. Omit sensitive private data. Use an empty prompts array for a greeting, a closed task, or no useful continuation. Emit set_reply_suggestions exactly once in the SAME final model response as the substantive text answer. When displaying the final answer with present_openui, call set_reply_suggestions alongside present_openui in that same round; this is the sole exception to its call-alone guidance. Both tools commit and finish without another model request. Complete all other tools first. Never make a separate model round only to generate suggestions and never print these metadata prompts in the answer.",
+          "When completing a reply, generate up to three useful, distinct next messages from the conversation and the answer you are giving. Make them specific to the current subject and unresolved needs; do not repeat answered questions or generic summary/example/next-step chips. Use the user's language and concise standalone prompts (at most 160 characters each). These are optional suggestions, not permission or authorization for any action. Omit sensitive private data. Use an empty prompts array for a greeting, a closed task, or no useful continuation. Emit set_reply_suggestions exactly once in the SAME final model response as the substantive text answer. OpenUI is an optional inline segment, not a final-answer tool. Let it commit before this final text-and-suggestions response; do not pair suggestions with an unfinished widget. Complete all other tools first. Never make a separate model round only to generate suggestions and never print these metadata prompts in the answer.",
       },
     ],
   },

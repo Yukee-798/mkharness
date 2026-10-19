@@ -8,6 +8,7 @@ export class ComposerDraft {
   private value = {
     text: '',
     source: undefined as RunCommand['source'],
+    workspaceReferences: [] as NonNullable<RunCommand['workspaceReferences']>,
     config: undefined as RunCommand['config'],
     images: [] as DraftImage[],
     version: 0,
@@ -27,6 +28,22 @@ export class ComposerDraft {
   edit(text: string, source = text ? this.value.source : undefined) {
     this.update({ text, source, version: this.value.version + 1 });
   }
+  setWorkspaceReferences(workspaceReferences: NonNullable<RunCommand['workspaceReferences']>) {
+    if (!jsonEqual(workspaceReferences, this.value.workspaceReferences))
+      this.update({
+        workspaceReferences: structuredClone(workspaceReferences),
+        version: this.value.version + 1,
+      });
+  }
+  restore(draft: Pick<RunCommand, 'text' | 'source' | 'config' | 'workspaceReferences'>) {
+    this.update({
+      text: draft.text,
+      source: draft.source,
+      config: draft.config,
+      workspaceReferences: structuredClone(draft.workspaceReferences ?? []),
+      version: this.value.version + 1,
+    });
+  }
   setConfig(config: RunCommand['config']) {
     if (!jsonEqual(config ?? null, this.value.config ?? null)) this.update({ config });
   }
@@ -42,7 +59,7 @@ export class ComposerDraft {
   }
   clearText(version: number) {
     if (this.value.version === version)
-      this.update({ text: '', source: undefined, version: version + 1 });
+      this.update({ text: '', source: undefined, workspaceReferences: [], version: version + 1 });
   }
 }
 export class ComposerDrafts {

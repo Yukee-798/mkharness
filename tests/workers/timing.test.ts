@@ -57,13 +57,13 @@ it('failed native tool receipts retain duration without pretending to succeed', 
   });
 });
 
-it('a terminate-only generated reply gets its duration without an extra model round', async () => {
+it('the final text receives reply timing and the inline widget retains tool timing', async () => {
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   const runId = crypto.randomUUID();
   await stub.submitRun({ runId, text: 'panel' });
   await (await stub.observeRun(runId)).text();
   const snapshot = JSON.parse(await stub.snapshot());
-  const answer = snapshot.entries.find((entry: any) =>
+  const widget = snapshot.entries.find((entry: any) =>
     entry.model?.some(
       (message: any) =>
         message.role === 'assistant' &&
@@ -72,16 +72,26 @@ it('a terminate-only generated reply gets its duration without an extra model ro
         ),
     ),
   );
-  expect((timingState(snapshot).replies as any)[String(answer.id)]).toMatchObject({
+  const answer = snapshot.entries.at(-1);
+  const timing = timingState(snapshot);
+  expect(answer.model[0]).toMatchObject({ role: 'assistant', content: [{ type: 'text' }] });
+  expect(Object.keys(timing.replies)).toEqual([String(answer.id)]);
+  expect((timing.replies as any)[String(answer.id)]).toMatchObject({
     runId,
     startedAt: expect.any(Number),
     endedAt: expect.any(Number),
   });
   expect(
+    Object.entries(timing.tools).some(
+      ([ref, span]: [string, any]) =>
+        ref.startsWith(`${widget.id}.`) && Number.isFinite(span.endedAt),
+    ),
+  ).toBe(true);
+  expect(
     snapshot.entries.filter((entry: any) =>
       entry.model?.some((message: any) => message.role === 'assistant'),
     ),
-  ).toHaveLength(2);
+  ).toHaveLength(3);
 });
 
 it('optional projections are bounded and isolated, and removing them exposes no native facts', async () => {

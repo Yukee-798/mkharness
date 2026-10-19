@@ -1,5 +1,32 @@
+import { workspaceEnglish } from './workspace-messages';
 // Application copy only; model output and resource content are never translated.
 export const english: Record<string, string> = {
+  ...workspaceEnglish,
+  页面暂时无法显示: 'This page could not be displayed.',
+  '可以重试打开页面。此操作不会重新提交任务。':
+    'Try reopening the page. This does not submit any tasks again.',
+  重试打开页面: 'Reopen page',
+  聊天视图暂时无法显示: 'The conversation view could not be displayed.',
+  '可以重新打开聊天以恢复显示。此操作不会重新提交生成任务。':
+    'Reopen the conversation to restore the view. This does not submit the generation task again.',
+  重新打开聊天: 'Reopen conversation',
+  复制诊断信息: 'Copy diagnostics',
+
+  下载原图: 'Download original',
+  '正在下载…': 'Downloading…',
+  '图片下载失败，请重试。': 'Could not download this image. Please retry.',
+  '查看大图：{title}': 'View full image: {title}',
+  '正在生成图片…': 'Generating image…',
+  '图片生成需要一些时间，完成后会显示在这里。':
+    'Image generation takes some time. Your image will appear here when ready.',
+  '正在读取图片…': 'Loading image…',
+  '图片无法读取，请重新打开。': 'Could not load this image. Try opening it again.',
+  '图片生成未完成。请查看回复说明，确认后再尝试。':
+    'Image generation did not finish. Read the reply before trying again.',
+  '已停止等待图片。远端生成可能仍在继续。':
+    'Stopped waiting for the image. Remote generation may still continue.',
+  适应窗口: 'Fit to window',
+  原始尺寸: 'Original size',
   工作台导航: 'Workspace navigation',
   定时任务: 'Scheduled tasks',
   插件市场: 'Plugin marketplace',

@@ -170,13 +170,13 @@ export function Panel({
   return (
     <ThemeProvider lightTheme={openUITheme}>
       <section
-        className="generated-panel -mx-1 min-w-0 max-w-[calc(100%+0.5rem)] overflow-x-auto p-1 whitespace-normal"
+        className="generated-panel my-3 min-w-0 max-w-full rounded-xl border border-border bg-card p-4 text-card-foreground whitespace-normal sm:p-5"
         aria-label={t('Interactive answer')}
         onChangeCapture={edit}
         onClickCapture={edit}
         onKeyDownCapture={edit}
       >
-        <div inert={!bundle || undefined}>
+        <div className="min-w-0 overflow-x-auto" inert={!bundle || undefined}>
           <PanelContext value={session}>
             <RenderBoundary key={bundle ? 'committed' : 'preview'}>
               <Renderer

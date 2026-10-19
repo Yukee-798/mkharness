@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import baseline from '../../migrations/0001_initial.sql?raw';
+import scenarios from '../../migrations/0003_scenarios.sql?raw';
 import { createChat, listChats, resolveChat } from '../../src/server/chat/directory';
 import { newConversationBindings } from '../../src/server/mcp/connections/catalog';
 import { newSkillBindings } from '../../src/server/skills/catalog';
@@ -22,6 +23,15 @@ beforeAll(async () => {
       .filter((sql) => sql.trim())
       .map((sql) => fixture.DB.prepare(sql)),
   );
+  const trigger = scenarios.match(/CREATE TRIGGER[\s\S]*?END;/)![0];
+  const rest = scenarios.replace(trigger, '');
+  await fixture.DB.batch([
+    ...rest
+      .split(';')
+      .filter((sql) => sql.trim())
+      .map((sql) => fixture.DB.prepare(sql)),
+    fixture.DB.prepare(trigger),
+  ]);
 });
 beforeEach(async () => {
   await fixture.DB.prepare('DELETE FROM user').run();

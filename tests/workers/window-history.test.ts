@@ -70,11 +70,15 @@ it('extends a page starting at a final tool result through its answer and origin
   await stub.submitRun({ runId, text: 'panel' });
   await (await stub.observeRun(runId)).text();
   const original = JSON.parse(await stub.snapshot());
-  expect(original.entries.at(-1).model[0].role).toBe('toolResult');
+  const toolResult = original.entries.findLast(
+    (entry: any) => entry.model?.[0]?.role === 'toolResult',
+  );
+  expect(toolResult).toBeDefined();
+  const trailing = original.entries.filter((entry: any) => entry.id > toolResult.id).length;
   await runInDurableObject(stub, async (instance) => {
     const root = await instance.root();
     await root.commit(async (tx) => {
-      for (let n = 0; n < 99; n++)
+      for (let n = 0; n < 99 - trailing; n++)
         await tx.appendEntry(UserEntry, root.id, {
           model: [{ role: 'user', content: 'padding ' + n, timestamp: n }],
         });

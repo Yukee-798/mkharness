@@ -12,6 +12,7 @@ export default defineConfig({
         compatibilityFlags: ['nodejs_compat'],
         modulesRules: [{ type: 'CompiledWasm', include: ['**/*.wasm'], fallthrough: true }],
         durableObjects: {
+          IMAGE_PROBES: { className: 'ImageProbe', useSQLite: true },
           CONVERSATIONS: { className: 'ChatSession', useSQLite: true },
           MCP_CONNECTIONS: { className: 'McpConnection', useSQLite: true },
           OPENROUTER_PROBES: { className: 'OpenRouterProbe', useSQLite: true },
@@ -20,7 +21,7 @@ export default defineConfig({
           BINDING_PROBES: { className: 'BindingProbe', useSQLite: true },
         },
         d1Databases: ['DB'],
-        r2Buckets: ['SKILL_FILES'],
+        r2Buckets: ['SKILL_FILES', 'ARTIFACT_FILES'],
         bindings: {
           APP_URL: 'http://localhost:5173',
           MODEL_PROVIDER: 'fixture',

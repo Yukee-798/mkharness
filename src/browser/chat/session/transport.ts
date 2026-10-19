@@ -1,3 +1,4 @@
+import { traceConversation } from './diagnostics';
 import { AbstractAgent, runHttpRequest, transformHttpEventStream } from '@ag-ui/client';
 import {
   EventType,
@@ -50,6 +51,7 @@ export class AttachAgent extends AbstractAgent {
       input.runId = config.runId;
       const runId = config.runId;
       input.threadId = this.options.conversationId;
+      traceConversation('stream.open', { chatId: this.options.conversationId, runId });
       const source = transformHttpEventStream(
         runHttpRequest(() =>
           (this.options.observe ?? conversationRemote.observe)(
@@ -61,6 +63,27 @@ export class AttachAgent extends AbstractAgent {
         ),
       ).subscribe({
         next: (event) => {
+          if (
+            [
+              EventType.RUN_STARTED,
+              EventType.RUN_FINISHED,
+              EventType.RUN_ERROR,
+              EventType.MESSAGES_SNAPSHOT,
+              EventType.TEXT_MESSAGE_START,
+              EventType.TOOL_CALL_START,
+            ].includes(event.type)
+          )
+            traceConversation('stream.event', {
+              chatId: this.options.conversationId,
+              runId,
+              type: event.type,
+              ...('messageId' in event && typeof event.messageId === 'string'
+                ? { messageId: event.messageId.slice(0, 200) }
+                : {}),
+              ...('toolCallId' in event && typeof event.toolCallId === 'string'
+                ? { toolCallId: event.toolCallId.slice(0, 200) }
+                : {}),
+            });
           if (event.type === EventType.STATE_SNAPSHOT) {
             const state = (event as BaseEvent & { snapshot?: ObservationState }).snapshot;
             if (state?.runId === runId) {
@@ -132,6 +155,11 @@ export class AttachAgent extends AbstractAgent {
         },
       });
       return () => {
+        traceConversation('stream.detach', {
+          chatId: this.options.conversationId,
+          runId,
+          terminal,
+        });
         controller.abort();
         source.unsubscribe();
       };

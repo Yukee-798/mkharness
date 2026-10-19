@@ -3,7 +3,15 @@ import type { QueueAction } from '../../shared/queue';
 import type { Json } from '../../shared/json';
 
 /** Constructed from the owned D1 row by the Worker, never from request data. */
-export type ChatActor = { chatId: string; ownerId: string; generation: string };
+export type ChatActor = {
+  chatId: string;
+  ownerId: string;
+  generation: string;
+  runtimeName?: string;
+  scenarioId?: string;
+  workspaceId?: string;
+  scenarioKind?: string;
+};
 
 // An omitted target is resolved to the manifest's main conversation only at the DO edge.
 type Target = { target?: number };
@@ -31,3 +39,9 @@ export type ChatReadQuery = Target &
     | { type: 'resource'; extensionId: string; ref: string }
   );
 export type ChatObservationQuery = Target & { runId: string };
+export type ChatFileQuery = Target & {
+  extensionId: string;
+  ref: string;
+  name: string;
+  download: boolean;
+};

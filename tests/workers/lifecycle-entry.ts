@@ -3,6 +3,7 @@ import type { ToolRegistration } from '@earendil-works/pi-durable';
 
 export { ChatSession } from './entry';
 export { BindingProbe } from './task-binding-entry';
+export { ImageProbe } from './image-entry';
 
 /** Test observations over real DO reconstruction, without replacing lifecycle behavior. */
 export class LifecycleProbe extends Fixture {

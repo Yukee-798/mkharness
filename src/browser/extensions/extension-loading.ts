@@ -1,3 +1,4 @@
+import { sceneBrowserIds } from '../../scenarios/browser-loaders';
 import { useQuery } from '@tanstack/react-query';
 import { request } from '../api';
 import { loadBrowserExtensions } from './extensions';
@@ -18,7 +19,8 @@ export function useBrowserExtensions(userId: string) {
     staleTime: Infinity,
     refetchOnWindowFocus: 'always',
   });
-  const ids = capabilities.data?.extensionIds ?? [];
+  const baseIds = capabilities.data?.extensionIds ?? [];
+  const ids = baseIds.includes('workspace') ? [...baseIds, ...sceneBrowserIds] : baseIds;
   const loaded = useQuery({
     queryKey: ['user', userId, 'browser-extensions', ids],
     queryFn: () => loadBrowserExtensions(ids, browserLoaders),

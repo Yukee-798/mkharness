@@ -39,7 +39,10 @@
     "ChatSession": { "type": "durable-object", "storage": "sqlite" },
     "McpConnection": { "type": "durable-object", "storage": "sqlite" },
   },
-  "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-native-skills-local" }],
+  "r2_buckets": [
+    { "binding": "SKILL_FILES", "bucket_name": "mkharness-native-skills-local" },
+    { "binding": "ARTIFACT_FILES", "bucket_name": "mkharness-native-artifacts-local" },
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -66,7 +69,10 @@
           { "name": "MCP_CONNECTIONS", "class_name": "McpConnection" },
         ],
       },
-      "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-native-skills" }],
+      "r2_buckets": [
+        { "binding": "SKILL_FILES", "bucket_name": "mkharness-native-skills" },
+        { "binding": "ARTIFACT_FILES", "bucket_name": "mkharness-native-artifacts" },
+      ],
       "d1_databases": [
         {
           "binding": "DB",
@@ -96,7 +102,10 @@
           },
         ],
       },
-      "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-native-test-skills" }],
+      "r2_buckets": [
+        { "binding": "SKILL_FILES", "bucket_name": "mkharness-native-test-skills" },
+        { "binding": "ARTIFACT_FILES", "bucket_name": "mkharness-native-test-artifacts" },
+      ],
       "d1_databases": [
         {
           "binding": "DB",

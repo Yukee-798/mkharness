@@ -43,13 +43,15 @@ Try asking a question, requesting an interactive plan, or reading a public web p
 
 ## Features
 
-- **An Agent workbench.** A unified collapsible sidebar for Agent, scheduled tasks and the plugin marketplace, with developer-defined right panels. OpenUI is the default panel; scheduling and marketplace pages are placeholders. Desktop panels resize, maximize and restore; mobile uses a full-screen sheet.
+- **Image generation:** a provider-based `generate_image` tool, with Kie GPT Image 2.5 Sunburst by default. Images appear inside replies; clicking opens the workbench preview with original-size viewing and downloads. Set server-side `KIE_API_KEY` in `.dev.vars` (and restart) or deployment secrets, with the private `ARTIFACT_FILES` R2 binding. The tool is unavailable until configured. See [image extension design and provider integration](IMAGE_GENERATION_DESIGN.md).
+
+- **An Agent workbench.** A unified collapsible sidebar for Agent, scheduled tasks and the plugin marketplace, with developer-defined right panels. Scheduling and marketplace pages are placeholders; right panels are reserved for developer-defined resources. Desktop panels resize, maximize and restore; mobile uses a full-screen sheet.
 - **A working chat app.** Streaming responses, reasoning and tool activity, model and thinking-level selection, conversation history, and reply/tool timing. Built with assistant-ui, shadcn/ui, and Tailwind CSS.
 - **Image attachments.** Preview and remove PNG, JPEG, WebP, or GIF images using assistant-ui; send images with text or on their own to an image-capable model. Up to 4 images totaling 512 KiB per message, retained in Pi history for retries and recovery.
 - **A durable, editable queue.** Pending messages survive refresh. Edit withdraws an unstarted message and restores its text and images to the composer; Steer joins the current work at a native Pi boundary; Remove withdraws one pending message. Already-started tasks cannot be withdrawn through queue controls. Pi remains the only queue authority.
 - **Durable Agent execution.** Each chat runs in a `ChatSession` Durable Object with one native Pi Durable 1.3.0 Harness and the official SQLite adapter. Pi owns submissions, Inbox, history and task recovery. Closing the browser detaches observation; Stop is a separate action. Deletion returns `202` after a durable tombstone and cleanup alarm, hides the chat, and erases its content after runtime shutdown. D1 retains a minimal create/deletion receipt so delayed calls cannot recreate it.
 - **Extensions on both sides.** Add native Pi tools, prompts, and hooks on the server. Register assistant-ui Toolkits, tool-title decorations, message footers, and workbench panels in the browser.
-- **Interactive generated UI.** The optional OpenUI extension renders forms, tables, and charts, saves inputs, and performs bounded QuickJS calculations.
+- **Inline interactive explanations.** Markdown is the default answer format. OpenUI adds a compact bordered calculator, choice widget or useful data chart within the message, with saved inputs and bounded QuickJS calculations; it does not automatically open the right panel or replace the whole answer.
 - **Remote integrations.** User-added remote MCP connections with native SDK OAuth, deployment-configured MCP tools, static Skills, and an async-service example with submit/query/cancel and persisted recovery references.
 - **Google accounts and personal keys.** Better Auth Google sign-in scopes data to each account. Users configure their own model name, Base URL and API Key; a deployment default key is optional.
 
@@ -72,7 +74,7 @@ Extensions are trusted code that you review and ship with your application. Serv
 
 Manage all extension switches in [`extensions.config.ts`](extensions.config.ts). For a small example, set `example.enabled` to `true` there. Its [server tool, prompt section and hook](src/extensions/example/server.ts) and [browser renderer](src/extensions/example/browser.tsx) live together in `src/extensions/example/` and are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
 
-For custom workbench panels, export `panels` from your reviewed browser extension using `defineWorkbenchPanel`. The host handles target validation, selection, hide/restore, responsive layout and account-scoped reference persistence. See the [current panel Interface and example](WORKBENCH_DESIGN.md#13-首期实际实现与开发者接入) and the [OpenUI adapter](src/extensions/openui/WorkbenchPanel.tsx). Browser or cloud desktop providers own their connection lifecycle; the template ships the OpenUI preview adapter.
+For custom workbench panels, export `panels` from your reviewed browser extension using `defineWorkbenchPanel`. The host handles target validation, selection, hide/restore, responsive layout and account-scoped reference persistence. See the [current panel Interface and example](WORKBENCH_DESIGN.md#13-首期实际实现与开发者接入) and [panel contracts](src/browser/workbench/panels.ts). Browser or cloud desktop providers own their connection lifecycle; OpenUI renders inline and does not register a workbench panel.
 
 Successful web reads and searches populate Sources cards from committed Pi results. The reply extension adds native assistant-ui follow-up buttons and Regenerate to the action bar. Follow-ups are localized common prompts and require no background model call. Regenerate submits a new operation referring to the original committed input, including its form context; the original answer stays in history. It uses current model settings and does not authorize replay of an unknown remote side effect.
 
@@ -269,3 +271,7 @@ Tests use controlled model I/O. Verify a real provider request, refresh/reconnec
 ## License
 
 [MIT](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for upstream dependencies and borrowed components.
+
+## Multi-layout workspace / 多布局工作区
+
+Agent 聊天支持按需展开的 HTML 报告；创作画布提供独立项目、Studio 布局和素材列表。可信场景包通过 `scenarios.config.ts` 组合，复用 Pi 原生任务和工作区事务。详见 [开发接入](SCENARIO_WORKSPACE_IMPLEMENTATION.md) 与 [本地验收](SCENARIO_WORKSPACE_VERIFICATION.md)。

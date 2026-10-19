@@ -39,6 +39,27 @@ export function fixtureModels(contextWindow = model.contextWindow) {
     const last = context.messages.at(-1);
     const tool = text?.includes('ignores_cancel') && last?.role === 'user';
     let content: AssistantMessage['content'] | undefined;
+    if (text?.includes('image_generation_probe')) {
+      const results = context.messages.filter(
+        (m) => m.role === 'toolResult' && m.toolName === 'generate_image',
+      );
+      content =
+        last?.role === 'user' || (text.includes('repeat') && results.length === 1)
+          ? [
+              {
+                type: 'toolCall',
+                id: `image-${results.length}`,
+                name: 'generate_image',
+                arguments: {
+                  prompt: 'A blue circle on white',
+                  title: 'Blue circle',
+                  aspectRatio: '1:1',
+                  resolution: '1K',
+                },
+              },
+            ]
+          : [{ type: 'text', text: 'Image request finished.' }];
+    }
     if (text?.includes('custom_skill_probe')) {
       content =
         last?.role === 'user'
@@ -301,6 +322,24 @@ export function fixtureModels(contextWindow = model.contextWindow) {
       )
     )
       content = [{ type: 'text', text: 'Summary of earlier work and its published panel.' }];
+    if (text?.includes('report_workspace_probe'))
+      content =
+        last?.role === 'user'
+          ? [
+              {
+                type: 'toolCall',
+                id: 'workspace-report',
+                name: 'workspace_execute',
+                arguments: {
+                  name: 'report.publish',
+                  input: {
+                    title: 'Native report',
+                    source: '<h1 id="summary">Native report</h1><script>window.answer=42</script>',
+                  },
+                },
+              },
+            ]
+          : [{ type: 'text', text: 'Report published.' }];
     const message: AssistantMessage = {
       role: 'assistant',
       content:

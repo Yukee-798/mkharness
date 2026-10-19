@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { referenceSchema } from './workspace';
 import { jsonText, type Json } from './json';
 import { imagesSchema } from './images';
 import { thinkingLevels } from './model-selection';
@@ -25,6 +26,7 @@ const commandFields = z
       })
       .strict()
       .optional(),
+    workspaceReferences: z.array(referenceSchema).max(20).optional(),
     source: z
       .object({
         action: z.literal('extension_action'),
@@ -58,6 +60,7 @@ export const storedRequestSchema = z
       })
       .strict(),
     sourceContext: finitePayload.optional(),
+    workspaceContext: finitePayload.optional(),
   })
   .strict();
 export type StoredCommand = z.infer<typeof storedRequestSchema>['request'];

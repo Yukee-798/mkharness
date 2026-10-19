@@ -52,6 +52,39 @@ export class ChatResources {
     };
   }
 
+  async file(
+    target: ConversationId,
+    extensionId: string,
+    ref: string,
+    name: string,
+    download: boolean,
+  ) {
+    const handler = (await this.source.contributions()).find(
+      (item) => item.id === extensionId,
+    )?.resources;
+    if (!handler?.readFile) throw new AppError(404, 'resource_not_found');
+    const file = await handler.readFile(ref, name, this.source.readContext(target));
+    if (
+      !/^[\w.+-]+\/[\w.+-]+$/.test(file.contentType) ||
+      !file.filename ||
+      /[\r\n/\\]/.test(file.filename) ||
+      file.filename.length > 200 ||
+      !Number.isSafeInteger(file.size) ||
+      file.size <= 0
+    )
+      throw new AppError(503, 'invalid_resource');
+    return new Response(file.body, {
+      headers: {
+        'Content-Type': file.contentType,
+        'Content-Length': String(file.size),
+        'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+      },
+    });
+  }
+
   async save(
     target: ConversationId,
     extensionId: string,

@@ -1,8 +1,8 @@
-import { Clock3, MessageSquare, Puzzle } from 'lucide-react';
+import { Clock3, MessageSquare, Puzzle, LayoutDashboard } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useLocale } from '../app/locale';
-export type WorkbenchView = 'agent' | 'schedules' | 'plugins';
+export type WorkbenchView = 'agent' | 'canvas' | 'schedules' | 'plugins';
 export function WorkbenchNavigation({
   view,
   collapsed,
@@ -18,6 +18,7 @@ export function WorkbenchNavigation({
       {(
         [
           ['agent', 'Agent', MessageSquare],
+          ['canvas', '创作画布', LayoutDashboard],
           ['schedules', '定时任务', Clock3],
           ['plugins', '插件市场', Puzzle],
         ] as const
@@ -45,7 +46,11 @@ export function WorkbenchNavigation({
     </nav>
   );
 }
-export function WorkbenchPlaceholder({ view }: { view: Exclude<WorkbenchView, 'agent'> }) {
+export function WorkbenchPlaceholder({
+  view,
+}: {
+  view: Exclude<WorkbenchView, 'agent' | 'canvas'>;
+}) {
   const { t } = useLocale();
   const Icon = view === 'schedules' ? Clock3 : Puzzle;
   return (

@@ -46,6 +46,8 @@ export type ExecutionContext = {
   entries: readonly EntryRecord[];
 };
 export type ContributionHost = {
+  scenario?: import('../workspace/types').WorkspaceIdentity;
+  workspace?: () => Promise<import('../workspace/module').WorkspaceModule>;
   identity: string;
   ownerId: string;
   mcpBindings?: ConnectionBinding[];
@@ -55,6 +57,7 @@ export type ContributionHost = {
   command: (nativeConversationId: number) => Promise<StoredCommand | undefined>;
 };
 export type ServerContribution = {
+  imageJobs?: import('../../extensions/images/runtime').ImageJobCapability;
   id: string;
   extension?: Extension;
   execution?: {
@@ -67,6 +70,17 @@ export type ServerContribution = {
   stateDocuments?: readonly ConversationDocToken<JsonObject>[];
   resources?: {
     read(ref: string, context: ReadContext): Promise<{ data: JsonValue; initialState: JsonValue }>;
+    /** Authorized file reads stream bytes separately from JSON metadata and model history. */
+    readFile?(
+      ref: string,
+      name: string,
+      context: ReadContext,
+    ): Promise<{
+      body: ReadableStream;
+      contentType: string;
+      filename: string;
+      size: number;
+    }>;
     validateState?(state: unknown): JsonValue;
   };
   /** Out-of-band decisions for existing native work; never enqueue a new model run. */
@@ -109,6 +123,8 @@ export function collectContributions(contributions: readonly ServerContribution[
     if (
       (contribution.resources &&
         (typeof contribution.resources.read !== 'function' ||
+          (contribution.resources.readFile !== undefined &&
+            typeof contribution.resources.readFile !== 'function') ||
           (contribution.resources.validateState !== undefined &&
             typeof contribution.resources.validateState !== 'function'))) ||
       (contribution.projectTool !== undefined && typeof contribution.projectTool !== 'function') ||

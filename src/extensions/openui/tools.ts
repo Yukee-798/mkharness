@@ -189,7 +189,7 @@ export function panelTools(
     name: 'present_openui',
     callers: ['model'],
     description:
-      'Display the final answer or clarification questions using complete OpenUI Lang and the supplied component catalog. Call this tool alone after all necessary research and computation. Include useful next steps in the displayed content. Success commits the answer and ends this reply without another model round; validation failure permits repair. Printing UI code in chat does not render it. Static content and forms need no programRef. Optional programRef must refer to a committed successful prepare_program in this chat. Use native Query/Set/Reset and ToAssistant for explicit user submission.',
+      'Insert one compact inline interactive widget or useful data chart into the current reply. Ordinary text, static tables and the main answer stay in Markdown. Use this only for editable calculations, meaningful choices or visual understanding of data, never as the default answer format. After the widget commits, continue the reply as needed. Supply complete OpenUI Lang; optional programRef must refer to a committed successful prepare_program in this chat. Use native Query/Set/Reset locally and ToAssistant only for explicit user submission.',
     parameters: Type.Object({
       ui: Type.String({ maxLength: 262144 }),
       programRef: Type.Optional(Type.String({ maxLength: 512 })),
@@ -211,8 +211,6 @@ export function panelTools(
         return {
           output: [{ type: 'text', text: JSON.stringify({ panelRef, ready: true }) }],
           details: { ref: panelRef },
-          // Pi commits the result before ending this run and placing queued inputs.
-          control: { terminate: true },
         };
       } catch (error) {
         return {

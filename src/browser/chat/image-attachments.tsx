@@ -117,6 +117,15 @@ export function ImageComposer({
   const restoring = useRef(false);
   const retired = useRef(new Set<string>());
   const initialized = useRef(false);
+  useEffect(() => {
+    if (!draft) return;
+    const sync = () => {
+      const text = draft.getSnapshot().text;
+      if (aui.composer().getState().text !== text) aui.composer().setText(text);
+    };
+    sync();
+    return draft.subscribe(sync);
+  }, [aui, draft]);
   const remember = useCallback(() => {
     if (!draft || restoring.current) return;
     draft.setImages(

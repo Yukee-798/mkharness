@@ -161,3 +161,17 @@ it('restores workspace selection after reload and removes an invalid active targ
   );
   expect(restored.getSnapshot().active).toBeNull();
 });
+
+it('does not reopen retired or unavailable panel types from saved layout', () => {
+  const store = new WorkbenchPanels('owner');
+  store.setDefinitions(definitions);
+  store.selectChat('one');
+  open(store, 'saved');
+  store.setDefinitions(new Map());
+  expect(store.getSnapshot().active).toBeNull();
+  store.selectChat('two');
+  store.selectChat('one');
+  expect(store.getSnapshot().active).toBeNull();
+  store.setDefinitions(definitions);
+  expect(store.getSnapshot().active?.target).toEqual({ ref: 'saved' });
+});

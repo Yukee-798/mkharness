@@ -43,6 +43,7 @@ export default defineConfig([
       'src/routes/**/*.tsx',
       'src/shared/**/*.tsx',
       'src/extensions/**/*.tsx',
+      'src/scenarios/**/*.tsx',
       'tests/browser/**/*.{ts,tsx}',
       'tests/unit/**/*.tsx',
     ],
@@ -72,6 +73,21 @@ export default defineConfig([
       'tests/unit/**/*.{ts,tsx}',
     ],
     languageOptions: { globals: globals.node },
+  },
+  {
+    files: ['src/browser/**/*.tsx', 'src/scenarios/**/*.tsx', 'src/extensions/**/*.tsx'],
+    ignores: ['src/browser/ui/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'JSXOpeningElement[name.type="JSXIdentifier"][name.name=/^(button|input|select|textarea|dialog|label|details|summary)$/]',
+          message:
+            '应用控件请复用 src/browser/ui 的 shadcn 组件；聊天交互同时组合 assistant-ui 原语。',
+        },
+      ],
+    },
   },
   {
     files: ['tests/**/*.{ts,tsx}'],

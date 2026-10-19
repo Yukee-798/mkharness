@@ -1,3 +1,5 @@
+import { scenarioRoutes } from './workspace/routes';
+import { ZodError } from 'zod';
 import { modelRoutes } from './models/routes';
 import { conversationRoutes } from './chat/routes';
 import { Hono } from 'hono';
@@ -38,7 +40,10 @@ app.route('/api/mcp', mcpRoutes);
 app.route('/api/skills', skillRoutes);
 app.route('/api/settings', modelRoutes);
 app.route('/api/conversations', conversationRoutes);
+app.route('/api/scenarios', scenarioRoutes);
 app.onError((error, c) => {
+  if (error instanceof ZodError)
+    return c.json({ error: { code: 'invalid_request', message: '请求参数无效' } }, 400);
   if (error instanceof AppError) {
     if (c.req.path.startsWith('/api/auth/'))
       return c.json(

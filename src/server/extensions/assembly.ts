@@ -1,3 +1,5 @@
+import { scenarioRegistry } from '../../scenarios/server';
+import { extensionEnabled } from '../../extensions/configuration';
 import {
   extensionConfiguration,
   type ExtensionConfiguration,
@@ -13,14 +15,23 @@ export async function applicationContributions(
   host?: ContributionHost,
   config: ExtensionConfiguration = extensionConfiguration,
 ) {
-  return collectContributions(
-    await Promise.all(
-      enabledDefinitions(config).map(async (definition) => {
-        const contribution = await definition.create({ env, entries, host, configuration: config });
-        if (contribution.id !== definition.id)
-          throw new AppError(503, 'extension_identity_mismatch');
-        return contribution;
-      }),
-    ),
+  const contributions = await Promise.all(
+    enabledDefinitions(config).map(async (definition) => {
+      const contribution = await definition.create({ env, entries, host, configuration: config });
+      if (contribution.id !== definition.id) throw new AppError(503, 'extension_identity_mismatch');
+      return contribution;
+    }),
   );
+  if (host?.scenario && extensionEnabled('workspace', config)) {
+    for (const pack of scenarioRegistry.scene(host.scenario.kind).packs)
+      if (pack.contribute)
+        contributions.push({
+          ...(await pack.contribute(host, {
+            env,
+            config: scenarioRegistry.scenarios.packs.find((m) => m.id === pack.id)?.config ?? {},
+          })),
+          id: `scenario.${pack.id}`,
+        });
+  }
+  return collectContributions(contributions);
 }

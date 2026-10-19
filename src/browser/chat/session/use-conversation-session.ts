@@ -156,6 +156,7 @@ export function useConversationSession({
     message: string,
     source?: RunCommand['source'],
     images?: RunCommand['images'],
+    workspaceReferences?: RunCommand['workspaceReferences'],
   ) => {
     if (!userId) throw new ApiError(401, 'unauthorized', '请先登录');
     if (
@@ -170,7 +171,7 @@ export function useConversationSession({
     }
     setSending(true);
     try {
-      await send(message, source, selected, images);
+      await send(message, source, selected, images, workspaceReferences);
     } catch (e) {
       if (e instanceof ApiError && e.code === 'credential_required')
         onSettings?.(selected?.provider);

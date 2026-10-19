@@ -1,8 +1,13 @@
+import { traceConversation } from '../chat/session/diagnostics';
+import { WorkspaceProvider, WorkspaceToggle } from '../workspace/provider';
+import { ProjectDirectory } from '../workspace/projects';
+import type { ScenarioInstance } from '../../shared/workspace';
+import { request } from '../api';
 import { useLocale } from './locale';
 import { useCallback, useEffect, useState } from 'react';
 import { authClient } from './auth';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient, useQuery } from '@tanstack/react-query';
 import { directoryOptions, userKeys } from '../queries';
 import { Button } from '../ui/button';
 import { ResourceDrafts } from '../extensions/ResourceDrafts';
@@ -19,7 +24,7 @@ import { Delayed } from '../ui/delayed';
 import { useBrowserExtensions } from '../extensions/extension-loading';
 import { useSkillSelection } from '../../extensions/skills/selection';
 import { cn } from '../ui/utils';
-import { WorkbenchProvider, useWorkbench } from '../workbench/panel-host';
+import { WorkbenchProvider, WorkbenchPanelToggle, useWorkbench } from '../workbench/panel-host';
 import { ComposerDraftsProvider, useComposerDrafts } from '../workbench/composer-drafts';
 import {
   WorkbenchNavigation,
@@ -82,8 +87,15 @@ function WorkspaceContents({ name, userId, sessionError, retrySession }: Workspa
   // Start capability discovery and reviewed module downloads while Chat and its
   // snapshot load. The runtime reuses these same user-scoped query results.
   const extensions = useBrowserExtensions(userId);
-  const { chat: requestedId = '', view = 'agent', mcp } = useSearch({ from: '/' });
-  const id = userId ? requestedId : '';
+  const { chat: requestedId = '', scenario, view = 'agent', mcp } = useSearch({ from: '/' });
+  const project = useQuery({
+    queryKey: ['user', userId, 'scenario', scenario],
+    queryFn: ({ signal }) =>
+      request<ScenarioInstance>(`/scenarios/${encodeURIComponent(scenario!)}`, { signal }),
+    enabled: !!userId && !!scenario && view === 'canvas',
+    retry: false,
+  });
+  const id = userId ? (view === 'canvas' ? (project.data?.mainChatId ?? '') : requestedId) : '';
   const workbench = useWorkbench();
   const composerDrafts = useComposerDrafts();
   const navigate = useNavigate({ from: '/' });
@@ -137,6 +149,7 @@ function WorkspaceContents({ name, userId, sessionError, retrySession }: Workspa
   }, [client, userId]);
   const choose = useCallback(
     (value: string, replace = false) => {
+      traceConversation('navigate.chat', { from: requestedId, to: value });
       void navigate({
         search: (previous) => ({
           ...previous,
@@ -148,7 +161,7 @@ function WorkspaceContents({ name, userId, sessionError, retrySession }: Workspa
       });
       setMenu(false);
     },
-    [navigate],
+    [navigate, requestedId],
   );
   const deleted = (value: string) => {
     workbench?.removeChat(value);
@@ -166,10 +179,23 @@ function WorkspaceContents({ name, userId, sessionError, retrySession }: Workspa
   };
   const create = () => choose('');
   const changeView = (value: WorkbenchView) => {
+    traceConversation('navigate.view', { from: view, to: value });
     void navigate({
       search: (previous) => ({
         ...previous,
         view: value === 'agent' ? undefined : value,
+        mcp: undefined,
+      }),
+    });
+    setMenu(false);
+  };
+  const chooseProject = (value: string) => {
+    traceConversation('navigate.project', { from: scenario, to: value });
+    void navigate({
+      search: (previous) => ({
+        ...previous,
+        view: 'canvas',
+        scenario: value || undefined,
         mcp: undefined,
       }),
     });
@@ -231,12 +257,12 @@ function WorkspaceContents({ name, userId, sessionError, retrySession }: Workspa
                       key={item.id}
                       role="group"
                       aria-label={t('聊天：{title}', { title: item.title })}
-                      className="group/chat flex items-center rounded-md has-[button[aria-current=page]]:bg-accent"
+                      className="group/chat flex items-center rounded-md hover:bg-accent focus-within:bg-accent has-[button[aria-current=page]]:bg-accent has-[button[data-state=open]]:bg-accent"
                     >
                       <Button
                         variant="ghost"
                         aria-current={id === item.id ? 'page' : undefined}
-                        className="h-auto min-w-0 flex-1 justify-start px-2 py-2 text-left font-medium text-muted-foreground aria-[current=page]:font-semibold aria-[current=page]:text-foreground"
+                        className="h-auto min-w-0 flex-1 justify-start px-2 py-2 text-left font-medium text-muted-foreground hover:bg-transparent aria-[current=page]:font-semibold aria-[current=page]:text-foreground"
                         onClick={() => choose(item.id)}
                       >
                         <span className="min-w-0 flex-1 truncate">{item.title}</span>
@@ -269,117 +295,150 @@ function WorkspaceContents({ name, userId, sessionError, retrySession }: Workspa
     </div>
   );
   return (
-    <ResourceDrafts scope={userId}>
-      <AppShell
-        menu={menu}
-        onMenuChange={setMenu}
-        directory={directory}
-        navigation={(collapsed) => (
-          <WorkbenchNavigation view={view} collapsed={collapsed} onChange={changeView} />
-        )}
-        title={
-          view === 'agent'
-            ? id
-              ? (current?.title ?? t('聊天'))
-              : undefined
-            : t(view === 'schedules' ? '定时任务' : '插件市场')
-        }
-        onNewChat={() => void create()}
-        footer={(collapsed) =>
-          userId ? (
-            <AccountMenu
-              name={name}
-              collapsed={collapsed}
-              busy={signingOut}
-              onSettings={() => {
-                setSettingsProvider(activeProvider);
-                setSettingsSection('general');
-                setSettingsOpen(true);
-              }}
-              onSignOut={() => void signOut()}
-            />
-          ) : (
-            <Button
-              variant="ghost"
-              className={cn('h-12 w-full justify-start px-3', collapsed && 'justify-center px-0')}
-              aria-label={signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
-              disabled={signingIn || !!sessionError}
-              onClick={async () => {
-                setSigningIn(true);
-                setError('');
-                setMenu(false);
-                try {
-                  const result = await authClient.signIn.social({
-                    provider: 'google',
-                    callbackURL: location.origin,
-                  });
-                  if (result.error) throw new Error(result.error.message ?? '登录失败，请重试');
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setSigningIn(false);
-                }
-              }}
-            >
-              <LogIn className="size-4 shrink-0" />
-              <span className={collapsed ? 'sr-only' : undefined}>
-                {signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
-              </span>
-            </Button>
-          )
-        }
-      >
-        {(error || sessionError || directoryQuery.error) && (
-          <Alert variant="destructive" className="mx-4 mt-4 w-auto">
-            <AlertDescription>
-              {t(error || sessionError?.message || directoryQuery.error?.message || '')}
-              {sessionError && (
-                <Button variant="link" onClick={retrySession}>
-                  {t('重试')}
-                </Button>
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
-        <div
-          className="flex min-h-0 flex-1 flex-col"
-          hidden={view !== 'agent'}
-          style={view !== 'agent' ? { display: 'none' } : undefined}
-        >
-          <Chat
-            key={id}
-            id={id}
-            userId={userId}
-            onDirectoryChange={refreshDirectory}
-            onUnavailable={() => deleted(id)}
-            onCreated={(value) => {
-              refreshDirectory();
-              choose(value);
-            }}
-            onSettings={showSettings}
-            onModelProviderChange={setActiveProvider}
-            creation={
-              extensions.capabilities.data?.skills && skillSelection.creationIds !== undefined
-                ? { skillIds: skillSelection.creationIds }
+    <WorkspaceProvider userId={userId} chatId={id}>
+      <ResourceDrafts scope={userId}>
+        <AppShell
+          headerActions={
+            <>
+              <WorkspaceToggle />
+              {view === 'agent' && <WorkbenchPanelToggle />}
+            </>
+          }
+          menu={menu}
+          onMenuChange={setMenu}
+          directory={
+            view === 'canvas' ? (
+              <ProjectDirectory userId={userId} selected={scenario} choose={chooseProject} />
+            ) : (
+              directory
+            )
+          }
+          navigation={(collapsed) => (
+            <WorkbenchNavigation view={view} collapsed={collapsed} onChange={changeView} />
+          )}
+          title={
+            view === 'agent'
+              ? id
+                ? (current?.title ?? t('聊天'))
                 : undefined
-            }
-          />
-        </div>
-        {view !== 'agent' && <WorkbenchPlaceholder view={view} />}
-        {!!userId && (
-          <SettingsDialog
-            key={userId}
-            userId={userId}
-            customMcp={extensions.capabilities.data?.customMcp === true}
-            skills={extensions.capabilities.data?.skills === true}
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-            initialProvider={settingsProvider}
-            initialSection={settingsSection}
-          />
-        )}
-      </AppShell>
-    </ResourceDrafts>
+              : view === 'canvas'
+                ? project.data?.titleCustom === false && project.data.title === '未命名创作'
+                  ? t('未命名创作')
+                  : (project.data?.title ?? t('创作画布'))
+                : t(view === 'schedules' ? '定时任务' : '插件市场')
+          }
+          onNewChat={() => void create()}
+          footer={(collapsed) =>
+            userId ? (
+              <AccountMenu
+                name={name}
+                collapsed={collapsed}
+                busy={signingOut}
+                onSettings={() => {
+                  setSettingsProvider(activeProvider);
+                  setSettingsSection('general');
+                  setSettingsOpen(true);
+                }}
+                onSignOut={() => void signOut()}
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                className={cn('h-12 w-full justify-start px-3', collapsed && 'justify-center px-0')}
+                aria-label={signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
+                disabled={signingIn || !!sessionError}
+                onClick={async () => {
+                  setSigningIn(true);
+                  setError('');
+                  setMenu(false);
+                  try {
+                    const result = await authClient.signIn.social({
+                      provider: 'google',
+                      callbackURL: location.origin,
+                    });
+                    if (result.error) throw new Error(result.error.message ?? '登录失败，请重试');
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setSigningIn(false);
+                  }
+                }}
+              >
+                <LogIn className="size-4 shrink-0" />
+                <span className={collapsed ? 'sr-only' : undefined}>
+                  {signingIn ? t('正在打开登录…') : t('使用 Google 登录')}
+                </span>
+              </Button>
+            )
+          }
+        >
+          {(error || sessionError || directoryQuery.error || project.error) && (
+            <Alert variant="destructive" className="mx-4 mt-4 w-auto">
+              <AlertDescription>
+                {t(
+                  error ||
+                    sessionError?.message ||
+                    directoryQuery.error?.message ||
+                    project.error?.message ||
+                    '',
+                )}
+                {sessionError && (
+                  <Button variant="link" onClick={retrySession}>
+                    {t('重试')}
+                  </Button>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+          <div
+            className="flex min-h-0 flex-1 flex-col"
+            hidden={view !== 'agent' && view !== 'canvas'}
+            style={view !== 'agent' && view !== 'canvas' ? { display: 'none' } : undefined}
+          >
+            {(view !== 'canvas' || !!id) && (
+              <Chat
+                key={id}
+                id={id}
+                userId={userId}
+                onDirectoryChange={refreshDirectory}
+                onUnavailable={() => (view === 'canvas' ? chooseProject('') : deleted(id))}
+                onCreated={(value) => {
+                  refreshDirectory();
+                  choose(value);
+                }}
+                onSettings={showSettings}
+                onModelProviderChange={setActiveProvider}
+                creation={
+                  extensions.capabilities.data?.skills && skillSelection.creationIds !== undefined
+                    ? { skillIds: skillSelection.creationIds }
+                    : undefined
+                }
+              />
+            )}
+            {view === 'canvas' && !id && (
+              <div className="m-auto p-8 text-center text-muted-foreground">
+                {scenario && project.isPending
+                  ? t('正在打开创作项目…')
+                  : t('从左侧新建或打开一个创作项目。')}
+              </div>
+            )}
+          </div>
+          {view !== 'agent' && view !== 'canvas' && <WorkbenchPlaceholder view={view} />}
+          {!!userId && (
+            <SettingsDialog
+              key={userId}
+              userId={userId}
+              customMcp={extensions.capabilities.data?.customMcp === true}
+              skills={extensions.capabilities.data?.skills === true}
+              open={settingsOpen}
+              onOpenChange={setSettingsOpen}
+              initialProvider={settingsProvider}
+              initialSection={settingsSection}
+            />
+          )}
+        </AppShell>
+      </ResourceDrafts>
+    </WorkspaceProvider>
   );
 }
 

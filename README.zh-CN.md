@@ -37,6 +37,8 @@ pnpm dev
 
 可以先尝试提问、生成交互式计划或读取公开网页。网页搜索需要单独配置搜索 Key；`describe_text` 示例默认关闭。
 
+图片生成扩展默认接 Kie GPT Image 2.5 Sunburst：图片显示在回复内，点击后在右侧查看大图、切换原始尺寸并下载原图。服务端 `.dev.vars` 配置 `KIE_API_KEY` 后重启，并绑定私有 R2 `ARTIFACT_FILES`；未配置时不注册生成工具。提供方可通过 `ImageProvider` Interface 自定义，详见[图片生成设计与接入](IMAGE_GENERATION_DESIGN.md)。
+
 > 在界面填写的 Key 会发送给当前部署，并在服务端加密保存，用于后台执行与恢复。请在自己的部署或可信部署填写。保存 Key 不会测试连接，首次模型请求才会实际使用它。
 
 `pnpm setup` 生成缺失的本地认证与加密密钥，并应用从 `migrations/0001_initial.sql` 开始的原生 D1 迁移。重启时保留 `.dev.vars`，该文件已被 Git 忽略。数据保存在隔离的 `.wrangler/native-state`。Setup 仅接受空库或已知原生迁移链，拒绝无关旧 schema，不导入账号、聊天、凭据、MCP 连接或 Skills。`0002_google_accounts.sql` 使旧浏览器访客会话失效并移除其身份标记，保留用户和所属数据；上线前先应用此迁移。`node scripts/setup.mjs --check` 只检查本地状态，不修改密钥或应用迁移。统一使用 `localhost`，不要与 `127.0.0.1` 混用。
@@ -48,7 +50,7 @@ pnpm dev
 - **可用的聊天应用。** 流式回复、思考过程、工具活动、模型与思考强度选择、聊天历史，以及回复和工具耗时。使用 assistant-ui、shadcn/ui 与 Tailwind CSS。
 - **持久化 Agent 执行。** 每个聊天由 `ChatSession` Durable Object 承载一个原生 Pi Durable 1.3.0 Harness，使用官方 SQLite Adapter。Pi 负责提交、Inbox、历史和任务恢复。关闭浏览器只断开观察，Stop 是独立操作。删除持久化 tombstone 和清理 alarm 后返回 `202`、隐藏聊天，等待运行时关闭再擦除内容；D1 保留最小创建/删除回执，阻止迟到调用复活聊天。
 - **前后端扩展。** 服务端接入 Pi 原生工具、提示词与 hooks；浏览器注册 assistant-ui Toolkit、工具标题装饰和回复 Footer。
-- **交互式生成 UI。** 可选 OpenUI 扩展支持表单、表格、图表、输入保存，以及有资源限制的 QuickJS 计算。
+- **消息内的局部交互。** 普通回复默认使用 Markdown；OpenUI 在消息里插入带边框的小型计算器、选择组件或有助理解数据的图表，支持输入保存与有资源限制的 QuickJS 计算。它不自动打开右侧面板，也不包裹整篇回答。
 - **远程集成。** 用户可添加远程 MCP 并通过原生 SDK 完成 OAuth，也支持部署级 HTTPS MCP 工具、静态 Skills，以及包含 submit/query/cancel 和恢复引用保存的异步服务示例。
 - **Google 账号与个人 Key。** Better Auth Google 登录隔离各账号数据；用户自行配置模型名、Base URL 与 API Key，也可启用部署默认 Key。
 
@@ -260,3 +262,7 @@ E2E 使用隔离的 `.wrangler/native-e2e-build` 产物和 `.wrangler/native-e2e
 ## 许可证
 
 [MIT](LICENSE)。上游依赖与借用组件归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## Multi-layout workspace / 多布局工作区
+
+Agent 聊天支持按需展开的 HTML 报告；创作画布提供独立项目、Studio 布局和素材列表。可信场景包通过 `scenarios.config.ts` 组合，复用 Pi 原生任务和工作区事务。详见 [开发接入](SCENARIO_WORKSPACE_IMPLEMENTATION.md) 与 [本地验收](SCENARIO_WORKSPACE_VERIFICATION.md)。

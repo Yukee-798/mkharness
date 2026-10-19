@@ -12,6 +12,8 @@ export type ExtensionUI = {
 };
 export type ExtensionDecoration = ExtensionUI & { id: string };
 export type BrowserExtension = {
+  pack?: { id: string; version: string };
+  layouts?: Readonly<Record<string, import('../workspace/layout').LayoutAdapter>>;
   toolkit?: Toolkit;
   activity?: Record<string, 'visible' | 'hidden'>;
   ui?: ExtensionUI;
@@ -41,6 +43,13 @@ export async function loadBrowserExtensions(ids: readonly string[], loaders: Bro
       const module = result.value;
       const tools = Object.keys(module.toolkit ?? {});
       if (
+        Object.values(module.layouts ?? {}).some(
+          (layout) =>
+            !['left', 'right'].includes(layout.conversationSide) ||
+            !Number.isFinite(layout.primaryShare) ||
+            layout.primaryShare < 0 ||
+            layout.primaryShare > 100,
+        ) ||
         Object.entries(module.panels ?? {}).some(
           ([name, panel]) =>
             !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/.test(name) ||

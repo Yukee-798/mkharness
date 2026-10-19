@@ -24,6 +24,7 @@ export function AppShell({
   onNewChat,
   creating = false,
   navigation,
+  headerActions,
 }: {
   children: ReactNode;
   directory?: ReactNode;
@@ -34,6 +35,7 @@ export function AppShell({
   onNewChat?: () => void;
   creating?: boolean;
   navigation?: (collapsed: boolean) => ReactNode;
+  headerActions?: ReactNode;
 }) {
   const { t } = useLocale();
   // Apply saved browser preferences before the first paint and preserve them
@@ -188,10 +190,11 @@ export function AppShell({
                 </Button>
               </SheetTrigger>
               {title ? (
-                <h1 className="truncate text-sm font-medium">{title}</h1>
+                <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h1>
               ) : (
-                <span className="text-sm font-medium">{t('新聊天')}</span>
+                <span className="min-w-0 flex-1 text-sm font-medium">{t('新聊天')}</span>
               )}
+              {headerActions}
             </header>
             {children}
           </main>

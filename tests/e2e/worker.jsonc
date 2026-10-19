@@ -24,7 +24,10 @@
     "ChatSession": { "type": "durable-object", "storage": "sqlite" },
     "McpConnection": { "type": "durable-object", "storage": "sqlite" },
   },
-  "r2_buckets": [{ "binding": "SKILL_FILES", "bucket_name": "mkharness-native-e2e-skills" }],
+  "r2_buckets": [
+    { "binding": "SKILL_FILES", "bucket_name": "mkharness-native-e2e-skills" },
+    { "binding": "ARTIFACT_FILES", "bucket_name": "mkharness-native-e2e-artifacts" },
+  ],
   "d1_databases": [
     {
       "binding": "DB",

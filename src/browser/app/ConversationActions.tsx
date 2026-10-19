@@ -1,3 +1,4 @@
+import { Label } from '../ui/label';
 import { useLocale } from './locale';
 import { useState } from 'react';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
@@ -136,9 +137,9 @@ export function ConversationActions({
               }
             }}
           >
-            <label htmlFor={`chat-name-${id}`} className="sr-only">
+            <Label htmlFor={`chat-name-${id}`} className="sr-only">
               {t('聊天名称')}
-            </label>
+            </Label>
             <Input
               id={`chat-name-${id}`}
               value={name}

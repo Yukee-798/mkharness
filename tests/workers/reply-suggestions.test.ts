@@ -78,7 +78,10 @@ async function probe(mode: Mode) {
         };
         let content: AssistantMessage['content'];
         if (trace.rounds > 1 || mode === 'disabled')
-          content = [{ type: 'text', text: 'Completed answer after the prior tools' }];
+          content = [
+            { type: 'text', text: 'Completed answer after the prior tools' },
+            ...(['ui-first', 'suggestions-first'].includes(mode) ? [metadata] : []),
+          ];
         else if (mode === 'text' || mode === 'invalid')
           content = [
             { type: 'text', text: 'The host admits each extension request once.' },
@@ -123,10 +126,10 @@ async function probe(mode: Mode) {
 }
 
 it.each(['text', 'ui-first', 'suggestions-first'] as const)(
-  'commits %s answer and suggestions in one model round and restores their identity',
+  'commits %s answer with final-text suggestions and restores their identity',
   async (mode) => {
     const { stub, trace, snapshot, command } = await probe(mode);
-    expect(trace.rounds).toBe(1);
+    expect(trace.rounds).toBe(mode === 'text' ? 1 : 2);
     expect(trace.systems.join('\n')).toContain('reply-followups');
     const answer = snapshot.entries.findLast((entry: any) => entry.kind === 'pi.assistant');
     expect(suggestions(snapshot)).toEqual({ [answer.id]: prompts });
@@ -141,7 +144,7 @@ it.each(['text', 'ui-first', 'suggestions-first'] as const)(
         isError: false,
       });
     expect(await stub.submitRun(command)).toMatchObject({ accepted: true });
-    expect(trace.rounds).toBe(1);
+    expect(trace.rounds).toBe(mode === 'text' ? 1 : 2);
     await abortAllDurableObjects();
     const restored = JSON.parse(await env.CONVERSATIONS.get(stub.id).snapshot());
     expect(suggestions(restored)).toEqual(suggestions(snapshot));

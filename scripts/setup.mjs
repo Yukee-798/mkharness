@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 export const localStatePath = '.wrangler/native-state';
-const nativeMigrations = ['0001_initial.sql', '0002_google_accounts.sql'];
+const nativeMigrations = ['0001_initial.sql', '0002_google_accounts.sql', '0003_scenarios.sql'];
 const directoryColumns = ['create_request_id', 'create_hash', 'instance_generation', 'lifecycle'];
 const baselineTables = [
   'user',
@@ -62,7 +62,7 @@ export function checkLocalBaseline(root = projectRoot) {
     .sort();
   if (JSON.stringify(migrations) !== JSON.stringify(nativeMigrations)) {
     throw new Error(
-      'Native Pi setup requires the known migrations/0001_initial.sql + 0002_google_accounts.sql chain.',
+      'Native Pi setup requires the known migrations/0001_initial.sql through 0003_scenarios.sql chain.',
     );
   }
   const tables = queryLocalDatabase(

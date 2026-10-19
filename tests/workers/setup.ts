@@ -12,7 +12,15 @@ beforeAll(async () => {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, text]) => ({
         name: name.split('/').at(-1)!,
-        queries: (text as string).split(';').filter((query) => query.trim()),
+        queries: (() => {
+          const sql = text as string;
+          const triggers = [...sql.matchAll(/CREATE TRIGGER[\s\S]*?END;/g)].map(
+            (match) => match[0],
+          );
+          let rest = sql;
+          for (const trigger of triggers) rest = rest.replace(trigger, '');
+          return [...rest.split(';').filter((query) => query.trim()), ...triggers];
+        })(),
       })),
   );
 });

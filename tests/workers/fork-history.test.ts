@@ -133,12 +133,21 @@ it('does not expose a completed reply duration beyond a fork cut inside its fina
         String(receipt.answer)
       ]?.endedAt,
     ).toBeTypeOf('number');
-    const fork = await root.fork(receipt.answer, { ownership: { kind: 'ownerless' } }, BG);
+    const toolRound = parent.entries.findLast((entry) =>
+      entry.model?.some(
+        (message) =>
+          message.role === 'assistant' &&
+          message.content.some(
+            (block) => block.type === 'toolCall' && block.name === 'present_openui',
+          ),
+      ),
+    )!;
+    const fork = await root.fork(toolRound.id, { ownership: { kind: 'ownerless' } }, BG);
     const snapshot = (await instance.read(actor, {
       type: 'snapshot',
       target: Number(fork.id),
     })) as ConversationSnapshot;
-    expect(snapshot.toolProgress?.[`${receipt.answer}.same-call`]?.status).toBe('pending');
+    expect(snapshot.toolProgress?.[`${toolRound.id}.same-call`]?.status).toBe('pending');
     expect(
       (snapshot.history.annotations[String(receipt.answer)]?.timing as TimingState | undefined)
         ?.replies[String(receipt.answer)]?.endedAt,

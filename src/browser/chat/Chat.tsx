@@ -1,3 +1,4 @@
+import { WorkspaceReferences } from '../workspace/provider';
 import { useConversationSession } from './session/use-conversation-session';
 import type { QueueDraft } from '../../shared/queue';
 import { ImageComposer, AddImage } from './image-attachments';
@@ -9,6 +10,8 @@ import { TaskQueue } from './task-queue';
 import { ResourceDrafts } from '../extensions/ResourceDrafts';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
+import { Label } from '../ui/label';
+import { ComposerPrimitive } from '@assistant-ui/react';
 import { Alert, AlertDescription } from '../ui/alert';
 import { ModelPicker } from '../models/model-picker';
 import { resolveModelSelection } from '../../shared/model-selection';
@@ -60,11 +63,11 @@ function ConversationChat({
     credentialRequired,
   } = session.view;
   const draft = useComposerDraft(id);
-  const {
-    text,
-    source: draftSource,
-    version: composerVersion,
-  } = useSyncExternalStore(draft.subscribe, draft.getSnapshot, draft.getSnapshot);
+  const { text, workspaceReferences } = useSyncExternalStore(
+    draft.subscribe,
+    draft.getSnapshot,
+    draft.getSnapshot,
+  );
   const [editingQueue, setEditingQueue] = useState(false);
   const { submit, reportError: setError, selectModel: setSelection } = session;
   const restoredModel = useRef(false);
@@ -76,17 +79,18 @@ function ConversationChat({
   }, [catalog, draft, setSelection]);
   const footer = (
     <div className="space-y-3">
+      <WorkspaceReferences />
       <TaskQueue
         items={snapshot?.queue ?? []}
         recoveries={snapshot?.queueEdits ?? []}
         disabled={submitting || isStopping}
-        hasDraft={!!text}
+        hasDraft={!!text || !!workspaceReferences.length}
         editing={setEditingQueue}
         act={session.actOnQueue}
         acknowledge={session.acknowledgeQueueEdit}
         edit={(queuedDraft: QueueDraft) => {
           flushSync(() => {
-            draft.edit(queuedDraft.text, queuedDraft.source);
+            draft.restore(queuedDraft);
             if (queuedDraft.config && catalog) {
               draft.setConfig(queuedDraft.config);
               setSelection(resolveModelSelection(catalog, queuedDraft.config));
@@ -156,9 +160,10 @@ function ConversationChat({
             editingQueue
           )
             return false;
-          const submittedVersion = composerVersion;
+          const captured = draft.getSnapshot();
+          const submittedVersion = captured.version;
           try {
-            await submit(text, draftSource, images);
+            await submit(captured.text, captured.source, images, captured.workspaceReferences);
             draft.clearText(submittedVersion);
             return true;
           } catch (e) {
@@ -169,26 +174,39 @@ function ConversationChat({
       >
         {(hasImages) => (
           <>
-            <label htmlFor="message" className="sr-only">
+            <Label htmlFor="message" className="sr-only">
               {t('消息')}
-            </label>
-            <Textarea
-              id="message"
-              value={text}
-              onChange={(e) => {
-                draft.edit(e.target.value);
-              }}
-              rows={2}
-              placeholder={t('描述你的问题，或说说你想完成什么')}
-              className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
-              disabled={!composerReady || isStopping || editingQueue}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  e.currentTarget.form?.requestSubmit();
+            </Label>
+            <ComposerPrimitive.Input
+              asChild
+              cancelOnEscape={false}
+              submitMode="none"
+              onKeyDown={(event) => {
+                // The host can enqueue while observing a run; keyboard sends use
+                // the same HTTP form path, never AG-UI's send/steer actions.
+                if (
+                  event.key === 'Enter' &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing &&
+                  event.keyCode !== 229
+                ) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
                 }
               }}
-            />
+            >
+              <Textarea
+                id="message"
+                value={text}
+                onChange={(e) => {
+                  draft.edit(e.target.value);
+                }}
+                rows={2}
+                placeholder={t('描述你的问题，或说说你想完成什么')}
+                className="max-h-40 min-h-14 resize-none rounded-none border-0 px-1 py-1 text-base shadow-none focus-visible:ring-0 md:text-sm"
+                disabled={!composerReady || isStopping || editingQueue}
+              />
+            </ComposerPrimitive.Input>
             <div className="mt-2 flex items-center justify-between gap-2">
               <AddImage disabled={!composerReady || submitting || isStopping || editingQueue} />
               <div className="min-w-0 flex-1">
@@ -208,38 +226,39 @@ function ConversationChat({
                   </span>
                 )}
               </div>
-              <Button
-                type={hasPending || isStopping ? 'button' : 'submit'}
-                size="icon"
-                aria-busy={submitting || isStopping}
-                className="rounded-full"
-                aria-label={
-                  isStopping
-                    ? t('正在停止…')
-                    : submitting
-                      ? t('提交中…')
-                      : hasPending
-                        ? t('停止并撤回排队')
-                        : t('发送')
-                }
-                disabled={
-                  !composerReady ||
-                  submitting ||
-                  isStopping ||
-                  editingQueue ||
-                  (!hasPending &&
-                    ((!text.trim() && !hasImages) || (!id && session.view.settingsPending)))
-                }
-                onClick={hasPending ? session.stop : undefined}
-              >
-                {submitting || isStopping ? (
-                  <LoaderCircle className="size-4 motion-safe:animate-spin" />
-                ) : hasPending ? (
-                  <Square className="size-4" />
-                ) : (
-                  <ArrowUp className="size-4" />
-                )}
-              </Button>
+              <ComposerAction stopping={hasPending || isStopping} stop={session.stop}>
+                <Button
+                  type="button"
+                  size="icon"
+                  aria-busy={submitting || isStopping}
+                  className="rounded-full"
+                  aria-label={
+                    isStopping
+                      ? t('正在停止…')
+                      : submitting
+                        ? t('提交中…')
+                        : hasPending
+                          ? t('停止并撤回排队')
+                          : t('发送')
+                  }
+                  disabled={
+                    !composerReady ||
+                    submitting ||
+                    isStopping ||
+                    editingQueue ||
+                    (!hasPending &&
+                      ((!text.trim() && !hasImages) || (!id && session.view.settingsPending)))
+                  }
+                >
+                  {submitting || isStopping ? (
+                    <LoaderCircle className="size-4 motion-safe:animate-spin" />
+                  ) : hasPending ? (
+                    <Square className="size-4" />
+                  ) : (
+                    <ArrowUp className="size-4" />
+                  )}
+                </Button>
+              </ComposerAction>
             </div>
           </>
         )}
@@ -252,6 +271,31 @@ function ConversationChat({
         <ChatRuntime key={`${userId}:${id}`} session={session} footer={footer} />
       </div>
     </ResourceDrafts>
+  );
+}
+
+/** Native action UI; prevent its default runtime action so HTTP remains the only submit/cancel path. */
+function ComposerAction({
+  stopping,
+  stop,
+  children,
+}: {
+  stopping: boolean;
+  stop: () => void;
+  children: ReactNode;
+}) {
+  const Action = stopping ? ComposerPrimitive.Cancel : ComposerPrimitive.Send;
+  return (
+    <Action
+      asChild
+      onClick={(event) => {
+        event.preventDefault();
+        if (stopping) stop();
+        else event.currentTarget.form?.requestSubmit();
+      }}
+    >
+      {children}
+    </Action>
   );
 }
 

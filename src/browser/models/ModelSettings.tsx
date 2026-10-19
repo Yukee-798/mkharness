@@ -1,3 +1,4 @@
+import { Label } from '../ui/label';
 import { useLocale } from '../app/locale';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -138,7 +139,7 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
       <p className="text-sm text-muted-foreground">
         {t('模型名使用 API 标识；Base URL 需支持该模型的 API 协议。')}
       </p>
-      <label className="block space-y-2">
+      <Label className="block space-y-2">
         Base URL
         <Input
           aria-label="Base URL"
@@ -151,8 +152,8 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
           onChange={(e) => setBaseUrl(e.target.value)}
           placeholder="https://api.example.com/v1"
         />
-      </label>
-      <label className="block space-y-2">
+      </Label>
+      <Label className="block space-y-2">
         {t('模型名')}
         <Input
           aria-label={t('模型名')}
@@ -165,7 +166,7 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
           onChange={(e) => setModelId(e.target.value)}
           placeholder="deepseek-flash"
         />
-      </label>
+      </Label>
       <p className="text-sm text-muted-foreground">
         {t('当前来源：')}
         {current?.effectiveSource === 'user'
@@ -175,7 +176,7 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
             : t('未配置')}
         {current?.updatedAt && <> · {new Date(current.updatedAt).toLocaleString(locale)}</>}
       </p>
-      <label className="block space-y-2">
+      <Label className="block space-y-2">
         API Key
         <Input
           aria-label="API Key"
@@ -186,9 +187,9 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
           onChange={(e) => setKey(e.target.value)}
           placeholder={t('填写个人 API Key')}
         />
-      </label>
+      </Label>
       <div className="space-y-2">
-        <label className="flex items-center gap-2 text-sm">
+        <Label className="flex items-center gap-2 text-sm">
           <Checkbox
             aria-label={t('在此浏览器记住 API Key')}
             checked={remember}
@@ -201,7 +202,7 @@ function CredentialForm({ userId, initialProvider }: { userId: string; initialPr
             }}
           />
           {t('在此浏览器记住 API Key')}
-        </label>
+        </Label>
         <p className="text-xs text-muted-foreground">
           {t('可选：以明文保存在 localStorage，供再次填写；页面脚本可读取。退出后清除。')}
         </p>

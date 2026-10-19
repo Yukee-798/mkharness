@@ -2,6 +2,8 @@ import type { ExtensionConfiguration } from './src/extensions/configuration';
 
 /** Reviewed deployment configuration. Connection URLs and secrets stay in server bindings. */
 export default {
+  workspace: { enabled: true },
+  images: { enabled: true },
   timing: { enabled: true },
   web: { enabled: true },
   openui: { enabled: true, inspect: false },

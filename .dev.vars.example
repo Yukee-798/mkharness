@@ -32,3 +32,8 @@ ASYNC_SERVICE_URL=
 ASYNC_SERVICE_TOKEN=
 # none: never automatically repeat an uncertain submit; key/lookup require verified provider semantics.
 ASYNC_RECOVERY=none
+
+# Image generation (Kie GPT Image 2.5 Sunburst). Server only; blank disables the tool.
+KIE_API_KEY=
+KIE_BASE_URL=https://api.kie.ai
+KIE_IMAGE_MODEL=gpt-image-2-5-sunburst-text-to-image

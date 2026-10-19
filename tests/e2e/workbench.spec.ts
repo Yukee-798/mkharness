@@ -2,7 +2,7 @@ import { snapshotFixture } from './chat-fixtures';
 import { test, expect, resource } from './fixtures';
 
 for (const width of [1440, 390]) {
-  test(`workspace navigation and a single resource editor preserve context at ${width}px`, async ({
+  test(`inline UI keeps prose, inputs and workspace navigation together at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -41,6 +41,7 @@ for (const width of [1440, 390]) {
                 {
                   role: 'assistant',
                   content: [
+                    { type: 'text', text: '先看普通正文说明。' },
                     { type: 'toolCall', id: 'report', name: 'present_openui', arguments: { ui } },
                   ],
                 },
@@ -59,6 +60,14 @@ for (const width of [1440, 390]) {
                   details: { ref: '2.report' },
                   isError: false,
                 },
+              ],
+            },
+            {
+              conversationId: 1,
+              kind: 'pi.assistant',
+              id: 4,
+              model: [
+                { role: 'assistant', content: [{ type: 'text', text: '再用普通正文解释结果。' }] },
               ],
             },
           ],
@@ -90,36 +99,56 @@ for (const width of [1440, 390]) {
         .getByRole('button', { name, exact: true })
         .click();
     };
+    await page.addInitScript(() =>
+      localStorage.setItem(
+        'mkharness.workbench.owner',
+        JSON.stringify({
+          width: 45,
+          memories: [
+            [
+              'one',
+              {
+                hidden: false,
+                active: {
+                  type: 'openui/preview',
+                  key: '2.report',
+                  target: { key: '2.report', ref: '2.report' },
+                  chatId: 'one',
+                },
+              },
+            ],
+          ],
+        }),
+      ),
+    );
     await page.goto('/?chat=one');
     const input = page.getByRole('textbox', { name: '消息', exact: true });
     await expect(input).toBeEnabled();
     await input.fill('Unsent report notes');
-    await expect(page.getByText('Workbench report', { exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: /交互式回答/ }).click();
-    await expect(page.getByText('Workbench report', { exact: true })).toHaveCount(1);
-    if (width >= 768) {
-      const panel = page.getByRole('region', { name: '工作面板', exact: true });
-      const before = (await panel.boundingBox())!.width;
-      const handle = page.getByRole('separator');
-      await handle.focus();
-      await page.keyboard.press('ArrowLeft');
-      await expect.poll(async () => (await panel.boundingBox())!.width).toBeGreaterThan(before);
-      await page.getByRole('button', { name: '最大化面板', exact: true }).click();
-      await expect(input).toBeHidden();
-      await expect(panel).toBeVisible();
-      await page.getByRole('button', { name: '恢复面板大小', exact: true }).click();
-      await expect(input).toBeVisible();
-    }
+    await expect(page.getByText('先看普通正文说明。', { exact: true })).toBeVisible();
+    const widget = page.getByRole('region', { name: '交互式回答', exact: true });
+    await expect(widget.getByText('Workbench report', { exact: true })).toBeVisible();
+    await expect(page.getByText('再用普通正文解释结果。', { exact: true })).toBeVisible();
+    await expect(widget).toHaveCSS('border-top-style', 'solid');
+    await expect(widget).toHaveCSS('border-top-width', '1px');
+    await expect(page.getByRole('region', { name: '工作面板', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '查看新内容', exact: true })).toHaveCount(0);
+    const inOrder = await widget.evaluate((element) => {
+      const text = element.closest('[data-slot="chat-messages"]')?.textContent ?? '';
+      return (
+        text.indexOf('先看普通正文说明。') < text.indexOf('Workbench report') &&
+        text.indexOf('Workbench report') < text.indexOf('再用普通正文解释结果。')
+      );
+    });
+    expect(inOrder).toBe(true);
     await page.getByPlaceholder('Goal', { exact: true }).fill('B');
     await expect.poll(() => saved.state.$goal).toBe('B');
-    await page.getByRole('button', { name: '收起工作面板', exact: true }).click();
     await navigate('定时任务');
     await expect(page.getByText('即将开放', { exact: true })).toBeVisible();
     await navigate('插件市场');
     await expect(page.getByText('即将开放', { exact: true })).toBeVisible();
     await navigate('Agent');
     await expect(input).toHaveValue('Unsent report notes');
-    await page.getByRole('button', { name: '打开工作面板', exact: true }).click();
     await expect(page.getByPlaceholder('Goal', { exact: true })).toHaveValue('B');
     expect(submissions).toEqual([]);
     await page.reload();
@@ -128,14 +157,23 @@ for (const width of [1440, 390]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    const close = page.getByRole('button', { name: '收起工作面板', exact: true });
-    await expect(close).toBeInViewport();
-    if (width < 768) {
-      await expect
-        .poll(async () => Math.round((await page.getByRole('dialog').boundingBox())!.x))
-        .toBe(0);
-      await expect(page.getByRole('button', { name: '最大化面板', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: '工作面板', exact: true })).toHaveCount(0);
+    if (width === 1440) {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      for (let round = 0; round < 12; round++) {
+        await page.getByRole('button', { name: 'Report two', exact: true }).click();
+        await expect(page).toHaveURL(/chat=two/);
+        await expect(widget).toBeVisible();
+        await page.getByRole('button', { name: '新建聊天', exact: true }).click();
+        await expect(page).not.toHaveURL(/chat=/);
+        await expect(widget).toHaveCount(0);
+        await page.getByRole('button', { name: 'Report one', exact: true }).click();
+        await expect(page).toHaveURL(/chat=one/);
+        await expect(widget).toBeVisible();
+      }
+      expect(errors).toEqual([]);
     }
-    await page.screenshot({ path: `test-results/workbench-${width}.png` });
+    await page.screenshot({ path: `test-results/openui-inline-${width}.png` });
   });
 }

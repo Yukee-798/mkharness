@@ -1,3 +1,4 @@
+import { traceConversation } from './diagnostics';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { fromThreadMessageLike } from '@assistant-ui/react';
 import { useAgUiRuntime, fromAgUiMessages } from '@assistant-ui/react-ag-ui';
@@ -120,6 +121,10 @@ export function useConversationRuntime({
   });
   const activeRunId = (snapshot.pending.find((p) => p.status === 'running') ?? snapshot.pending[0])
     ?.operationId;
+  useEffect(() => {
+    traceConversation('runtime.mount', { chatId: id });
+    return () => traceConversation('runtime.unmount', { chatId: id });
+  }, [id]);
   const previousPrepend = useRef(prependVersion);
   useEffect(() => {
     let imported = history;
@@ -149,16 +154,24 @@ export function useConversationRuntime({
       }
     }
     previousPrepend.current = prependVersion;
+    traceConversation('runtime.import', {
+      chatId: id,
+      messages: imported.messages.length,
+      headId: imported.headId ?? undefined,
+      prependVersion,
+    });
     runtime.thread.import(imported);
-  }, [runtime, history, prependVersion, messageIds]);
+  }, [runtime, history, prependVersion, messageIds, id]);
   useEffect(() => {
-    if (activeRunId)
+    if (activeRunId) {
+      traceConversation('runtime.attach', { chatId: id, runId: activeRunId, restoration });
       void runtime.thread.resumeRun({
         parentId: runtime.thread.export().headId ?? null,
         runConfig: { custom: { mode: 'attach', runId: activeRunId } },
       });
+    }
     // Detaching a view is not a durable cancel; history pagination never resumes a run.
-  }, [runtime, activeRunId, restoration]);
+  }, [runtime, activeRunId, restoration, id]);
   return {
     runtime,
     extensions,

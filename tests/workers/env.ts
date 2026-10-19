@@ -3,6 +3,7 @@ import type { ChatSession } from './entry';
 import type { LifecycleProbe } from './lifecycle-entry';
 import type { BYOKProbe } from './byok-entry';
 import type { OpenRouterProbe } from './openrouter-entry';
+import type { ImageProbe } from './image-entry';
 import type { RunCommand } from '../../src/shared/contracts';
 
 // RPC exposes serializable operations. Native handles are available only to a
@@ -29,6 +30,7 @@ type RpcFixture<T extends Rpc.DurableObjectBranded> = Omit<
 };
 type LocalFixture<T extends Rpc.DurableObjectBranded> = T;
 type FixtureRpc = RpcFixture<ChatSession> &
+  Pick<ImageProbe, 'imageProbe'> &
   Pick<LifecycleProbe, 'probe'> &
   Pick<BYOKProbe, 'calls' | 'compactions'>;
 type FixtureStub<T extends Rpc.DurableObjectBranded> = DurableObjectStub<FixtureRpc> & {
@@ -45,6 +47,7 @@ export const env = bindings as unknown as Omit<
   Env,
   'CONVERSATIONS' | 'LIFECYCLE_PROBES' | 'BYOK_PROBES' | 'OPENROUTER_PROBES'
 > & {
+  IMAGE_PROBES: FixtureNamespace<ImageProbe>;
   CONVERSATIONS: FixtureNamespace<ChatSession>;
   LIFECYCLE_PROBES: FixtureNamespace<LifecycleProbe>;
   BYOK_PROBES: FixtureNamespace<BYOKProbe>;

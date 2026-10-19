@@ -60,24 +60,31 @@ export class OpenRouterProbe extends ChatSession {
                 },
               ],
             }
-          : {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: 'publish',
-                  type: 'function',
-                  function: {
-                    name: 'present_openui',
-                    arguments: JSON.stringify({
-                      ui: 'root = Stack([TextContent("## 验证结果\\n共 4 个字符")])',
-                    }),
+          : toolResults.length === 1
+            ? {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'publish',
+                    type: 'function',
+                    function: {
+                      name: 'present_openui',
+                      arguments: JSON.stringify({
+                        ui: 'root = Stack([TextContent("## 验证结果\\n共 4 个字符")])',
+                      }),
+                    },
                   },
-                },
-              ],
-            };
+                ],
+              }
+            : { content: '可以调整参数进一步比较。' };
       const chunks = [
         { id: 'native', choices: [{ index: 0, delta }] },
-        { id: 'native', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+        {
+          id: 'native',
+          choices: [
+            { index: 0, delta: {}, finish_reason: 'content' in delta ? 'stop' : 'tool_calls' },
+          ],
+        },
       ];
       return new Response(
         chunks.map((c) => 'data: ' + JSON.stringify(c) + '\n\n').join('') + 'data: [DONE]\n\n',

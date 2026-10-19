@@ -49,7 +49,11 @@ it(
     const calls = await runInDurableObject(stub, (_instance, state) =>
       state.storage.sql.exec('SELECT model FROM test_openrouter_requests').toArray(),
     );
-    expect(calls).toEqual([{ model: 'openrouter/free' }, { model: 'openrouter/free' }]);
+    expect(calls).toEqual([
+      { model: 'openrouter/free' },
+      { model: 'openrouter/free' },
+      { model: 'openrouter/free' },
+    ]);
     await abortAllDurableObjects();
     stub = namespace.get(stub.id);
     expect(JSON.parse(await stub.snapshot()).entries).toEqual(snapshot.entries);
@@ -59,7 +63,7 @@ it(
         (_instance, state) =>
           state.storage.sql.exec('SELECT COUNT(*) AS n FROM test_openrouter_requests').one().n,
       ),
-    ).toBe(2);
+    ).toBe(3);
   },
 );
 

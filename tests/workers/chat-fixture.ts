@@ -37,8 +37,16 @@ export class ChatFixture extends Production {
     });
   }
   async actor(): Promise<ChatActor> {
-    const id =
-      this.ctx.id.name ?? (await this.ctx.storage.get<{ chatId: string }>('manifest'))?.chatId;
+    const stored = await this.ctx.storage.get<ChatActor>('manifest');
+    const locator = this.ctx.id.name;
+    const located = locator
+      ? await this.env.DB.prepare(
+          'SELECT main_chat_id FROM scenario_instances WHERE runtime_name=?',
+        )
+          .bind(locator)
+          .first<string>('main_chat_id')
+      : undefined;
+    const id = stored?.chatId ?? located ?? locator;
     if (!id) throw new Error('Tests must use getByName');
     let row = await this.env.DB.prepare(
       'SELECT owner,instance_generation FROM conversations WHERE id=?',
@@ -64,7 +72,8 @@ export class ChatFixture extends Production {
         .bind(id)
         .first<{ owner: string; instance_generation: string }>();
     }
-    return { chatId: id, ownerId: row!.owner, generation: row!.instance_generation };
+    const { resolveChat, directoryActor } = await import('../../src/server/chat/directory');
+    return directoryActor(await resolveChat(this.env, row!.owner, id, true));
   }
   protected override async credentials(): Promise<
     import('../../src/server/models/execution').CredentialAccess

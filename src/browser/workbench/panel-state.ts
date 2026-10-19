@@ -120,14 +120,15 @@ export class WorkbenchPanels {
       }
     }
     const memory = this.memories.get(this.workspaceSelected ? 'workspace' : this.chatId);
-    this.emit({ active: memory?.active ?? null, hidden: memory?.hidden ?? false });
+    const active = memory?.active && definitions.has(memory.active.type) ? memory.active : null;
+    this.emit({ active, hidden: active ? memory!.hidden : false, latest: null });
   }
   selectChat(chatId: string) {
     if (this.chatId === chatId) return;
     this.chatId = chatId;
     const memory = this.memories.get(this.workspaceSelected ? 'workspace' : chatId);
     this.emit({
-      active: memory?.active ?? null,
+      active: memory?.active && this.definitions.has(memory.active.type) ? memory.active : null,
       hidden: memory?.hidden ?? false,
       latest: null,
       maximized: false,

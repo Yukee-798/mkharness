@@ -1,6 +1,8 @@
+import { useWorkspace } from '../workspace/provider';
 import {
   Component,
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -9,11 +11,13 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { Maximize2, Minimize2, PanelRightOpen, X } from 'lucide-react';
+import { Maximize2, Minimize2, PanelRightOpen, PanelRightClose, X } from 'lucide-react';
+import type { GroupImperativeHandle } from 'react-resizable-panels';
 import { useBrowserExtensions } from '../extensions/extension-loading';
 import { useIsomorphicLayoutEffect } from '../hooks/use-isomorphic-layout-effect';
 import { useLocale } from '../app/locale';
 import { Button } from '../ui/button';
+import { TooltipIconButton } from '../ui/tooltip-icon-button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '../ui/sheet';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../ui/resizable';
 import { WorkbenchPanels } from './panel-state';
@@ -21,6 +25,38 @@ import type { ConversationPort, WorkbenchPanelDefinition } from './panels';
 
 const Context = createContext<WorkbenchPanels | null>(null);
 export const useWorkbench = () => useContext(Context);
+export function WorkbenchPanelToggle() {
+  const controller = useWorkbench();
+  const workspace = useWorkspace();
+  if (workspace?.snapshot?.objects.some((o) => o.type === 'report')) return null;
+  return controller ? <PanelToggle controller={controller} /> : null;
+}
+function PanelToggle({ controller }: { controller: WorkbenchPanels }) {
+  const { t } = useLocale();
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot,
+  );
+  if (!state.pageVisible || (!state.active && !state.latest)) return null;
+  const expanded = !!state.active && !state.hidden;
+  const label = expanded ? t('收起工作面板') : state.latest ? t('查看新内容') : t('打开工作面板');
+  return (
+    <TooltipIconButton
+      tooltip={label}
+      aria-label={label}
+      aria-expanded={expanded}
+      data-slot="workbench-toggle"
+      onClick={() => {
+        if (expanded) controller.hidePanel();
+        else if (state.latest) controller.openPanel({ ...state.latest, activation: 'explicit' });
+        else controller.showPanel();
+      }}
+    >
+      {expanded ? <PanelRightClose /> : <PanelRightOpen />}
+    </TooltipIconButton>
+  );
+}
 export function WorkbenchProvider({
   userId,
   chatId,
@@ -117,6 +153,7 @@ function PanelLayout({
     controller.getSnapshot,
   );
   const root = useRef<HTMLDivElement>(null);
+  const group = useRef<GroupImperativeHandle>(null);
   const [wide, setWide] = useState(false);
   const [retry, setRetry] = useState(0);
   useEffect(() => {
@@ -135,6 +172,33 @@ function PanelLayout({
     ? controller.definition(active.type)
     : undefined;
   const visible = !!active && !state.hidden && state.pageVisible;
+  // Hiding Panel content with display:none does not remove its registered track.
+  // Resize the actual group so hidden and maximized tracks occupy zero space.
+  const applyLayout = useCallback(
+    (current?: Record<string, number>) => {
+      const handle = group.current;
+      if (!handle) return;
+      const width = controller.getSnapshot().width;
+      const layout: Record<string, number> =
+        wide && active
+          ? {
+              conversation: visible ? (state.maximized ? 0 : 100 - width) : 100,
+              workbench: visible ? (state.maximized ? 100 : width) : 0,
+            }
+          : { conversation: 100 };
+      // New tracks register after their parent renders. Constraints handle that
+      // first layout; only resize imperatively once the same tracks are registered.
+      const registered = current ?? handle.getLayout();
+      if (
+        Object.keys(registered).length === Object.keys(layout).length &&
+        Object.keys(layout).every((key) => Object.hasOwn(registered, key)) &&
+        Object.entries(layout).some(([key, size]) => Math.abs(registered[key]! - size) > 0.1)
+      )
+        handle.setLayout(layout);
+    },
+    [controller, wide, active, visible, state.maximized],
+  );
+  useEffect(() => applyLayout(), [applyLayout]);
   const Content = definition?.Content;
   let title = t('工作面板');
   try {
@@ -184,7 +248,7 @@ function PanelLayout({
   const pane = (
     <section
       aria-label={t('工作面板')}
-      className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
+      className={`${visible ? 'flex' : 'hidden'} h-full min-h-0 flex-col overflow-hidden bg-background`}
     >
       {header}
       <div className="min-h-0 flex-1 overflow-auto p-4">{content}</div>
@@ -192,43 +256,35 @@ function PanelLayout({
   );
   return (
     <div ref={root} className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {(state.latest || (active && state.hidden)) && (
-        <div className="flex shrink-0 justify-end border-b px-4 py-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              if (state.latest) controller.openPanel({ ...state.latest, activation: 'explicit' });
-              else controller.showPanel();
-            }}
-          >
-            <PanelRightOpen />
-            {state.latest ? t('查看新内容') : t('打开工作面板')}
-          </Button>
-        </div>
-      )}
       <ResizablePanelGroup
+        groupRef={group}
         orientation="horizontal"
-        onLayoutChanged={(layout) => {
-          if (visible && wide && !state.maximized)
-            controller.setWidth(layout.workbench ?? state.width);
+        onLayoutChanged={(layout, { isUserInteraction, requestedLayout }) => {
+          if (isUserInteraction && visible && wide && !state.maximized && layout.workbench > 0)
+            controller.setWidth(requestedLayout?.workbench ?? layout.workbench);
+          else if (!isUserInteraction) applyLayout(layout);
         }}
       >
         <ResizablePanel
           id="conversation"
           minSize={visible && wide && !state.maximized ? '360px' : 0}
+          maxSize={wide && visible && state.maximized ? 0 : '100%'}
           defaultSize="55%"
-          style={{ display: wide && visible && state.maximized ? 'none' : undefined }}
         >
-          <div className="flex h-full min-h-0 flex-col">{children}</div>
+          <div
+            className="flex h-full min-h-0 flex-col"
+            inert={wide && visible && state.maximized ? true : undefined}
+          >
+            {children}
+          </div>
         </ResizablePanel>
         {wide && visible && !state.maximized && <ResizableHandle />}
         {wide && active && (
           <ResizablePanel
             id="workbench"
             minSize={visible && !state.maximized ? '360px' : 0}
+            maxSize={visible ? '100%' : 0}
             defaultSize={`${state.width}%`}
-            style={{ display: visible ? undefined : 'none' }}
           >
             {pane}
           </ResizablePanel>

@@ -11,9 +11,13 @@ export function createSubmitter(
     source?: RunCommand['source'],
     config?: RunCommand['config'],
     images?: RunCommand['images'],
+    workspaceReferences?: RunCommand['workspaceReferences'],
   ) => {
     const input = {
       text: text.trim(),
+      ...(workspaceReferences?.length
+        ? { workspaceReferences: structuredClone(workspaceReferences) }
+        : {}),
       ...(source ? { source } : {}),
       ...(config ? { config } : {}),
       ...(images?.length ? { images: structuredClone(images) } : {}),
@@ -28,6 +32,9 @@ export function createSubmitter(
       !jsonEqual(
         {
           text: uncertain.text,
+          ...(uncertain.workspaceReferences?.length
+            ? { workspaceReferences: uncertain.workspaceReferences }
+            : {}),
           ...(uncertain.source ? { source: uncertain.source } : {}),
           ...(uncertain.config ? { config: uncertain.config } : {}),
           ...(uncertain.images ? { images: uncertain.images } : {}),

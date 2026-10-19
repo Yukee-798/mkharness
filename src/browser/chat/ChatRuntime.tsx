@@ -1,3 +1,4 @@
+import { ScenarioLayout } from '../workspace/layout';
 import { ComposerFooterExtensions } from '../extensions/extension-ui';
 import { useLocale } from '../app/locale';
 import { ExtensionContext } from '../extensions/extension-context';
@@ -13,6 +14,7 @@ import { Assistant, User } from './messages/AssistantMessage';
 import type { ConversationSession } from './session/use-conversation-session';
 import { useHistoryScroll } from './session/use-history-scroll';
 import { WorkbenchPanelLayout } from '../workbench/panel-host';
+import { ScrollAreaRoot, ScrollAreaViewport, ScrollBar } from '../ui/scroll-area';
 export function ChatRuntime({
   session,
   footer,
@@ -65,100 +67,111 @@ export function ChatRuntime({
             messageIds,
           }}
         >
-          <WorkbenchPanelLayout
-            conversation={{
-              userId,
-              chatId: id,
-              nativeTarget: snapshot?.conversationId ?? 0,
-              submit,
-            }}
-          >
-            <ThreadPrimitive.Root
-              aria-label={t('聊天历史')}
-              className="flex min-h-0 flex-1 flex-col"
+          <ScenarioLayout>
+            <WorkbenchPanelLayout
+              conversation={{
+                userId,
+                chatId: id,
+                nativeTarget: snapshot?.conversationId ?? 0,
+                submit,
+              }}
             >
-              <ThreadPrimitive.Viewport
-                ref={viewport}
-                data-slot="chat-viewport"
-                aria-busy={restoring}
-                scrollToBottomOnRunStart={false}
-                className="group/viewport relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain [overflow-anchor:none] has-[[data-slot=chat-welcome]]:justify-center-safe has-[[data-slot=chat-welcome]]:py-8"
+              <ThreadPrimitive.Root
+                aria-label={t('聊天历史')}
+                className="flex min-h-0 flex-1 flex-col"
               >
-                {restoring && (
-                  <span role="status" className="sr-only">
-                    {t('正在恢复聊天…')}
-                  </span>
-                )}
-                {showWelcome && (
-                  <ThreadPrimitive.Empty>
-                    <ChatWelcome />
-                  </ThreadPrimitive.Empty>
-                )}
-                {hasOlder && (
-                  <div
-                    className="mx-auto flex min-h-10 items-center justify-center px-4 text-xs text-muted-foreground"
-                    role="status"
+                <ScrollAreaRoot type="hover" className="min-h-0 flex-1">
+                  <ThreadPrimitive.Viewport
+                    asChild
+                    ref={viewport}
+                    aria-busy={restoring}
+                    scrollToBottomOnRunStart={false}
                   >
-                    {historyError ? (
-                      <Button variant="ghost" size="sm" onClick={retryHistory}>
-                        {t('历史消息加载失败，点击重试')}
-                      </Button>
-                    ) : historyLoading ? (
-                      t('正在加载历史消息…')
-                    ) : (
-                      t('向上滚动加载更早的消息')
-                    )}
-                  </div>
-                )}
-                <div
-                  data-slot="chat-messages"
-                  className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-8 pb-6 empty:hidden sm:px-6"
-                >
-                  <ThreadPrimitive.Messages
-                    components={{ UserMessage: User, AssistantMessage: Assistant }}
-                  />
-                </div>
-                <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl shrink-0 bg-background px-4 pt-3 pb-4 group-has-[[data-slot=chat-welcome]]/viewport:static group-has-[[data-slot=chat-welcome]]/viewport:mt-0 group-has-[[data-slot=chat-welcome]]/viewport:pt-6 group-has-[[data-slot=chat-welcome]]/viewport:pb-0 sm:px-6">
-                  {snapshot && (
-                    <ThreadPrimitive.ScrollToBottom asChild>
-                      <TooltipIconButton
-                        tooltip={t('回到最新消息')}
-                        className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm group-has-[[data-slot=chat-welcome]]/viewport:hidden"
-                      >
-                        <ArrowDown className="size-4" />
-                      </TooltipIconButton>
-                    </ThreadPrimitive.ScrollToBottom>
-                  )}
-                  {extensions.unavailable && (
-                    <Alert className="mb-3">
-                      <AlertDescription>
-                        {t('部分扩展界面未能加载，基础聊天仍可使用。')}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={extensions.loading}
-                          onClick={extensions.retry}
+                    <ScrollAreaViewport
+                      data-slot="chat-viewport"
+                      className="group/viewport relative overscroll-contain [overflow-anchor:none] [&>div]:flex! [&>div]:min-h-full [&>div]:min-w-0 [&>div]:flex-col has-[[data-slot=chat-welcome]]:[&>div]:justify-center-safe has-[[data-slot=chat-welcome]]:[&>div]:py-8"
+                    >
+                      {restoring && (
+                        <span role="status" className="sr-only">
+                          {t('正在恢复聊天…')}
+                        </span>
+                      )}
+                      {showWelcome && (
+                        <ThreadPrimitive.Empty>
+                          <ChatWelcome />
+                        </ThreadPrimitive.Empty>
+                      )}
+                      {hasOlder && (
+                        <div
+                          className="mx-auto flex min-h-10 items-center justify-center px-4 text-xs text-muted-foreground"
+                          role="status"
                         >
-                          {t('重试加载')}
-                        </Button>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  {runtimeIssues.length > 0 && (
-                    <Alert>
-                      <AlertDescription>
-                        {runtimeIssues.some((issue) => issue.code === 'compaction_failed')
-                          ? t('上下文压缩失败，部分任务可能无法继续。请检查模型配置后再发送请求。')
-                          : t('部分任务无法恢复，请联系应用维护者。')}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  <ComposerFooterExtensions />
-                  {footer}
-                </ThreadPrimitive.ViewportFooter>
-              </ThreadPrimitive.Viewport>
-            </ThreadPrimitive.Root>
-          </WorkbenchPanelLayout>
+                          {historyError ? (
+                            <Button variant="ghost" size="sm" onClick={retryHistory}>
+                              {t('历史消息加载失败，点击重试')}
+                            </Button>
+                          ) : historyLoading ? (
+                            t('正在加载历史消息…')
+                          ) : (
+                            t('向上滚动加载更早的消息')
+                          )}
+                        </div>
+                      )}
+                      <div
+                        data-slot="chat-messages"
+                        className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-8 pb-6 empty:hidden sm:px-6"
+                      >
+                        <ThreadPrimitive.Messages
+                          components={{ UserMessage: User, AssistantMessage: Assistant }}
+                        />
+                      </div>
+                      <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-3xl shrink-0 bg-background px-4 pt-3 pb-4 group-has-[[data-slot=chat-welcome]]/viewport:static group-has-[[data-slot=chat-welcome]]/viewport:mt-0 group-has-[[data-slot=chat-welcome]]/viewport:pt-6 group-has-[[data-slot=chat-welcome]]/viewport:pb-0 sm:px-6">
+                        {snapshot && (
+                          <ThreadPrimitive.ScrollToBottom asChild>
+                            <TooltipIconButton
+                              tooltip={t('回到最新消息')}
+                              className="absolute -top-9 left-1/2 size-8 -translate-x-1/2 rounded-full border bg-background shadow-sm group-has-[[data-slot=chat-welcome]]/viewport:hidden"
+                            >
+                              <ArrowDown className="size-4" />
+                            </TooltipIconButton>
+                          </ThreadPrimitive.ScrollToBottom>
+                        )}
+                        {extensions.unavailable && (
+                          <Alert className="mb-3">
+                            <AlertDescription>
+                              {t('部分扩展界面未能加载，基础聊天仍可使用。')}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={extensions.loading}
+                                onClick={extensions.retry}
+                              >
+                                {t('重试加载')}
+                              </Button>
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                        {runtimeIssues.length > 0 && (
+                          <Alert>
+                            <AlertDescription>
+                              {runtimeIssues.some((issue) => issue.code === 'compaction_failed')
+                                ? t(
+                                    '上下文压缩失败，部分任务可能无法继续。请检查模型配置后再发送请求。',
+                                  )
+                                : t('部分任务无法恢复，请联系应用维护者。')}
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                        <ComposerFooterExtensions />
+                        {footer}
+                      </ThreadPrimitive.ViewportFooter>
+                    </ScrollAreaViewport>
+                  </ThreadPrimitive.Viewport>
+                  <ScrollBar className="w-2 border-0 px-0.5" />
+                </ScrollAreaRoot>
+              </ThreadPrimitive.Root>
+            </WorkbenchPanelLayout>
+          </ScenarioLayout>
         </ExtensionContext>
       </ToolProgressContext>
     </AssistantRuntimeProvider>

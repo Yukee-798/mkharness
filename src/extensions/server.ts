@@ -30,6 +30,20 @@ export const exampleDefinition: Definition = {
 /** The only server activation list. Listing IDs never executes a factory. */
 export const definitions: readonly Definition[] = [
   {
+    id: 'workspace',
+    create: async ({ host }) => {
+      const { workspaceContribution } = await import('../server/workspace/extension');
+      return workspaceContribution(host);
+    },
+  },
+  {
+    id: 'images',
+    create: async ({ env, host }) => {
+      const { configuredImages } = await import('./images/server');
+      return configuredImages(env as unknown as Record<string, unknown>, host);
+    },
+  },
+  {
     id: 'skills',
     create: async ({ env, host, configuration = extensionConfiguration }) => {
       const { skillsContribution } = await import('./skills/server');
