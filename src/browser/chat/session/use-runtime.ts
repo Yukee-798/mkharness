@@ -7,7 +7,7 @@ import { browserUserContent } from '../../../shared/images';
 import { useExtensionConfig } from '../../extensions/extension-config';
 import { imageAttachmentAdapter } from '../image-attachments';
 import { AttachAgent, StreamReplaced } from './transport';
-import type { useSubmission } from './use-submission';
+import type { RunCommand } from '../../../shared/contracts';
 import type { RuntimeIssue } from '../../../shared/runtime-issues';
 import type { ToolProgressMap } from '../../../shared/tool-progress';
 import type { ExtensionState } from '../../../shared/extension-state';
@@ -19,7 +19,7 @@ export function useConversationRuntime({
   id,
   userId,
   snapshot,
-  initialSubmission,
+  outgoing,
   restoration,
   done,
   reconnect,
@@ -32,7 +32,8 @@ export function useConversationRuntime({
   id: string;
   userId: string;
   snapshot: Snapshot;
-  initialSubmission?: ReturnType<typeof useSubmission>['latest'];
+  /** A user message Pi has not committed yet; the session decides when it shows. */
+  outgoing?: RunCommand;
   restoration: number;
   done: () => void;
   reconnect: (replacement?: boolean) => void;
@@ -51,20 +52,14 @@ export function useConversationRuntime({
   );
   // Commit aliases belong to this runtime only. Fresh mounts restore canonical Pi IDs.
   const messageIds = useMemo(() => new Map<string, string>(), []);
-  const optimistic =
-    !snapshot.pending.length &&
-    !snapshot.entries.some((e) => e.model?.some((m) => m.role === 'user'))
-      ? initialSubmission?.submission
-      : undefined;
   const history = useMemo(() => {
     const source = toMessages(snapshot.entries, messageIds);
-    // This is the first message of a just-created chat. Once Pi exposes a user
-    // entry (or accepted work), its history takes over without text-based matching.
-    if (optimistic)
+    // Once Pi exposes the user entry, its history takes over without text-based matching.
+    if (outgoing)
       source.push({
-        id: `submitting:${optimistic.command.runId}`,
+        id: `submitting:${outgoing.runId}`,
         role: 'user',
-        content: browserUserContent(optimistic.command.text, optimistic.command.images),
+        content: browserUserContent(outgoing.text, outgoing.images),
       });
     const messages = fromAgUiMessages(source, {
       showThinking: true,
@@ -76,7 +71,7 @@ export function useConversationRuntime({
       })),
       headId: messages.at(-1)?.id ?? null,
     };
-  }, [snapshot.entries, messageIds, optimistic]);
+  }, [snapshot.entries, messageIds, outgoing]);
   const callbacks = useRef({ done, reconnect, connected, queue, snapshot });
   callbacks.current = { done, reconnect, connected, queue, snapshot };
   const agent = useMemo(

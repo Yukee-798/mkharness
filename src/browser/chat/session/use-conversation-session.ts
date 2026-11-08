@@ -12,6 +12,7 @@ import { emptySnapshot } from './snapshot';
 import { ConversationHistory } from './history-store';
 import { conversationRemote, type ConversationRemote } from './remote';
 import { useConversationRuntime } from './use-runtime';
+import { lastEntryId, outgoingMessage, type OutgoingBaseline } from './outgoing';
 export type ConversationSessionOptions = {
   id: string;
   userId: string;
@@ -48,6 +49,9 @@ export function useConversationSession({
   const initialSubmission = latest?.submission?.initial ? latest : undefined;
   const [error, setError] = useState<Error>();
   const [sending, setSending] = useState(false);
+  // A follow-up stays visible from submission until Pi commits it; see outgoingMessage.
+  const [baseline, setBaseline] = useState<OutgoingBaseline>();
+  const [acknowledging, setAcknowledging] = useState(false);
   const observation = useConversationObservation({
     id,
     userId,
@@ -110,10 +114,18 @@ export function useConversationSession({
       throw new ApiError(400, 'credential_required', '请先配置所选模型的 Base URL 与 API Key');
     }
     setSending(true);
+    if (id) {
+      setBaseline({
+        lastEntry: lastEntryId(snapshot?.entries ?? []),
+        idle: !!snapshot && !observation.hasPending,
+      });
+      setAcknowledging(true);
+    }
     let receipt: Awaited<ReturnType<typeof send>>;
     try {
       receipt = await send(message, source, selected, images, workspaceReferences, draftSubmission);
     } catch (e) {
+      setAcknowledging(false);
       if (e instanceof ApiError && e.code === 'credential_required')
         onSettings?.(selected?.provider);
       throw e;
@@ -122,7 +134,11 @@ export function useConversationSession({
     }
     if (!id) return;
     setError(undefined);
-    await observation.accepted(receipt);
+    try {
+      await observation.accepted(receipt);
+    } finally {
+      setAcknowledging(false);
+    }
   };
   const submit = (
     message: string,
@@ -133,6 +149,9 @@ export function useConversationSession({
   // The wrapper uses assistant-ui focus behavior; submission deliberately stays HTTP-only.
   // Calling runtime.send/abort here would replace the live subscription or cancel a durable task.
   const renderedSnapshot = snapshot ?? (!id || initialSubmission ? emptySnapshot : undefined);
+  const outgoing = renderedSnapshot
+    ? outgoingMessage(renderedSnapshot, latest, baseline, acknowledging)
+    : undefined;
   const submitting = sending || latest?.status === 'pending';
   const composerReady = !!userId && (!id || !!renderedSnapshot);
   const hasPending = observation.hasPending;
@@ -159,10 +178,13 @@ export function useConversationSession({
   const retry = async () => {
     setError(undefined);
     try {
+      setAcknowledging(true);
       const result = await retrySubmission();
       if (result && !initialSubmission) await observation.accepted(result.receipt);
     } catch (error) {
       setError(error as Error);
+    } finally {
+      setAcknowledging(false);
     }
   };
   const stop = async () => {
@@ -180,7 +202,7 @@ export function useConversationSession({
     id,
     userId,
     snapshot: renderedSnapshot ?? emptySnapshot,
-    initialSubmission,
+    outgoing,
     restoration,
     done: refresh,
     reconnect,

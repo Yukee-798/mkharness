@@ -48,6 +48,9 @@ export class AttachAgent extends AbstractAgent {
       let terminal = false;
       let lastRevision = -1;
       let references = new Map<string, string>();
+      // Live history frames carry only entries added during this observation. Keep the
+      // observed window so each frame still imports as one complete, ordered snapshot.
+      let observed: Message[] = [];
       input.runId = config.runId;
       const runId = config.runId;
       input.threadId = this.options.conversationId;
@@ -118,13 +121,12 @@ export class AttachAgent extends AbstractAgent {
             }
           }
           if (event.type === EventType.MESSAGES_SNAPSHOT) {
-            references = messageAliases((event as MessagesSnapshotEvent).messages, this.messageIds);
+            observed = mergeObserved(observed, (event as MessagesSnapshotEvent).messages);
+            references = messageAliases(observed, this.messageIds);
+            const aliased = aliasMessages(observed, this.messageIds);
             event = {
               ...event,
-              messages:
-                this.options.mergeMessages?.(
-                  aliasMessages((event as MessagesSnapshotEvent).messages, this.messageIds),
-                ) ?? aliasMessages((event as MessagesSnapshotEvent).messages, this.messageIds),
+              messages: this.options.mergeMessages?.(aliased) ?? aliased,
             } as MessagesSnapshotEvent;
           }
           if (event.type === EventType.TOOL_CALL_RESULT) {
@@ -165,4 +167,12 @@ export class AttachAgent extends AbstractAgent {
       };
     });
   }
+}
+
+const entryOf = (message: Message) => Number(message.id.split(':')[0]);
+/** Canonical Pi message IDs start with their entry ID. A frame replaces every observed
+ * message from its first entry onward and keeps the older observed prefix. */
+export function mergeObserved(observed: readonly Message[], incoming: readonly Message[]) {
+  const first = Math.min(...incoming.map(entryOf).filter(Number.isFinite));
+  return [...observed.filter((message) => entryOf(message) < first), ...incoming];
 }

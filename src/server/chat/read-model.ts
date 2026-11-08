@@ -37,7 +37,7 @@ export type ChatReadFrame =
       type: 'history';
       entries: EntryRecord[];
       aliases: Record<string, string>;
-      completedEntryId?: number;
+      completedEntryIds?: number[];
     }
   | {
       type: 'state';
@@ -242,8 +242,20 @@ export class ConversationReadModel {
       finished = false;
     let unsubscribe = () => {};
     let notify: (() => void) | undefined;
-    const queued: ChatReadFrame[][] = [];
+    // Undelivered frames for a slow reader. Draft, state and history frames are cumulative
+    // snapshots, so a newer one supersedes an older queued one of the same kind. Coalescing
+    // keeps a stalled reader bounded without resetting it; only history may be large
+    // (it carries images), and at most one history frame is ever queued.
+    const queued: { frame: ChatReadFrame; bytes: number }[] = [];
     let queuedBytes = 0;
+    const supersedes = (next: ChatReadFrame, previous: ChatReadFrame) =>
+      next.type === previous.type &&
+      (next.type === 'state' ||
+        next.type === 'history' ||
+        (next.type === 'draft' &&
+          previous.type === 'draft' &&
+          next.messageId === previous.messageId &&
+          !previous.complete));
     const close = async () => {
       if (closed) return;
       closed = true;
@@ -254,16 +266,41 @@ export class ConversationReadModel {
     };
     const push = (frames: ChatReadFrame[]) => {
       if (closed || !frames.length) return;
-      const bytes = new TextEncoder().encode(JSON.stringify(frames)).byteLength;
-      if (queued.length >= 64 || queuedBytes + bytes > 1024 * 1024) {
-        queued.splice(0, queued.length, [{ type: 'reset' }]);
-        queuedBytes = new TextEncoder().encode(JSON.stringify(queued[0])).byteLength;
-        notify?.();
-        void close();
-        return;
+      for (let frame of frames) {
+        for (let index = queued.length - 1; index >= 0; index--) {
+          const previous = queued[index]!.frame;
+          if (!supersedes(frame, previous)) continue;
+          // State carries the message aliases a later history frame is projected with; never
+          // move it behind such a frame.
+          if (
+            frame.type === 'state' &&
+            queued.slice(index + 1).some((item) => item.frame.type === 'history')
+          )
+            continue;
+          if (frame.type === 'history' && previous.type === 'history') {
+            const completed = [
+              ...new Set([
+                ...(previous.completedEntryIds ?? []),
+                ...(frame.completedEntryIds ?? []),
+              ]),
+            ];
+            frame = { ...frame, ...(completed.length ? { completedEntryIds: completed } : {}) };
+          }
+          queuedBytes -= queued[index]!.bytes;
+          queued.splice(index, 1);
+        }
+        const bytes =
+          frame.type === 'history' ? 0 : new TextEncoder().encode(JSON.stringify(frame)).byteLength;
+        if (queued.length >= 256 || queuedBytes + bytes > 1024 * 1024) {
+          queued.splice(0, queued.length, { frame: { type: 'reset' }, bytes: 0 });
+          queuedBytes = 0;
+          notify?.();
+          void close();
+          return;
+        }
+        queued.push({ frame, bytes });
+        queuedBytes += bytes;
       }
-      queued.push(frames);
-      queuedBytes += bytes;
       notify?.();
     };
     try {
@@ -305,11 +342,44 @@ export class ConversationReadModel {
           ),
         },
       });
-      const historyFrame = (completedEntryId?: number): ChatReadFrame => ({
+      // After the initial full window, a live frame carries only entries this observation
+      // added. The reader already holds the older window; resending it (including every
+      // historical image) on each tool round made later turns progressively slower.
+      let floor = Infinity;
+      const observeEntry = (entry: EntryRecord) => {
+        const id = Number(entry.id);
+        entries.set(id, entry);
+        let lower = id;
+        // A tool result is projected only beside its call, which may predate this observation.
+        for (const message of entry.model ?? []) {
+          if (message.role !== 'toolResult') continue;
+          let call = -Infinity;
+          for (const [candidate, value] of entries)
+            if (
+              candidate < id &&
+              candidate > call &&
+              value.model?.some(
+                (item) =>
+                  item.role === 'assistant' &&
+                  item.content.some(
+                    (block) => block.type === 'toolCall' && block.id === message.toolCallId,
+                  ),
+              )
+            )
+              call = candidate;
+          if (Number.isFinite(call)) lower = Math.min(lower, call);
+        }
+        floor = Math.min(floor, lower);
+      };
+      const historyFrame = (completedEntryId?: number, full = false): ChatReadFrame => ({
         type: 'history',
-        entries: browserEntries([...entries.values()].sort((a, b) => Number(a.id) - Number(b.id))),
+        entries: browserEntries(
+          [...entries.values()]
+            .filter((entry) => full || Number(entry.id) >= floor)
+            .sort((a, b) => Number(a.id) - Number(b.id)),
+        ),
         aliases: Object.fromEntries(aliases),
-        ...(completedEntryId ? { completedEntryId } : {}),
+        ...(completedEntryId ? { completedEntryIds: [completedEntryId] } : {}),
       });
       const terminal = (): ChatReadFrame | undefined =>
         record!.status === 'done'
@@ -383,7 +453,7 @@ export class ConversationReadModel {
       let active = !!watch.snapshot.run?.inputs.includes(record.id),
         draft = 0;
       fold.accept(active ? watch.snapshot : { ...watch.snapshot, generation: undefined });
-      const initial: ChatReadFrame[] = [historyFrame(), stateFrame()];
+      const initial: ChatReadFrame[] = [historyFrame(undefined, true), stateFrame()];
       if (fold.current)
         initial.push({
           type: 'draft',
@@ -438,7 +508,7 @@ export class ConversationReadModel {
                       ),
                   );
                   if (event.entry) {
-                    entries.set(Number(event.entry.id), event.entry);
+                    observeEntry(event.entry);
                     frames.push(historyFrame(Number(event.entry.id)));
                   }
                 } else progress.update(call, event.type === 'tool_execution_update' ? event : {});
@@ -478,10 +548,10 @@ export class ConversationReadModel {
                   );
                 }
                 fold.current = undefined;
-                entries.set(Number(event.entry.id), event.entry);
+                observeEntry(event.entry);
                 frames.push(stateFrame(), historyFrame(Number(event.entry.id)));
               } else if (event.type === 'entry_appended') {
-                entries.set(Number(event.entry.id), event.entry);
+                observeEntry(event.entry);
                 frames.push(historyFrame(Number(event.entry.id)));
               }
             }
@@ -523,9 +593,9 @@ export class ConversationReadModel {
                 });
                 continue;
               }
-              const batch = queued.shift()!;
-              queuedBytes -= new TextEncoder().encode(JSON.stringify(batch)).byteLength;
-              yield batch;
+              const next = queued.shift()!;
+              queuedBytes -= next.bytes;
+              yield [next.frame];
             }
           } finally {
             await close();

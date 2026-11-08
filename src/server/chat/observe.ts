@@ -40,13 +40,13 @@ export async function observeRun(
         if (ended) return;
         if (value.type === 'history') {
           const messages = toMessages(value.entries, new Map(Object.entries(value.aliases)));
-          if (value.completedEntryId !== undefined)
+          const completed = new Set((value.completedEntryIds ?? []).map(String));
+          if (completed.size)
             for (const message of messages)
               if (
                 message.role === 'tool' &&
                 streamedToolCalls.has(message.toolCallId) &&
-                (message.id === String(value.completedEntryId) ||
-                  message.id.startsWith(`${value.completedEntryId}:`)) &&
+                completed.has(message.id.split(':')[0]!) &&
                 !emittedToolResults.has(message.id)
               ) {
                 emittedToolResults.add(message.id);

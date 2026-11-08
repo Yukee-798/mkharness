@@ -149,7 +149,7 @@ it('rejects obsolete or malformed transport envelopes instead of downgrading the
   );
 });
 
-it('detaching and overflowing an observation close only its reader and leave native execution running', async () => {
+it('detaching and stalling an observation close only its reader, coalesce its backlog and leave native execution running', async () => {
   let start!: () => void, release!: () => void;
   const started = new Promise<void>((resolve) => {
     start = resolve;
@@ -195,7 +195,16 @@ it('detaching and overflowing an observation close only its reader and leave nat
     await conversation.waitForIdle(BG);
     const batches = [];
     for await (const batch of buffered!.frames) batches.push(...batch);
-    expect(batches).toEqual([{ type: 'reset' }]);
+    // A stalled reader keeps only the newest cumulative frame of each kind instead of
+    // being reset: 100 progress updates collapse to a handful of state frames (aliases
+    // never move behind the history frame they project).
+    expect(batches.filter((frame) => frame.type === 'state').length).toBeLessThan(8);
+    expect(batches.filter((frame) => frame.type === 'history').length).toBeLessThanOrEqual(1);
+    expect(batches.some((frame) => frame.type === 'reset')).toBe(false);
+    expect(batches.at(-1)).toEqual({ type: 'terminal', status: 'done' });
+    const history = batches.find((frame) => frame.type === 'history');
+    if (history?.type === 'history')
+      expect(history.entries.every((entry) => Number(entry.id) > 1)).toBe(true);
     expect(
       (await pi.commit((tx) => tx.submissionByRequest(conversation.id, runId), BG))?.status,
     ).toBe('done');
