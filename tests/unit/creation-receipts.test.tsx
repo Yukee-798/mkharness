@@ -93,3 +93,62 @@ it('retries a lost first submission after navigation without creating a second c
   second.unmount();
   client.clear();
 });
+
+it.each([false, true])(
+  'confirms draft and captured images after retry in a remounted view (newer=%s)',
+  async (newer) => {
+    const { ComposerDraft } = await import('../../src/browser/workbench/composer-drafts');
+    const draft = new ComposerDraft();
+    const image = (id: string) => ({
+      id,
+      input: {
+        type: 'image' as const,
+        name: id + '.png',
+        contentType: 'image/png',
+        content: [{ type: 'image' as const, image: 'data:image/png;base64,aGVsbG8=' }],
+      },
+    });
+    draft.edit('Original');
+    draft.setImages([image('original')]);
+    const attempt = draft.beginSubmission();
+    const client = new QueryClient();
+    const commands: RunCommand[] = [];
+    const remote = {
+      ...conversationRemote,
+      submit: async (_id: string, command: RunCommand) => {
+        commands.push(command);
+        if (commands.length === 1) throw new Error('Lost receipt');
+      },
+    };
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const first = renderHook(() => useSubmission('owner', 'chat', undefined, undefined, remote), {
+      wrapper,
+    });
+    await act(async () => {
+      await expect(
+        first.result.current.send('Original', undefined, undefined, undefined, undefined, attempt),
+      ).rejects.toThrow('Lost receipt');
+    });
+    expect(draft.getSnapshot().text).toBe('Original');
+    first.unmount();
+    draft.setImages([image('original'), image('new')]);
+    if (newer) draft.edit('Next message');
+    const second = renderHook(() => useSubmission('owner', 'chat', undefined, undefined, remote), {
+      wrapper,
+    });
+    try {
+      await waitFor(() => expect(second.result.current.latest?.status).toBe('error'));
+      await act(async () => {
+        await second.result.current.retry();
+      });
+      expect(commands[1]).toEqual(commands[0]);
+      expect(draft.getSnapshot().text).toBe(newer ? 'Next message' : '');
+      expect(draft.getSnapshot().images.map((image) => image.id)).toEqual(['new']);
+    } finally {
+      second.unmount();
+      client.clear();
+    }
+  },
+);

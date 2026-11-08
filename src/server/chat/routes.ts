@@ -130,6 +130,7 @@ conversationRoutes.post('/:id/runs', async (c) => {
   const parsed = commandSchema.safeParse(await jsonBody(c.req.raw, 1048576));
   if (!parsed.success) throw new AppError(400, 'invalid_request');
   const chat = c.get('chat');
+  const started = performance.now();
   const result = await c.env.CONVERSATIONS.getByName(chat.runtime_name ?? chat.id).command(
     directoryActor(chat),
     {
@@ -138,25 +139,14 @@ conversationRoutes.post('/:id/runs', async (c) => {
       ...nativeTarget(c.req.query('conversationId')),
     },
   );
-  if (result && typeof result === 'object' && 'error' in result) return jsonResult(result);
-  // A directory projection failure must not turn an accepted native submission into a retry.
-  await c.env.DB.prepare(
-    "UPDATE conversations SET title=CASE WHEN title_custom=0 AND title='新聊天' THEN ? ELSE title END,updated_at=? WHERE id=? AND owner=? AND instance_generation=? AND lifecycle='active'",
-  )
-    .bind(
-      (parsed.data.text || parsed.data.images?.[0]?.name || '新聊天').slice(0, 60),
-      Date.now(),
-      chat.id,
-      chat.owner,
-      chat.instance_generation,
-    )
-    .run()
-    .catch(() =>
-      console.error(
-        JSON.stringify({ stage: 'chat_directory', chatId: chat.id, error: 'projection_failed' }),
-      ),
-    );
-  return jsonResult(result, 202);
+  // RPC wall time includes DO authorization/admission; it is not provider TTFT.
+  const response = jsonResult(result, 202);
+  response.headers.set(
+    'Server-Timing',
+    `chat-command;dur=${(performance.now() - started).toFixed(1)}`,
+  );
+  // The DO persists directory repair with admission and owns its background write/alarm.
+  return response;
 });
 
 conversationRoutes.get('/:id/snapshot', async (c) => {

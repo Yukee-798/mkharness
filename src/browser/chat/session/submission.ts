@@ -1,8 +1,9 @@
 import type { RunCommand } from '../../../shared/contracts';
 import { jsonEqual } from '../../../shared/json';
+import type { DraftSubmission } from '../../workbench/composer-drafts';
 /** Retain an unacknowledged command so explicit retry uses the same Pi operation id. */
-export function createSubmitter(
-  post: (command: RunCommand) => Promise<unknown>,
+export function createSubmitter<T>(
+  post: (command: RunCommand, draft?: DraftSubmission) => Promise<T>,
   previous?: () => RunCommand | null | undefined,
 ) {
   let uncertain: RunCommand | undefined;
@@ -12,6 +13,7 @@ export function createSubmitter(
     config?: RunCommand['config'],
     images?: RunCommand['images'],
     workspaceReferences?: RunCommand['workspaceReferences'],
+    draft?: DraftSubmission,
   ) => {
     const input = {
       text: text.trim(),
@@ -44,7 +46,8 @@ export function createSubmitter(
     )
       uncertain = { runId: crypto.randomUUID(), ...input };
     const command = uncertain;
-    await post(command);
+    const result = await post(command, draft);
     if (uncertain === command) uncertain = undefined;
+    return result;
   };
 }

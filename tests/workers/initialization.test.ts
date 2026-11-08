@@ -69,14 +69,20 @@ it('initializes one main conversation when fresh snapshot reads race the first s
   });
   expect(replies).toEqual([
     expect.objectContaining({ conversationId: expect.any(Number) }),
-    { runId: command.runId, accepted: true },
+    expect.objectContaining({ runId: command.runId, accepted: true }),
   ]);
   const initial = replies[0] as ConversationSnapshot;
   await (await stub.observe(actor, { runId: command.runId })).text();
-  expect(await stub.command(actor, { type: 'submit', command })).toEqual(replies[1]);
+  expect(await stub.command(actor, { type: 'submit', command })).toMatchObject({
+    runId: command.runId,
+    accepted: true,
+  });
   await abortAllDurableObjects();
   const restored = env.CONVERSATIONS.get(stub.id);
-  expect(await restored.command(actor, { type: 'submit', command })).toEqual(replies[1]);
+  expect(await restored.command(actor, { type: 'submit', command })).toMatchObject({
+    runId: command.runId,
+    accepted: true,
+  });
   const snapshot = (await restored.read(actor, { type: 'snapshot' })) as ConversationSnapshot;
   expect(snapshot.conversationId).toBe(initial.conversationId);
   expect(snapshot.entries.filter((entry) => entry.kind === 'app.input')).toHaveLength(1);
@@ -133,6 +139,9 @@ it.each(['snapshot-first', 'submission-first'])(
     const replies = await Promise.all(
       order === 'snapshot-first' ? [snapshot(), submit()] : [submit(), snapshot()],
     );
+    expect(replies.find((reply) => reply.status === 202)?.headers.get('Server-Timing')).toMatch(
+      /^chat-command;dur=\d+\.\d$/,
+    );
     const observed = await Promise.all(
       replies.map(async (response) => ({ status: response.status, body: await response.json() })),
     );
@@ -149,7 +158,7 @@ it('accepts the first submission when no initial snapshot is racing it', async (
   const stub = env.CONVERSATIONS.getByName(crypto.randomUUID());
   const actor = await stub.actor();
   const command = { runId: crypto.randomUUID(), text: 'first isolated message' };
-  expect(await stub.command(actor, { type: 'submit', command })).toEqual({
+  expect(await stub.command(actor, { type: 'submit', command })).toMatchObject({
     runId: command.runId,
     accepted: true,
   });

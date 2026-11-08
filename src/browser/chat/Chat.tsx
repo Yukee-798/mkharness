@@ -69,7 +69,7 @@ function ConversationChat({
     draft.getSnapshot,
   );
   const [editingQueue, setEditingQueue] = useState(false);
-  const { submit, reportError: setError, selectModel: setSelection } = session;
+  const { reportError: setError, selectModel: setSelection } = session;
   const restoredModel = useRef(false);
   useEffect(() => {
     if (!catalog || restoredModel.current) return;
@@ -151,7 +151,7 @@ function ConversationChat({
       <ImageComposer
         draft={draft}
         className="rounded-2xl border bg-background p-3 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/20"
-        onSubmit={async (images) => {
+        onSubmit={async (images, imageIds) => {
           if (
             !composerReady ||
             (!text.trim() && !images?.length) ||
@@ -160,11 +160,8 @@ function ConversationChat({
             editingQueue
           )
             return false;
-          const captured = draft.getSnapshot();
-          const submittedVersion = captured.version;
           try {
-            await submit(captured.text, captured.source, images, captured.workspaceReferences);
-            draft.clearText(submittedVersion);
+            await session.submitDraft(draft, images, imageIds);
             return true;
           } catch (e) {
             setError(e as Error);

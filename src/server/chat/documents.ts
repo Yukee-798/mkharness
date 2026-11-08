@@ -8,6 +8,7 @@ export type AdmissionReceipt = {
   pendingInput?: string;
   submissionId?: number;
   antecedents?: number[];
+  directory?: { title: string; updatedAt: number };
 };
 /** A compact receipt per request; completed receipts retain no user payload. */
 export const Admissions = defineDocFamily<AdmissionReceipt, AdmissionReceipt>({
@@ -22,6 +23,18 @@ export const PendingAdmissions = defineDoc<{ keys: string[] }>({
   version: 1,
   scope: 'session',
   initial: () => ({ keys: [] }),
+});
+/** Coalesced directory outbox. Native acceptance and this intent commit together. */
+export const DirectoryProjection = defineDoc<{
+  title?: string;
+  updatedAt: number;
+  revision: number;
+  pending: boolean;
+}>({
+  kind: 'app.directory-projection',
+  version: 1,
+  scope: 'session',
+  initial: () => ({ updatedAt: 0, revision: 0, pending: false }),
 });
 export const ExecutionBinding = defineDocFamily<{ execution: string }, string>({
   kind: 'app.execution-binding',

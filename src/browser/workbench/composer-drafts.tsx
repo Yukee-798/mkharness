@@ -4,6 +4,10 @@ import type { RunCommand } from '../../shared/contracts';
 import { jsonEqual } from '../../shared/json';
 
 export type DraftImage = { id: string; input: File | CreateAttachment };
+export type DraftSubmission = {
+  input: Pick<RunCommand, 'text' | 'source' | 'workspaceReferences'>;
+  run<T>(post: () => Promise<T>): Promise<T>;
+};
 export class ComposerDraft {
   private value = {
     text: '',
@@ -45,7 +49,8 @@ export class ComposerDraft {
     });
   }
   setConfig(config: RunCommand['config']) {
-    if (!jsonEqual(config ?? null, this.value.config ?? null)) this.update({ config });
+    if (!jsonEqual(config ?? null, this.value.config ?? null))
+      this.update({ config, version: this.value.version + 1 });
   }
   setImages(images: DraftImage[]) {
     if (
@@ -60,6 +65,52 @@ export class ComposerDraft {
   clearText(version: number) {
     if (this.value.version === version)
       this.update({ text: '', source: undefined, workspaceReferences: [], version: version + 1 });
+  }
+  private restoreText(
+    draft: Pick<RunCommand, 'text' | 'source' | 'workspaceReferences'>,
+    version: number,
+  ) {
+    if (this.value.version === version)
+      this.update({
+        text: draft.text,
+        source: draft.source,
+        workspaceReferences: structuredClone(draft.workspaceReferences ?? []),
+        version: version + 1,
+      });
+  }
+  /** One local transaction follows the immutable command across attempts and view remounts. */
+  beginSubmission(imageIds?: ReadonlySet<string>): DraftSubmission {
+    const captured = this.value;
+    const input = structuredClone({
+      text: captured.text,
+      source: captured.source,
+      workspaceReferences: captured.workspaceReferences,
+    });
+    const images = new Set(imageIds ?? captured.images.map((image) => image.id));
+    let version = captured.version;
+    const clear = () => {
+      if (this.value.version !== version) return;
+      this.clearText(version);
+      version = this.value.version;
+    };
+    return {
+      input,
+      run: async <T,>(post: () => Promise<T>) => {
+        clear();
+        try {
+          const result = await post();
+          clear();
+          this.removeImages(images);
+          return result;
+        } catch (error) {
+          if (this.value.version === version) {
+            this.restoreText(input, version);
+            version = this.value.version;
+          }
+          throw error;
+        }
+      },
+    };
   }
 }
 export class ComposerDrafts {

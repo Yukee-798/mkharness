@@ -133,3 +133,180 @@ it('discovers lost draft transfers and retains them on failed acknowledgement wi
     client.clear();
   }
 });
+
+it.each(['accepted', 'legacy', 'wrong-target', 'completed', 'retry'] as const)(
+  'attaches from an authoritative admission without a snapshot round trip (%s)',
+  async (mode) => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+    });
+    client.setQueryData(['user', 'owner', 'capabilities'], { extensionIds: [] });
+    client.setQueryData(['user', 'owner', 'model-settings'], {
+      modelCatalog: { models: [] },
+      credentials: [],
+    });
+    const base: ConversationSnapshot = {
+      conversationId: 7,
+      entries: [],
+      pending: [],
+      queue: [],
+      queueEdits: [],
+      stopping: false,
+      history: { upperEntryId: 0, revision: 0, annotations: {} },
+    };
+    // A follow-up snapshot intentionally never resolves. Events must open without it.
+    const snapshot = vi
+      .fn()
+      .mockResolvedValueOnce(base)
+      .mockImplementation(() => new Promise(() => {}));
+    const observe = vi.fn(
+      async (_id: string, runId: string) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  `data: ${JSON.stringify({ type: 'RUN_STARTED', threadId: 'chat', runId })}\n\n`,
+                ),
+              );
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const submit = vi.fn(async (_id: string, command: { runId: string }) => {
+      if (mode === 'retry' && submit.mock.calls.length === 1) throw new Error('Lost receipt');
+      if (mode === 'legacy') return;
+      return {
+        conversationId: mode === 'wrong-target' ? 9 : 7,
+        pending:
+          mode === 'completed' ? [] : [{ operationId: command.runId, status: 'running' as const }],
+      };
+    });
+    const remote: ConversationRemote = {
+      snapshot,
+      observe,
+      submit,
+      create: async () => ({ id: 'chat' }),
+      history: async () => ({ entries: [], history: base.history }),
+      stop: async () => {},
+      queue: async () => ({ queue: [] }),
+      acknowledgeQueueEdit: async () => {},
+    };
+    const hook = renderHook(() => useConversationSession({ id: 'chat', userId: 'owner', remote }), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    try {
+      await waitFor(() => expect(hook.result.current.view.composerReady).toBe(true));
+      await act(async () => {
+        if (mode === 'retry')
+          await expect(hook.result.current.submit('hello')).rejects.toThrow('Lost receipt');
+        else await hook.result.current.submit('hello');
+      });
+      if (mode === 'retry') {
+        await waitFor(() => expect(hook.result.current.view.submissionFailed).toBe(true));
+        await act(async () => hook.result.current.retrySubmission());
+        expect(submit.mock.calls[1]).toEqual(submit.mock.calls[0]);
+      }
+      if (mode === 'accepted' || mode === 'retry') {
+        await waitFor(() => expect(observe).toHaveBeenCalledOnce());
+        expect(snapshot).toHaveBeenCalledOnce();
+        expect(observe.mock.calls[0].slice(0, 2)).toEqual(['chat', submit.mock.calls[0][1].runId]);
+      } else {
+        await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
+        expect(observe).not.toHaveBeenCalled();
+      }
+    } finally {
+      hook.unmount();
+      client.clear();
+    }
+  },
+);
+
+it('preserves accepted work when a pre-admission reconnect snapshot arrives late', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+  });
+  client.setQueryData(['user', 'owner', 'capabilities'], { extensionIds: [] });
+  client.setQueryData(['user', 'owner', 'model-settings'], {
+    modelCatalog: { models: [] },
+    credentials: [],
+  });
+  const idle: ConversationSnapshot = {
+    conversationId: 7,
+    entries: [],
+    pending: [],
+    queue: [],
+    queueEdits: [],
+    stopping: false,
+    history: { upperEntryId: 0, revision: 0, annotations: {} },
+  };
+  let release!: (value: ConversationSnapshot) => void;
+  const snapshot = vi
+    .fn()
+    .mockResolvedValueOnce(structuredClone(idle))
+    .mockImplementation(
+      () =>
+        new Promise<ConversationSnapshot>((resolve) => {
+          release = resolve;
+        }),
+    );
+  const stop = vi.fn(async () => {});
+  const remote: ConversationRemote = {
+    snapshot,
+    submit: async (_id, command) => ({
+      conversationId: 7,
+      pending: [{ operationId: command.runId, status: 'running' }],
+    }),
+    observe: async (_id, runId) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify({ type: 'RUN_STARTED', threadId: 'chat', runId })}\n\n`,
+              ),
+            );
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+    create: async () => ({ id: 'chat' }),
+    history: async () => ({ entries: [], history: idle.history }),
+    stop,
+    queue: async () => ({ queue: [] }),
+    acknowledgeQueueEdit: async () => {},
+  };
+  const hook = renderHook(() => useConversationSession({ id: 'chat', userId: 'owner', remote }), {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+  try {
+    await waitFor(() => expect(hook.result.current.view.composerReady).toBe(true));
+    act(() => hook.result.current.reconnect());
+    await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await hook.result.current.submit('Accepted after read began');
+    });
+    expect(hook.result.current.view.hasPending).toBe(true);
+    await act(async () => {
+      release(structuredClone(idle));
+    });
+    expect(hook.result.current.view.hasPending).toBe(true);
+    await act(async () => {
+      await hook.result.current.stop();
+    });
+    expect(stop).toHaveBeenCalledExactlyOnceWith('chat', 7);
+    await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(3));
+    await act(async () => {
+      release(structuredClone(idle));
+    });
+    expect(hook.result.current.view.hasPending).toBe(false);
+  } finally {
+    hook.unmount();
+    client.clear();
+  }
+});

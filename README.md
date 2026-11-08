@@ -43,7 +43,7 @@ Try asking a question, requesting an interactive plan, or reading a public web p
 
 ## Features
 
-- **Image generation:** a provider-based `generate_image` tool, with Kie GPT Image 2.5 Sunburst by default. Images appear inside replies; clicking opens the workbench preview with original-size viewing and downloads. Set server-side `KIE_API_KEY` in `.dev.vars` (and restart) or deployment secrets, with the private `ARTIFACT_FILES` R2 binding. The tool is unavailable until configured. See [image extension design and provider integration](IMAGE_GENERATION_DESIGN.md).
+- **Image generation:** a provider-based `generate_image` tool, with Kie GPT Image 2.5 Sunburst by default. Images appear inside replies; clicking opens the workbench preview with original-size viewing and downloads. Set server-side `KIE_API_KEY` in `.dev.vars` (and restart) or deployment secrets, with the private `ARTIFACT_FILES` R2 binding. The tool is unavailable until configured. Local design notes: `docs/design/IMAGE_GENERATION_DESIGN.md`.
 
 - **An Agent workbench.** A unified collapsible sidebar for Agent, scheduled tasks and the plugin marketplace, with developer-defined right panels. Scheduling and marketplace pages are placeholders; right panels are reserved for developer-defined resources. Desktop panels resize, maximize and restore; mobile uses a full-screen sheet.
 - **A working chat app.** Streaming responses, reasoning and tool activity, model and thinking-level selection, conversation history, and reply/tool timing. Built with assistant-ui, shadcn/ui, and Tailwind CSS.
@@ -59,7 +59,7 @@ Use this foundation for research assistants, data workflows, or creative Agents 
 
 ## Extend MkHarness
 
-See [source architecture](ARCHITECTURE.md) for current ownership and runtime contracts. The [historical engineering review](ENGINEERING_REVIEW.md) records the implementation before the native replacement and is not a current architecture or acceptance report.
+Design, review and acceptance notes under `docs/` are kept only in the local workspace and are not distributed with the repository. If available locally, see `docs/design/ARCHITECTURE.md` for current ownership and runtime contracts. `docs/reviews/ENGINEERING_REVIEW.md` records the implementation before the native replacement and is not a current architecture or acceptance report.
 
 Extensions are trusted code that you review and ship with your application. Server capabilities and browser presentation have separate static registration points, so a tool can have a custom renderer without adding tool-specific branches to core chat logic.
 
@@ -74,7 +74,7 @@ Extensions are trusted code that you review and ship with your application. Serv
 
 Manage all extension switches in [`extensions.config.ts`](extensions.config.ts). For a small example, set `example.enabled` to `true` there. Its [server tool, prompt section and hook](src/extensions/example/server.ts) and [browser renderer](src/extensions/example/browser.tsx) live together in `src/extensions/example/` and are disabled by default. The [timing extension](src/extensions/timing/) demonstrates decorating existing tools and replies.
 
-For custom workbench panels, export `panels` from your reviewed browser extension using `defineWorkbenchPanel`. The host handles target validation, selection, hide/restore, responsive layout and account-scoped reference persistence. See the [current panel Interface and example](WORKBENCH_DESIGN.md#13-首期实际实现与开发者接入) and [panel contracts](src/browser/workbench/panels.ts). Browser or cloud desktop providers own their connection lifecycle; OpenUI renders inline and does not register a workbench panel.
+For custom workbench panels, export `panels` from your reviewed browser extension using `defineWorkbenchPanel`. The host handles target validation, selection, hide/restore, responsive layout and account-scoped reference persistence. See [panel contracts](src/browser/workbench/panels.ts); the local panel Interface and example notes are in section 13 of `docs/design/WORKBENCH_DESIGN.md`. Browser or cloud desktop providers own their connection lifecycle; OpenUI renders inline and does not register a workbench panel.
 
 Successful web reads and searches populate Sources cards from committed Pi results. The reply extension adds native assistant-ui follow-up buttons and Regenerate to the action bar. Follow-ups are localized common prompts and require no background model call. Regenerate submits a new operation referring to the original committed input, including its form context; the original answer stays in history. It uses current model settings and does not authorize replay of an unknown remote side effect.
 
@@ -209,7 +209,7 @@ flowchart LR
 
 One ChatId identifies one DO and Pi Session; native numeric conversation IDs identify its main conversation, forks and task-owned children. The Worker constructs the owner/generation actor from D1, and the DO rechecks it before initialization. Creation uses a stable requestId and a canonical request hash, atomically freezing user MCP, deployment MCP and Skill bindings. Model configuration and prepared admission receipts share a Pi commit; native submission recovery looks up the same requestId before submitting again.
 
-Snapshots always contain a bounded history page, queue and actual native conversation ID. Opaque older-page cursors bind the chat, native conversation and fixed upper entry boundary. The browser rejects unknown envelopes and keeps loaded pages while observing the current run. Historical annotations merge by native entry ID and revision. See [ARCHITECTURE.md](ARCHITECTURE.md) for the source boundaries and storage contract.
+Snapshots always contain a bounded history page, queue and actual native conversation ID. Opaque older-page cursors bind the chat, native conversation and fixed upper entry boundary. The browser rejects unknown envelopes and keeps loaded pages while observing the current run. Historical annotations merge by native entry ID and revision. Local architecture notes: `docs/design/ARCHITECTURE.md`.
 
 To configure an optional OpenRouter free default on your own deployment, set `MODEL_PROVIDER=openrouter`, `MODEL_ID=openrouter/free`, `MODEL_THINKING_LEVEL=off`, and `ALLOW_SERVER_MODEL_KEY=1`, then store an OpenRouter key as the `MODEL_API_KEY` Worker secret. The deployment key only authorizes models explicitly configured through `MODEL_ID` / `MODEL_IDS`; personal keys can select other registered models. No paid fallback is configured. Each Agent turn or compaction consumes another provider request, so a chat can use several free requests. [OpenRouter free routing](https://openrouter.ai/docs/guides/routing/routers/free-router).
 
@@ -274,4 +274,4 @@ Tests use controlled model I/O. Verify a real provider request, refresh/reconnec
 
 ## Multi-layout workspace / 多布局工作区
 
-Agent 聊天支持按需展开的 HTML 报告；创作画布提供独立项目、Studio 布局和素材列表。可信场景包通过 `scenarios.config.ts` 组合，复用 Pi 原生任务和工作区事务。详见 [开发接入](SCENARIO_WORKSPACE_IMPLEMENTATION.md) 与 [本地验收](SCENARIO_WORKSPACE_VERIFICATION.md)。
+Agent chat supports expandable HTML reports; the creative canvas provides independent projects, a Studio layout and an asset list. Trusted scenario packs are composed through `scenarios.config.ts`, reusing native Pi tasks and workspace transactions. Local integration notes: `docs/design/SCENARIO_WORKSPACE_IMPLEMENTATION.md`; local acceptance records: `docs/verification/SCENARIO_WORKSPACE_VERIFICATION.md`.

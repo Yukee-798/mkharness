@@ -37,7 +37,7 @@ pnpm dev
 
 可以先尝试提问、生成交互式计划或读取公开网页。网页搜索需要单独配置搜索 Key；`describe_text` 示例默认关闭。
 
-图片生成扩展默认接 Kie GPT Image 2.5 Sunburst：图片显示在回复内，点击后在右侧查看大图、切换原始尺寸并下载原图。服务端 `.dev.vars` 配置 `KIE_API_KEY` 后重启，并绑定私有 R2 `ARTIFACT_FILES`；未配置时不注册生成工具。提供方可通过 `ImageProvider` Interface 自定义，详见[图片生成设计与接入](IMAGE_GENERATION_DESIGN.md)。
+图片生成扩展默认接 Kie GPT Image 2.5 Sunburst：图片显示在回复内，点击后在右侧查看大图、切换原始尺寸并下载原图。服务端 `.dev.vars` 配置 `KIE_API_KEY` 后重启，并绑定私有 R2 `ARTIFACT_FILES`；未配置时不注册生成工具。提供方可通过 `ImageProvider` Interface 自定义，本地设计资料见 `docs/design/IMAGE_GENERATION_DESIGN.md`。
 
 > 在界面填写的 Key 会发送给当前部署，并在服务端加密保存，用于后台执行与恢复。请在自己的部署或可信部署填写。保存 Key 不会测试连接，首次模型请求才会实际使用它。
 
@@ -58,7 +58,7 @@ pnpm dev
 
 ## 扩展 MkHarness
 
-当前目录职责与运行时契约见[源码架构](ARCHITECTURE.md)。[历史工程评审](ENGINEERING_REVIEW.md)记录替换前的快照，不作为当前架构或验收指南。
+`docs/` 下的设计、评审和验收资料仅保留在本地工作区，不随仓库分发。本地如有这些资料，当前目录职责与运行时契约见 `docs/design/ARCHITECTURE.md`。`docs/reviews/ENGINEERING_REVIEW.md` 记录替换前的快照，不作为当前架构或验收指南。
 
 扩展是经你审核、随应用部署发布的受信任代码。服务端能力与浏览器展示各有独立的静态装配入口，工具可以接入专属 renderer，无需在核心聊天逻辑增加工具名分支。
 
@@ -200,7 +200,7 @@ flowchart LR
 
 一个 ChatId 对应一个 DO 和 Pi Session，Pi 返回的数字 conversation ID 区分主会话、fork 和 task-owned children。Worker 从 D1 构造 owner/generation actor，DO 初始化时再次核对。创建使用稳定 requestId 和规范 hash，目录与三类冻结绑定原子写入。配置和 prepared admission 回执处于同一 Pi commit；恢复先按 requestId 查原生提交，不重复入队。
 
-快照始终包含有界历史页、queue 和真实 native conversation ID。旧页 cursor 绑定 ChatId、native conversation 与固定 upper 边界，浏览器拒绝未知协议。加载旧页不重连活动 stream，annotations 按 entry ID 和 revision 合并。详细说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+快照始终包含有界历史页、queue 和真实 native conversation ID。旧页 cursor 绑定 ChatId、native conversation 与固定 upper 边界，浏览器拒绝未知协议。加载旧页不重连活动 stream，annotations 按 entry ID 和 revision 合并。本地架构资料见 `docs/design/ARCHITECTURE.md`。
 
 如需为自己的部署配置可选的 OpenRouter 免费默认模型，设置 `MODEL_PROVIDER=openrouter`、`MODEL_ID=openrouter/free`、`MODEL_THINKING_LEVEL=off`、`ALLOW_SERVER_MODEL_KEY=1`，将 OpenRouter Key 保存为 Worker 的 `MODEL_API_KEY` Secret。部署 Key 只允许 `MODEL_ID` / `MODEL_IDS` 明确配置的模型；个人 Key 可使用其他已注册模型。未配置付费回退。Agent 每轮推理及压缩都会消耗一次供应商请求，一次聊天可能使用多次免费请求。[OpenRouter 免费路由说明](https://openrouter.ai/docs/guides/routing/routers/free-router)。
 
@@ -265,4 +265,4 @@ E2E 使用隔离的 `.wrangler/native-e2e-build` 产物和 `.wrangler/native-e2e
 
 ## Multi-layout workspace / 多布局工作区
 
-Agent 聊天支持按需展开的 HTML 报告；创作画布提供独立项目、Studio 布局和素材列表。可信场景包通过 `scenarios.config.ts` 组合，复用 Pi 原生任务和工作区事务。详见 [开发接入](SCENARIO_WORKSPACE_IMPLEMENTATION.md) 与 [本地验收](SCENARIO_WORKSPACE_VERIFICATION.md)。
+Agent 聊天支持按需展开的 HTML 报告；创作画布提供独立项目、Studio 布局和素材列表。可信场景包通过 `scenarios.config.ts` 组合，复用 Pi 原生任务和工作区事务。本地开发接入资料见 `docs/design/SCENARIO_WORKSPACE_IMPLEMENTATION.md`，本地验收记录见 `docs/verification/SCENARIO_WORKSPACE_VERIFICATION.md`。

@@ -1,5 +1,6 @@
 import { request } from '../../api';
 import { decodeHistoryPage, type HistoryPage } from '../../../shared/conversation';
+import { submissionObservation, type SubmissionObservation } from '../../../shared/conversation';
 import type { QueueAction, QueueActionResult } from '../../../shared/queue';
 import type { CreateConversationRequest, RunCommand } from '../../../shared/contracts';
 import { loadSnapshot } from './snapshot';
@@ -20,7 +21,11 @@ export type ConversationRemote = {
   acknowledgeQueueEdit: (id: string, runId: string, target?: number) => Promise<unknown>;
   stop: (id: string, target?: number) => Promise<unknown>;
   create: (creation: CreateConversationRequest) => Promise<{ id: string }>;
-  submit: (id: string, command: RunCommand, target?: number) => Promise<unknown>;
+  submit: (
+    id: string,
+    command: RunCommand,
+    target?: number,
+  ) => Promise<SubmissionObservation | void>;
   observe: (id: string, runId: string, signal: AbortSignal, target?: number) => Promise<Response>;
 };
 const targetQuery = (target?: number) => (target === undefined ? '' : 'conversationId=' + target);
@@ -56,11 +61,13 @@ export const conversationRemote: ConversationRemote = {
       method: 'POST',
       body: JSON.stringify(creation),
     }),
-  submit: (id, command, target) =>
-    request(`${path(id)}/runs${target === undefined ? '' : '?' + targetQuery(target)}`, {
-      method: 'POST',
-      body: JSON.stringify(command),
-    }),
+  submit: async (id, command, target) =>
+    submissionObservation(
+      await request(`${path(id)}/runs${target === undefined ? '' : '?' + targetQuery(target)}`, {
+        method: 'POST',
+        body: JSON.stringify(command),
+      }),
+    ),
   observe: (id, runId, signal, target) =>
     fetch(
       `/api${path(id)}/runs/${encodeURIComponent(runId)}/events${target === undefined ? '' : '?' + targetQuery(target)}`,

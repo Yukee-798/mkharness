@@ -5,6 +5,7 @@ import type { CreateConversationRequest, RunCommand } from '../../../shared/cont
 import { conversationRemote, type ConversationRemote } from './remote';
 import { userKeys } from '../../queries';
 import { createSubmitter } from './submission';
+import type { DraftSubmission } from '../../workbench/composer-drafts';
 
 type Submission = {
   id: string;
@@ -13,6 +14,7 @@ type Submission = {
   creation?: CreateConversationRequest;
   // Acknowledged product identity only. Native submission state stays on the server.
   createdId?: string;
+  draft?: DraftSubmission;
 };
 const belongsTo = (submission: Submission | undefined, id: string) =>
   !!submission &&
@@ -67,21 +69,24 @@ export function useSubmission(
           client.getMutationCache().remove(attempt);
       }
     },
-    mutationFn: async (submission: Submission) => {
-      let chatId = submission.createdId || submission.id;
-      if (!chatId) {
-        if (!submission.creation) throw new Error('Missing creation request');
-        const result = await remote.create(submission.creation);
-        if (!result || typeof result.id !== 'string' || !result.id)
-          throw new Error('protocol_mismatch: Refresh to load the current chat protocol.');
-        chatId = result.id;
-        // Keep the create receipt with the pending mutation before navigating away.
-        submission.createdId = chatId;
-        createdId.current = chatId;
-        if (mounted.current) created.current?.(chatId);
-      }
-      await remote.submit(chatId, submission.command);
-      return { id: chatId };
+    mutationFn: (submission: Submission) => {
+      const post = async () => {
+        let chatId = submission.createdId || submission.id;
+        if (!chatId) {
+          if (!submission.creation) throw new Error('Missing creation request');
+          const result = await remote.create(submission.creation);
+          if (!result || typeof result.id !== 'string' || !result.id)
+            throw new Error('protocol_mismatch: Refresh to load the current chat protocol.');
+          chatId = result.id;
+          // Keep the create receipt with the pending mutation before navigating away.
+          submission.createdId = chatId;
+          createdId.current = chatId;
+          if (mounted.current) created.current?.(chatId);
+        }
+        const receipt = await remote.submit(chatId, submission.command);
+        return { id: chatId, receipt };
+      };
+      return submission.draft ? submission.draft.run(post) : post();
     },
     onSuccess: (result, submission) => {
       if (!submission.initial) return;
@@ -98,7 +103,7 @@ export function useSubmission(
   const send = useMemo(
     () =>
       createSubmitter(
-        async (command) => {
+        async (command, draft) => {
           const initial = !createdId.current;
           if (initial && !creationAttempt.current) {
             creationAttempt.current = previous.current?.submission?.creation ?? {
@@ -106,12 +111,14 @@ export function useSubmission(
               ...structuredClone(creationRef.current ?? {}),
             };
           }
-          await mutateAsync({
+          const result = await mutateAsync({
             id: createdId.current,
             command,
             initial,
+            draft,
             ...(initial ? { creation: creationAttempt.current } : {}),
           });
+          return result.receipt;
         },
         () =>
           previous.current?.status === 'error'
@@ -133,7 +140,7 @@ export function useSubmission(
       })
     )
       return Promise.resolve();
-    return mutateAsync(submission).then(() => {});
+    return mutateAsync(submission);
   };
   return { send, retry, latest };
 }

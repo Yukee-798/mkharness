@@ -45,6 +45,26 @@ export type ObservationState = {
   queue?: QueuedInput[];
   history?: HistoryWindow;
 };
+/** Admission returns native pending identities only; observation still restores its canonical prefix. */
+export type SubmissionObservation = Pick<ConversationSnapshot, 'conversationId' | 'pending'>;
+
+export function submissionObservation(value: unknown): SubmissionObservation | undefined {
+  if (!object(value) || value.accepted !== true || !object(value.observation)) return;
+  const observation = value.observation;
+  if (
+    !integer(observation.conversationId, 1) ||
+    !Array.isArray(observation.pending) ||
+    observation.pending.some(
+      (item) =>
+        !object(item) ||
+        typeof item.operationId !== 'string' ||
+        !item.operationId.length ||
+        (item.status !== 'running' && item.status !== 'queued'),
+    )
+  )
+    return;
+  return observation as SubmissionObservation;
+}
 
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);

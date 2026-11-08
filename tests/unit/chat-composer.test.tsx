@@ -38,12 +38,15 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-function References() {
-  draft = useComposerDraft('main');
+function References({ id }: { id: string }) {
+  draft = useComposerDraft(id);
   const w = useWorkspace()!;
   return <Button onClick={() => w.select([{ objectId: 'B', contentVersion: 1 }])}>Select B</Button>;
 }
-function mount(handler: (path: string, init?: RequestInit) => Promise<Response> | undefined) {
+function mount(
+  handler: (path: string, init?: RequestInit) => Promise<Response> | undefined,
+  id = 'main',
+) {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const path = String(input);
     const handled = handler(path, init);
@@ -87,8 +90,8 @@ function mount(handler: (path: string, init?: RequestInit) => Promise<Response> 
     <QueryClientProvider client={client}>
       <ComposerDraftsProvider userId="owner">
         <WorkspaceProvider userId="owner" chatId="main">
-          <References />
-          <Chat id="main" userId="owner" />
+          <References id={id} />
+          <Chat id={id} userId="owner" />
         </WorkspaceProvider>
       </ComposerDraftsProvider>
     </QueryClientProvider>,
@@ -157,6 +160,8 @@ it.each(['button', 'enter'] as const)(
       text: 'Explain this',
       workspaceReferences: [{ objectId: 'A', contentVersion: 1 }],
     });
+    expect((input as HTMLTextAreaElement).value).toBe('');
+    expect(draft.getSnapshot().workspaceReferences).toEqual([]);
     fireEvent.click(page.getByText('Select B'));
     await act(async () => acknowledge());
     expect(draft.getSnapshot().workspaceReferences).toEqual([{ objectId: 'B', contentVersion: 1 }]);
@@ -251,4 +256,158 @@ it('keeps the composer and viewport mounted when scenario metadata arrives after
   expect(page.getByLabelText('Message')).toBe(input);
   expect(page.container.querySelector('[data-slot="chat-viewport"]')).toBe(viewport);
   expect((input as HTMLTextAreaElement).value).toBe('Unsent notes');
+});
+
+it.each(['untouched', 'text', 'references', 'config'] as const)(
+  'restores a failed send only if the cleared draft is untouched (%s)',
+  async (change) => {
+    let fail!: () => void;
+    const commands: { runId: string }[] = [];
+    const page = mount((path, init) => {
+      if (path.endsWith('/runs')) {
+        commands.push(JSON.parse(init!.body as string));
+        return new Promise((resolve) => {
+          fail = () =>
+            resolve(
+              Response.json(
+                { error: { code: 'unavailable', message: 'Lost receipt' } },
+                { status: 503 },
+              ),
+            );
+        });
+      }
+    });
+    const input = page.getByLabelText('Message') as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    const references = [{ objectId: 'A', contentVersion: 1 }];
+    await act(async () => draft.restore({ text: 'Original', workspaceReferences: references }));
+    fireEvent.click(page.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(commands).toHaveLength(1));
+    expect(input.value).toBe('');
+    if (change === 'text') fireEvent.change(input, { target: { value: 'New draft' } });
+    if (change === 'references') fireEvent.click(page.getByText('Select B'));
+    if (change === 'config')
+      await act(async () =>
+        draft.setConfig({ provider: 'fixture', modelId: 'fixture', thinkingLevel: 'off' }),
+      );
+    await act(async () => fail());
+    await page.findByRole('button', { name: 'Retry submission' });
+    expect(input.value).toBe(
+      change === 'untouched' ? 'Original' : change === 'text' ? 'New draft' : '',
+    );
+    expect(draft.getSnapshot().workspaceReferences).toEqual(
+      change === 'untouched'
+        ? references
+        : change === 'references'
+          ? [{ objectId: 'B', contentVersion: 1 }]
+          : [],
+    );
+    fireEvent.click(page.getByRole('button', { name: 'Retry submission' }));
+    await waitFor(() => expect(commands).toHaveLength(2));
+    expect(commands[1]).toEqual(commands[0]);
+    await act(async () => fail());
+  },
+);
+
+it('keeps newly typed text when a successful acknowledgement arrives', async () => {
+  let acknowledge!: () => void;
+  const page = mount((path) =>
+    path.endsWith('/runs')
+      ? new Promise((resolve) => {
+          acknowledge = () => resolve(Response.json({ accepted: true }));
+        })
+      : undefined,
+  );
+  const input = page.getByLabelText('Message') as HTMLTextAreaElement;
+  await waitFor(() => expect(input.disabled).toBe(false));
+  fireEvent.change(input, { target: { value: 'First message' } });
+  fireEvent.click(page.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(input.value).toBe(''));
+  fireEvent.change(input, { target: { value: 'Next message' } });
+  await act(async () => acknowledge());
+  expect(input.value).toBe('Next message');
+});
+
+it('clears the first message before creation and admission acknowledge', async () => {
+  let created!: () => void;
+  let admitted!: () => void;
+  const page = mount((path) => {
+    if (path === '/api/conversations')
+      return new Promise((resolve) => {
+        created = () => resolve(Response.json({ id: 'created' }));
+      });
+    if (path.endsWith('/runs'))
+      return new Promise((resolve) => {
+        admitted = () => resolve(Response.json({ accepted: true }));
+      });
+  }, '');
+  const input = page.getByLabelText('Message') as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: 'Hello Coach' } });
+  await waitFor(() =>
+    expect(page.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false),
+  );
+  fireEvent.click(page.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(created).toBeTypeOf('function'));
+  expect(input.value).toBe('');
+  await act(async () => created());
+  await waitFor(() => expect(admitted).toBeTypeOf('function'));
+  expect(input.value).toBe('');
+  await act(async () => admitted());
+});
+
+it('confirms the restored draft when explicit retry succeeds', async () => {
+  const commands: unknown[] = [];
+  const page = mount((path, init) => {
+    if (path.endsWith('/runs')) {
+      commands.push(JSON.parse(init!.body as string));
+      return Promise.resolve(
+        commands.length === 1
+          ? Response.json(
+              { error: { code: 'unavailable', message: 'Lost receipt' } },
+              { status: 503 },
+            )
+          : Response.json({ accepted: true }),
+      );
+    }
+  });
+  const input = page.getByLabelText('Message') as HTMLTextAreaElement;
+  await waitFor(() => expect(input.disabled).toBe(false));
+  fireEvent.change(input, { target: { value: 'Retry this' } });
+  fireEvent.click(page.getByRole('button', { name: 'Send' }));
+  const retry = await page.findByRole('button', { name: 'Retry submission' });
+  expect(input.value).toBe('Retry this');
+  fireEvent.click(retry);
+  await waitFor(() => expect(page.queryByRole('button', { name: 'Retry submission' })).toBeNull());
+  expect(commands).toHaveLength(2);
+  expect(commands[1]).toEqual(commands[0]);
+  expect(input.value).toBe('');
+});
+
+it('preserves a new message across a deferred explicit retry and blocks duplicate retry clicks', async () => {
+  const commands: unknown[] = [];
+  let complete!: () => void;
+  const page = mount((path, init) => {
+    if (!path.endsWith('/runs')) return;
+    commands.push(JSON.parse(init!.body as string));
+    if (commands.length === 1)
+      return Promise.resolve(
+        Response.json({ error: { code: 'unavailable', message: 'Lost receipt' } }, { status: 503 }),
+      );
+    return new Promise((resolve) => {
+      complete = () => resolve(Response.json({ accepted: true }));
+    });
+  });
+  const input = page.getByLabelText('Message') as HTMLTextAreaElement;
+  await waitFor(() => expect(input.disabled).toBe(false));
+  fireEvent.change(input, { target: { value: 'Original' } });
+  fireEvent.click(page.getByRole('button', { name: 'Send' }));
+  const retry = await page.findByRole('button', { name: 'Retry submission' });
+  fireEvent.click(retry);
+  fireEvent.click(retry);
+  await waitFor(() => expect(commands).toHaveLength(2));
+  expect(input.value).toBe('');
+  fireEvent.change(input, { target: { value: 'Next message' } });
+  await act(async () => complete());
+  expect(input.value).toBe('Next message');
+  expect(commands[1]).toEqual(commands[0]);
 });

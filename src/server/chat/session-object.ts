@@ -71,6 +71,7 @@ import { withdrawFailedFollowers } from './admission-recovery';
 import {
   Admissions,
   PendingAdmissions,
+  DirectoryProjection,
   ExecutionBinding,
   ConversationControl,
   ModelTarget,
@@ -132,6 +133,7 @@ export class ChatSession extends DurableObject<Env> {
   private stopJobs = new Map<number, Promise<void>>();
   private closingForDelete?: Promise<void>;
   private alarmLine: Promise<void> = Promise.resolve();
+  private directoryFlight?: Promise<void>;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.runtime = new ChatRuntime(ctx);
@@ -565,7 +567,7 @@ export class ChatSession extends DurableObject<Env> {
       if (prior.hash !== hash) throw new AppError(409, 'request_conflict');
       if (prior.state === 'withdrawn') throw new AppError(409, 'request_withdrawn');
       await this.place(pi, key, prior);
-      return { runId: command.runId, accepted: true as const };
+      return this.submitReceipt(target, command.runId);
     }
     const pending = await this.pending(target);
     if (pending.filter((p) => p.status === 'queued').length >= 10)
@@ -649,13 +651,30 @@ export class ChatSession extends DurableObject<Env> {
         conversationId: Number(target),
         requestId: command.runId,
         antecedents,
+        directory: {
+          title: (command.text || command.images?.[0]?.name || '新聊天').slice(0, 60),
+          updatedAt: Date.now(),
+        },
         pendingInput: jsonText(stored, 2 * 1048576 + 65536),
       });
       pending.keys.push(key);
     }, BG);
     const receipt = await pi.snapshot(Admissions, key, BG);
     await this.place(pi, key, receipt!);
-    return { runId: command.runId, accepted: true as const };
+    return this.submitReceipt(target, command.runId);
+  }
+  private async submitReceipt(target: ConversationId, runId: string) {
+    const accepted = { runId, accepted: true as const };
+    try {
+      return {
+        ...accepted,
+        observation: { conversationId: Number(target), pending: await this.pending(target) },
+      };
+    } catch {
+      // Optional read acceleration must not turn durable acceptance into a failed send.
+      console.error(JSON.stringify({ stage: 'chat_receipt', error: 'observation_failed' }));
+      return accepted;
+    }
   }
   private async place(pi: Harness, key: string, receipt: Readonly<AdmissionReceipt>) {
     if (receipt.state === 'withdrawn') throw new AppError(409, 'request_withdrawn');
@@ -720,6 +739,14 @@ export class ChatSession extends DurableObject<Env> {
       const current = await tx.doc(Admissions, key, receipt as AdmissionReceipt);
       current.state = withdrawn ? 'withdrawn' : 'admitted';
       current.submissionId = Number(native!.id);
+      if (!withdrawn && current.directory) {
+        const projection = await tx.doc(DirectoryProjection);
+        projection.title ??= current.directory.title;
+        projection.updatedAt = Math.max(projection.updatedAt, current.directory.updatedAt);
+        projection.revision++;
+        projection.pending = true;
+      }
+      delete current.directory;
       delete current.pendingInput;
       delete current.antecedents;
       const pending = await tx.doc(PendingAdmissions);
@@ -735,6 +762,7 @@ export class ChatSession extends DurableObject<Env> {
       doc.state = 'withdrawn';
       delete doc.pendingInput;
       delete doc.antecedents;
+      delete doc.directory;
       const pending = await tx.doc(PendingAdmissions);
       pending.keys = pending.keys.filter((k) => k !== key);
     }, BG);
@@ -878,6 +906,55 @@ export class ChatSession extends DurableObject<Env> {
   private rearm(opened?: Harness): Promise<void> {
     return this.alarmWork(() => this.updateAlarm(opened));
   }
+  private projectDirectory(pi: Harness): Promise<void> {
+    if (this.directoryFlight) return this.directoryFlight;
+    this.directoryFlight = (async () => {
+      const projection = await pi.snapshot(DirectoryProjection, BG);
+      if (!projection?.pending || this.deleted) return;
+      const actor = this.identity();
+      const started = performance.now();
+      try {
+        await this.env.DB.prepare(
+          "UPDATE conversations SET title=CASE WHEN title_custom=0 AND title='新聊天' THEN ? ELSE title END,updated_at=MAX(COALESCE(updated_at,0),?) WHERE id=? AND owner=? AND instance_generation=? AND lifecycle='active'",
+        )
+          .bind(
+            projection.title,
+            projection.updatedAt,
+            actor.chatId,
+            actor.ownerId,
+            actor.generation,
+          )
+          .run();
+      } finally {
+        console.info(
+          JSON.stringify({
+            stage: 'chat_directory_write',
+            chatId: actor.chatId,
+            durationMs: Math.round(performance.now() - started),
+          }),
+        );
+      }
+      if (this.deleted) return;
+      await pi.commit(async (tx) => {
+        const current = await tx.doc(DirectoryProjection);
+        // An input accepted during the D1 write owns a newer repair intent.
+        if (current.revision === projection.revision) current.pending = false;
+      }, BG);
+    })()
+      .catch(() => {
+        console.error(
+          JSON.stringify({
+            stage: 'chat_directory',
+            chatId: this.identity().chatId,
+            error: 'projection_failed',
+          }),
+        );
+      })
+      .finally(() => {
+        this.directoryFlight = undefined;
+      });
+    return this.directoryFlight;
+  }
   private async updateAlarm(opened?: Harness) {
     if (this.deleted) {
       await this.ctx.storage.setAlarm(Date.now() + 1000);
@@ -894,11 +971,13 @@ export class ChatSession extends DurableObject<Env> {
       await withdrawFailedFollowers(pi, id, BG);
 
     const pending = (await pi.snapshot(PendingAdmissions, BG))?.keys.length ?? 0;
+    const directoryPending = (await pi.snapshot(DirectoryProjection, BG))?.pending;
     const editDeadline = await this.queueEdits(pi).maintenance();
     if (
       inspection.tasks.length ||
       inspection.submissions.length ||
       pending ||
+      directoryPending ||
       this.stoppingTargets.size ||
       this.activeCommands ||
       editDeadline !== undefined
@@ -958,6 +1037,7 @@ export class ChatSession extends DurableObject<Env> {
         await this.reconcilePrepared(pi);
         await this.queueEdits(pi).recover();
       });
+      await this.projectDirectory(pi);
       await this.rearm(pi);
     } catch (error) {
       if (error instanceof AppError && error.status === 404) {
@@ -1316,7 +1396,10 @@ export class ChatSession extends DurableObject<Env> {
           }
         } finally {
           this.activeCommands--;
-          if (this.ready && !this.deleted) this.ctx.waitUntil(this.rearm(this.ready));
+          if (this.ready && !this.deleted) {
+            const pi = this.ready;
+            this.ctx.waitUntil(this.projectDirectory(pi).then(() => this.rearm(pi)));
+          }
         }
       });
     } catch (error) {

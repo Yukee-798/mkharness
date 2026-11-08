@@ -104,7 +104,7 @@ export function ImageComposer({
   draft,
   ...props
 }: {
-  onSubmit: (images?: ImageAttachment[]) => Promise<boolean>;
+  onSubmit: (images?: ImageAttachment[], imageIds?: ReadonlySet<string>) => Promise<boolean>;
   children: (hasImages: boolean) => ReactNode;
   className?: string;
   draft?: ComposerDraft;
@@ -231,8 +231,9 @@ export function ImageComposer({
           const validated = images.length ? imagesSchema.safeParse(images) : undefined;
           if (validated && !validated.success)
             throw new Error('最多添加 4 张图片，总大小不能超过 512 KiB');
-          if (await onSubmit(validated?.data)) {
-            draft?.removeImages(new Set(captured.map((attachment) => attachment.id)));
+          if (
+            await onSubmit(validated?.data, new Set(captured.map((attachment) => attachment.id)))
+          ) {
             if (!mounted.current) return;
             for (const attachment of captured)
               if (
